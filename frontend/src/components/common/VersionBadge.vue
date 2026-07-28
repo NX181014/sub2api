@@ -733,6 +733,7 @@ const isReleaseBuild = computed(() => buildType.value === 'release')
 
 function toggleDropdown() {
   dropdownOpen.value = !dropdownOpen.value
+  if (dropdownOpen.value) void appStore.fetchVersion(false)
 }
 
 function closeDropdown() {
@@ -910,10 +911,6 @@ function handleClickOutside(event: MouseEvent) {
 }
 
 onMounted(() => {
-  if (isAdmin.value) {
-    // Use cached version if available, otherwise fetch
-    appStore.fetchVersion(false)
-  }
   document.addEventListener('click', handleClickOutside)
 })
 

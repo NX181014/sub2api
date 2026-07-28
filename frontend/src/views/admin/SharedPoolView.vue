@@ -243,10 +243,6 @@
               <h2 class="text-sm font-semibold text-gray-900 dark:text-white">{{ t('admin.sharedPool.accounts.title') }}</h2>
               <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.accounts.subtitle') }}</p>
             </div>
-            <button type="button" class="btn btn-primary min-h-11" @click="openCostDialog">
-              <Icon name="plus" size="sm" />
-              {{ t('admin.sharedPool.accounts.addCost') }}
-            </button>
           </div>
           <DataTable :columns="costColumns" :data="accountCosts" row-key="id" :loading="loading">
             <template #cell-account_name="{ row }">
@@ -880,23 +876,6 @@ async function loadReferenceOptions() {
   accountOptions.value = accounts.items.map((account) => ({ value: account.id, label: account.name }))
   userOptions.value = users.items.map((user) => ({ value: user.id, label: user.username || user.email }))
   sources.value = sourceResponse.items || []
-}
-
-async function openCostDialog() {
-  if (pendingIntakeDraft.value) {
-    if (retryAccounts.value.length) openPendingRetry()
-    else await reopenDraftForManualSelection()
-    return
-  }
-  intakeMode.value = false
-  recoveryRecord.value = null
-  Object.assign(costForm, emptyCostForm())
-  showCostDialog.value = true
-  try {
-    await loadReferenceOptions()
-  } catch (error: any) {
-    appStore.showError(error?.message || t('admin.sharedPool.errors.options'))
-  }
 }
 
 async function openAccountPoolRecord(account: Pick<Account, 'id' | 'name'>, record?: SharedPoolAccountCost) {
