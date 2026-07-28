@@ -655,6 +655,8 @@ func compareVersions(current, latest string) int {
 
 func parseVersion(v string) [3]int {
 	v = strings.TrimPrefix(v, "v")
+	v, _, _ = strings.Cut(v, "-")
+	v, _, _ = strings.Cut(v, "+")
 	parts := strings.Split(v, ".")
 	result := [3]int{0, 0, 0}
 	for i := 0; i < len(parts) && i < 3; i++ {

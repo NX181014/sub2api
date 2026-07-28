@@ -69,6 +69,11 @@ func TestUpdateServicePerformUpdateNoUpdateReturnsSentinel(t *testing.T) {
 	require.ErrorIs(t, err, ErrNoUpdateAvailable)
 }
 
+func TestCompareVersionsIgnoresCustomBuildSuffix(t *testing.T) {
+	require.Zero(t, compareVersions("v0.1.166-custom-a0328f2db", "0.1.166"))
+	require.Negative(t, compareVersions("v0.1.166-custom-a0328f2db", "0.1.167"))
+}
+
 func newRollbackTestService(current string, releases []*GitHubRelease) *UpdateService {
 	return NewUpdateService(
 		&updateServiceCacheStub{},
