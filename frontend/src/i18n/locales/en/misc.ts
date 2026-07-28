@@ -23,6 +23,7 @@ export default {
     latestVersion: 'Latest Version',
     upToDate: "You're running the latest version.",
     updateAvailable: 'A new version is available!',
+    checkFailed: 'Version check failed. Use refresh to retry.',
     releaseNotes: 'Release Notes',
     noReleaseNotes: 'No release notes',
     viewUpdate: 'View Update',

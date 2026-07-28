@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
 import { useAppStore } from '@/stores/app'
 import { getPublicSettings } from '@/api/auth'
+import { checkUpdates } from '@/api/admin/system'
 import type { PublicSettings } from '@/types'
 
 function createDeferred<T>() {
@@ -82,6 +83,23 @@ describe('useAppStore', () => {
   afterEach(() => {
     vi.useRealTimers()
     localStorage.clear()
+  })
+
+  it('clears stale version status when a refresh fails', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    vi.mocked(checkUpdates).mockResolvedValueOnce({
+      current_version: '1.0.0', latest_version: '1.0.0', has_update: false, build_type: 'release'
+    })
+    const store = useAppStore()
+    await store.fetchVersion()
+    vi.mocked(checkUpdates).mockRejectedValueOnce(new Error('network unavailable'))
+
+    await expect(store.fetchVersion(true)).resolves.toBeNull()
+
+    expect(store.versionLoaded).toBe(false)
+    expect(store.hasUpdate).toBe(false)
+    expect(store.latestVersion).toBe('')
+    consoleError.mockRestore()
   })
 
   // --- Toast 消息管理 ---

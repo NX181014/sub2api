@@ -270,6 +270,10 @@ export const useAppStore = defineStore('app', () => {
       return data
     } catch (error) {
       console.error('Failed to fetch version:', error)
+      versionLoaded.value = false
+      hasUpdate.value = false
+      latestVersion.value = ''
+      releaseInfo.value = null
       return null
     } finally {
       versionLoading.value = false

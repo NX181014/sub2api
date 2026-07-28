@@ -156,6 +156,22 @@ export interface CreateSharedPoolIntakeRequest {
   notes?: string
 }
 
+export interface CreateSharedPoolCostEntryRequest {
+  account_id: number
+  payer_user_id: number
+  purchase_source_id?: number
+  entry_type: PoolCostEntryType
+  original_amount: string
+  currency: string
+  fx_rate: string
+  service_start: string
+  service_end: string
+  warranty_end?: string
+  order_no?: string
+  purchase_url?: string
+  notes?: string
+}
+
 export interface RecordSharedPoolLifecycleRequest {
   account_id: number
   event_type: PoolLifecycleEventType
@@ -441,35 +457,41 @@ export async function listAccountCosts(params?: PoolPeriodParams): Promise<Share
   return { items, total: items.length }
 }
 
-type IntakeOperation = { fingerprint: string; key: string }
-const intakeOperations = new Map<number, IntakeOperation>()
+type PoolWriteOperation = { fingerprint: string; key: string }
+const poolWriteOperations = new Map<string, PoolWriteOperation>()
 
-export async function createAccountIntake(
-  accountId: number,
-  payload: CreateSharedPoolIntakeRequest
-): Promise<void> {
-  const storageKey = `sub2api:admin:pool-intake:${accountId}`
+async function postPoolWrite(operationID: string, keyPrefix: string, url: string, payload: unknown): Promise<void> {
+  const storageKey = `sub2api:admin:${operationID}`
   const fingerprint = JSON.stringify(payload)
-  let operation = intakeOperations.get(accountId)
+  let operation = poolWriteOperations.get(operationID)
   try {
     if (!operation) {
       const stored = globalThis.sessionStorage?.getItem(storageKey)
-      if (stored) operation = JSON.parse(stored) as IntakeOperation
+      if (stored) operation = JSON.parse(stored) as PoolWriteOperation
     }
   } catch {
     // In-memory retry protection still works when browser storage is unavailable.
   }
   if (!operation || operation.fingerprint !== fingerprint) {
     const requestID = globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`
-    operation = { fingerprint, key: `pool-intake-${accountId}-${requestID}` }
+    operation = { fingerprint, key: `${keyPrefix}-${requestID}` }
   }
-  intakeOperations.set(accountId, operation)
+  poolWriteOperations.set(operationID, operation)
   try { globalThis.sessionStorage?.setItem(storageKey, JSON.stringify(operation)) } catch { /* memory fallback */ }
-  await apiClient.post(`/admin/pool/accounts/${accountId}/intake`, payload, {
-    headers: { 'Idempotency-Key': operation.key }
-  })
-  intakeOperations.delete(accountId)
+  await apiClient.post(url, payload, { headers: { 'Idempotency-Key': operation.key } })
+  poolWriteOperations.delete(operationID)
   try { globalThis.sessionStorage?.removeItem(storageKey) } catch { /* memory fallback */ }
+}
+
+export async function createAccountIntake(
+  accountId: number,
+  payload: CreateSharedPoolIntakeRequest
+): Promise<void> {
+  await postPoolWrite(`pool-intake:${accountId}`, `pool-intake-${accountId}`, `/admin/pool/accounts/${accountId}/intake`, payload)
+}
+
+export async function createCost(payload: CreateSharedPoolCostEntryRequest): Promise<void> {
+  await postPoolWrite(`pool-cost:${payload.account_id}`, `pool-cost-${payload.account_id}`, '/admin/pool/costs', payload)
 }
 
 export async function recordLifecycleEvent(payload: RecordSharedPoolLifecycleRequest): Promise<void> {
@@ -604,6 +626,7 @@ export default {
   getOverview,
   listAccountCosts,
   createAccountIntake,
+  createCost,
   recordLifecycleEvent,
   getLatestFXRate,
   saveFXRate,

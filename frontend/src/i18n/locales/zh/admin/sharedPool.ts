@@ -6,7 +6,7 @@ export default {
     period: { label: '结算周期', day: '按天', week: '按周', month: '按月', custom: '自定义', timezone: 'Asia/Shanghai' },
     metrics: { purchaseCost: '采购成本', usageValue: '用量价值', roiRate: '回本率', bannedLoss: '封禁损失', pendingRecovery: '待回本', activeAccounts: '活跃账号' },
     overview: { recoveryTitle: '号池回本进度', recoverySubtitle: '按模型标准计价折算用量价值', accountsRecovered: '个账号已回本', accountRecovery: '账号回本明细', estimatedDays: '预计 {days} 天' },
-    accounts: { title: '账号成本台账', subtitle: '记录贡献人、上传人、采购来源和服务期', addCost: '录入账号成本', recordEvent: '记录事件' },
+    accounts: { title: '账号成本台账', subtitle: '记录贡献人、上传人、采购来源和服务期', addCost: '追加成本', recordEvent: '记录事件' },
     entryTypes: { purchase: '首次采购', renewal: '续费', topup: '充值', price_version: '价格变更', adjustment: '成本调整' },
     settlement: { title: '本期 AA 结算', formula: '成员分摊 = 本期成本 x 个人用量占比 - 个人垫付', usageWeight: '计价用量', totalCost: '本期成本', carryForward: '结转', coverage: '计价覆盖率', unpricedWarning: '存在 {count} 条未计价用量，计价覆盖率达到 99% 后才可锁定。', payable: '应付', receivable: '应收', lock: '锁定结算', lockTitle: '锁定本期结算', lockMessage: '锁定后金额和计算快照保持不变，请确认本期数据已经核对。', lockedSuccess: '结算已锁定' },
     sources: { title: '采购来源质量', chartTitle: '来源回本率与 30 天封禁率', sampleHint: '按购买批次统计，样本较少时仅作参考', smallSample: '小样本' },

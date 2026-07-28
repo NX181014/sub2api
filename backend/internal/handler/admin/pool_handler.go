@@ -468,18 +468,15 @@ func (h *PoolHandler) CreateCost(c *gin.Context) {
 		}
 		warrantyEnd = &parsed
 	}
-	item, err := h.poolService.CreateCost(c.Request.Context(), service.CreateAccountCostInput{
-		AccountID: req.AccountID, PayerUserID: req.PayerUserID, PurchaseSourceID: req.PurchaseSourceID,
-		EntryType: req.EntryType, OriginalAmount: req.OriginalAmount, Currency: req.Currency,
-		FXRate: req.FXRate, CNYAmountMinor: req.CNYAmountMinor, ServiceStart: start, ServiceEnd: end, WarrantyEnd: warrantyEnd,
-		PaidAt: paidAt, OrderNo: req.OrderNo, PurchaseURL: req.PurchaseURL, Note: req.Note,
-		SupersedesID: req.SupersedesID, RelatedAccountID: req.RelatedAccountID, CreatedByUserID: actorID,
+	executeAdminIdempotentJSON(c, "admin.pool.cost.create", req, service.DefaultWriteIdempotencyTTL(), func(ctx context.Context) (any, error) {
+		return h.poolService.CreateCost(ctx, service.CreateAccountCostInput{
+			AccountID: req.AccountID, PayerUserID: req.PayerUserID, PurchaseSourceID: req.PurchaseSourceID,
+			EntryType: req.EntryType, OriginalAmount: req.OriginalAmount, Currency: req.Currency,
+			FXRate: req.FXRate, CNYAmountMinor: req.CNYAmountMinor, ServiceStart: start, ServiceEnd: end, WarrantyEnd: warrantyEnd,
+			PaidAt: paidAt, OrderNo: req.OrderNo, PurchaseURL: req.PurchaseURL, Note: req.Note,
+			SupersedesID: req.SupersedesID, RelatedAccountID: req.RelatedAccountID, CreatedByUserID: actorID,
+		})
 	})
-	if err != nil {
-		response.ErrorFrom(c, err)
-		return
-	}
-	response.Success(c, item)
 }
 
 func (h *PoolHandler) ListLifecycle(c *gin.Context) {

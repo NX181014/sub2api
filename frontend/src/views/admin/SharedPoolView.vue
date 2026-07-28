@@ -412,14 +412,14 @@
         </div>
         <div v-if="!(preAccountDraft && pendingAccountAction === 'import')">
           <label for="pool-provider-identity" class="input-label">{{ t('admin.sharedPool.form.providerIdentity') }} *</label>
-          <input id="pool-provider-identity" v-model.trim="costForm.provider_identity" class="input" required :disabled="profileReadOnly" />
+          <input id="pool-provider-identity" v-model.trim="costForm.provider_identity" class="input" required :disabled="profileReadOnly || additionalCostMode" />
         </div>
         <p v-else class="rounded-lg bg-gray-50 px-3 py-2 text-xs text-gray-500 dark:bg-gray-800/60 dark:text-gray-400">
           {{ t('admin.sharedPool.intake.importIdentityAuto') }}
         </p>
         <div>
           <label for="pool-source" class="input-label">{{ t('admin.sharedPool.form.source') }} *</label>
-          <input id="pool-source" v-model.trim="costForm.purchase_source_name" class="input" required list="pool-source-list" :disabled="profileReadOnly" />
+          <input id="pool-source" v-model.trim="costForm.purchase_source_name" class="input" required list="pool-source-list" :disabled="profileReadOnly || additionalCostMode" />
           <datalist id="pool-source-list">
             <option v-for="source in sources" :key="source.name" :value="source.name"></option>
           </datalist>
@@ -430,7 +430,7 @@
         </div>
         <div>
           <label for="pool-uploader" class="input-label">{{ t('admin.sharedPool.form.uploader') }} *</label>
-          <Select id="pool-uploader" v-model="costForm.uploader_user_id" :options="userOptions" searchable :disabled="profileReadOnly" :aria-label="t('admin.sharedPool.form.uploader')" />
+          <Select id="pool-uploader" v-model="costForm.uploader_user_id" :options="userOptions" searchable :disabled="profileReadOnly || additionalCostMode" :aria-label="t('admin.sharedPool.form.uploader')" />
         </div>
         <div>
           <label for="pool-entry-type" class="input-label">{{ t('admin.sharedPool.form.entryType') }} *</label>
@@ -470,7 +470,11 @@
         </div>
       </form>
       <template #footer>
-        <div v-if="profileReadOnly" class="flex justify-end">
+        <div v-if="profileReadOnly" class="flex flex-wrap justify-end gap-2">
+          <button type="button" class="btn btn-primary" @click="beginAdditionalCost">
+            <Icon name="plus" size="sm" />
+            {{ t('admin.sharedPool.accounts.addCost') }}
+          </button>
           <button type="button" class="btn btn-secondary" @click="closeCostDialog">{{ t('common.close') }}</button>
         </div>
         <FormDialogActions v-else form="pool-cost-form" :submitting="savingCost" @cancel="closeCostDialog" />
@@ -609,6 +613,7 @@ const savingFXRate = ref(false)
 const locking = ref(false)
 const showCostDialog = ref(false)
 const intakeMode = ref(false)
+const additionalCostMode = ref(false)
 const preAccountDraft = ref(false)
 const showEventDialog = ref(false)
 const showLockConfirm = ref(false)
@@ -662,7 +667,7 @@ const replacementAccountOptions = computed(() =>
 )
 
 const poolRecordsByAccountID = computed(() => latestPoolRecords(accountCosts.value))
-const profileReadOnly = computed(() => recoveryRecord.value !== null && retryAccounts.value.length === 0)
+const profileReadOnly = computed(() => recoveryRecord.value !== null && !additionalCostMode.value && retryAccounts.value.length === 0)
 const costDialogTitle = computed(() => {
   if (profileReadOnly.value) return t('admin.sharedPool.actions.poolRecord')
   if (preAccountDraft.value) {
@@ -803,6 +808,7 @@ function resetPendingIntake() {
   retryAccounts.value = []
   autoAccountIdentity.value = false
   preAccountDraft.value = false
+  additionalCostMode.value = false
 }
 
 function intakePayload(form: CreateSharedPoolCostRequest): CreateSharedPoolIntakeRequest {
@@ -880,6 +886,7 @@ async function loadReferenceOptions() {
 
 async function openAccountPoolRecord(account: Pick<Account, 'id' | 'name'>, record?: SharedPoolAccountCost) {
   intakeMode.value = true
+  additionalCostMode.value = false
   const existing = record || poolRecordsByAccountID.value[account.id]
   recoveryRecord.value = existing || null
   Object.assign(costForm, emptyCostForm(), {
@@ -906,6 +913,22 @@ async function openAccountPoolRecord(account: Pick<Account, 'id' | 'name'>, reco
   }
 }
 
+function beginAdditionalCost() {
+  if (!recoveryRecord.value) return
+  const nextServiceStart = costForm.service_end
+  additionalCostMode.value = true
+  Object.assign(costForm, {
+    entry_type: 'renewal',
+    purchase_cost: 0,
+    order_no: '',
+    purchase_url: '',
+    service_start: nextServiceStart,
+    service_end: '',
+    warranty_end: '',
+    notes: ''
+  })
+}
+
 async function openOverviewAccountPoolRecord(row: SharedPoolAccountCost) {
   try {
     const response = await adminAPI.sharedPool.listAccountCosts(periodParams())
@@ -929,6 +952,7 @@ async function prepareAccountAction(action: PendingAccountAction) {
   pendingIntakeDraft.value = null
   retryAccounts.value = []
   preAccountDraft.value = true
+  additionalCostMode.value = false
   intakeMode.value = false
   recoveryRecord.value = null
   Object.assign(costForm, emptyCostForm(), {
@@ -962,6 +986,7 @@ function openPendingRetry() {
 function closeCostDialog() {
   if (savingCost.value) return
   showCostDialog.value = false
+  additionalCostMode.value = false
   if (preAccountDraft.value) resetPendingIntake()
 }
 
@@ -1128,7 +1153,26 @@ async function saveAccountCost() {
 
   savingCost.value = true
   try {
-    await adminAPI.sharedPool.createAccountIntake(costForm.account_id, intakePayload(costForm))
+    const payload = intakePayload(costForm)
+    if (additionalCostMode.value && recoveryRecord.value) {
+      await adminAPI.sharedPool.createCost({
+        account_id: costForm.account_id,
+        payer_user_id: costForm.contributor_user_id,
+        purchase_source_id: recoveryRecord.value.purchase_source_id || undefined,
+        entry_type: payload.entry_type,
+        original_amount: payload.original_amount,
+        currency: payload.currency,
+        fx_rate: payload.fx_rate,
+        service_start: payload.service_start,
+        service_end: payload.service_end,
+        warranty_end: payload.warranty_end,
+        order_no: payload.order_no,
+        purchase_url: payload.purchase_url,
+        notes: payload.notes
+      })
+    } else {
+      await adminAPI.sharedPool.createAccountIntake(costForm.account_id, payload)
+    }
     appStore.showSuccess(t('admin.sharedPool.form.saved'))
     showCostDialog.value = false
     resetPendingIntake()

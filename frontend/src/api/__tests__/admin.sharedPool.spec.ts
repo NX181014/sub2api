@@ -8,6 +8,7 @@ import {
   approveApproval,
   createAccountIntake,
   createApproval,
+  createCost,
   getOverview,
   listAccountCosts,
   listApprovals,
@@ -65,6 +66,31 @@ describe('admin shared-pool API', () => {
     await expect(createAccountIntake(42, { ...payload, original_amount: '21' })).rejects.toThrow('network timeout')
 
     expect(post.mock.calls[0][2].headers['Idempotency-Key']).not.toBe(post.mock.calls[1][2].headers['Idempotency-Key'])
+  })
+
+  it('appends an additional account cost through the cost endpoint', async () => {
+    vi.spyOn(globalThis.crypto, 'randomUUID').mockReturnValue('33333333-3333-4333-8333-333333333333')
+    const payload = {
+      account_id: 42,
+      payer_user_id: 7,
+      purchase_source_id: 3,
+      entry_type: 'renewal' as const,
+      original_amount: '20.00',
+      currency: 'CNY',
+      fx_rate: '1',
+      service_start: '2026-08-01',
+      service_end: '2026-09-01'
+    }
+
+    post.mockRejectedValueOnce(new Error('network timeout'))
+    await expect(createCost(payload)).rejects.toThrow('network timeout')
+    post.mockResolvedValueOnce({ data: {} })
+    await createCost(payload)
+
+    expect(post).toHaveBeenNthCalledWith(2, '/admin/pool/costs', payload, {
+      headers: { 'Idempotency-Key': 'pool-cost-42-33333333-3333-4333-8333-333333333333' }
+    })
+    expect(post.mock.calls[0][2]).toEqual(post.mock.calls[1][2])
   })
 
   it('keeps exact per-account payback fields', async () => {
