@@ -362,21 +362,21 @@ type ShadowOptions struct {
 }
 
 type UpdateAccountInput struct {
-	Name                  string
-	Notes                 *string
-	Type                  string // Account type: oauth, setup-token, apikey
-	Credentials           map[string]any
-	Extra                 map[string]any
-	ProxyID               *int64
-	Concurrency           *int     // 使用指针区分"未提供"和"设置为0"
-	Priority              *int     // 使用指针区分"未提供"和"设置为0"
-	RateMultiplier        *float64 // 账号计费倍率（>=0，允许 0）
-	LoadFactor            *int
-	Status                string
-	GroupIDs              *[]int64
-	ExpiresAt             *int64
-	AutoPauseOnExpired    *bool
-	SkipMixedChannelCheck bool // 跳过混合渠道检查（用户已确认风险）
+	Name                  string         `json:"name,omitempty"`
+	Notes                 *string        `json:"notes,omitempty"`
+	Type                  string         `json:"type,omitempty"` // Account type: oauth, setup-token, apikey
+	Credentials           map[string]any `json:"credentials,omitempty"`
+	Extra                 map[string]any `json:"extra,omitempty"`
+	ProxyID               *int64         `json:"proxy_id,omitempty"`
+	Concurrency           *int           `json:"concurrency,omitempty"` // 使用指针区分"未提供"和"设置为0"
+	Priority              *int           `json:"priority,omitempty"`    // 使用指针区分"未提供"和"设置为0"
+	RateMultiplier        *float64       `json:"rate_multiplier,omitempty"`
+	LoadFactor            *int           `json:"load_factor,omitempty"`
+	Status                string         `json:"status,omitempty"`
+	GroupIDs              *[]int64       `json:"group_ids,omitempty"`
+	ExpiresAt             *int64         `json:"expires_at,omitempty"`
+	AutoPauseOnExpired    *bool          `json:"auto_pause_on_expired,omitempty"`
+	SkipMixedChannelCheck bool           `json:"skip_mixed_channel_check,omitempty"`
 }
 
 // BulkUpdateAccountsInput describes the payload for bulk updating accounts.

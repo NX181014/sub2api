@@ -867,6 +867,12 @@ export default {
       updating: '更新中...',
       accountCreated: '账号创建成功',
       accountUpdated: '账号更新成功',
+      approval: {
+        submit: '提交审核',
+        submitting: '提交中...',
+        updateSubmitted: '已提交，等待其他管理员审核',
+        updateReason: '变更账号“{name}”的信息'
+      },
       failedToCreate: '创建账号失败',
       failedToUpdate: '更新账号失败',
       pleaseSelectStatus: '请选择有效的账号状态',

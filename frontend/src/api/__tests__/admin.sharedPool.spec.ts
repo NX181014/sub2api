@@ -4,7 +4,15 @@ const { get, post } = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn() }))
 
 vi.mock('@/api/client', () => ({ apiClient: { get, post } }))
 
-import { createAccountIntake, getOverview } from '@/api/admin/sharedPool'
+import {
+  approveApproval,
+  createAccountIntake,
+  createApproval,
+  getOverview,
+  listAccountCosts,
+  listApprovals,
+  revealApproval
+} from '@/api/admin/sharedPool'
 
 describe('admin shared-pool API', () => {
   beforeEach(() => {
@@ -100,5 +108,71 @@ describe('admin shared-pool API', () => {
       current_net_loss: 0,
       observation_days: 12
     })
+  })
+
+  it('keeps saved pool profile fields for dialog prefill', async () => {
+    get
+      .mockResolvedValueOnce({ data: [{
+        id: 3, account_id: 9, account_name: 'account-9', payer_user_id: 7,
+        payer_email: 'payer@example.com', purchase_source: 'source-a', entry_type: 'purchase',
+        currency: 'CNY', original_amount: '20', cny_amount_minor: 2000, fx_rate: '1',
+        service_start: '2026-07-01T00:00:00Z', service_end: '2026-08-01T00:00:00Z',
+        note: 'invoice stored'
+      }] })
+      .mockResolvedValueOnce({ data: [{
+        id: 9, name: 'account-9', provider_identity: 'provider@example.com',
+        contributor_user_id: 7, created_by_user_id: 8
+      }] })
+
+    const result = await listAccountCosts()
+
+    expect(result.items[0]).toMatchObject({
+      account_id: 9,
+      provider_identity: 'provider@example.com',
+      notes: 'invoice stored'
+    })
+  })
+
+  it('uses the shared approval contract for update, review, and one-time reveal', async () => {
+    const approval = {
+      id: 19,
+      action_type: 'UPDATE_ACCOUNT' as const,
+      account_id: 42,
+      account_name: 'account-42',
+      status: 'pending' as const,
+      reason: 'rename',
+      requested_by_user_id: 2,
+      requested_by_email: 'admin@example.com',
+      requested_at: '2026-07-28T00:00:00Z'
+    }
+    post.mockResolvedValueOnce({ data: approval })
+
+    await expect(createApproval({
+      action_type: 'UPDATE_ACCOUNT',
+      account_id: 42,
+      reason: 'rename',
+      payload: { account_update: { name: 'renamed' } }
+    })).resolves.toEqual(approval)
+    expect(post).toHaveBeenNthCalledWith(1, '/admin/pool/approvals', {
+      action_type: 'UPDATE_ACCOUNT',
+      account_id: 42,
+      reason: 'rename',
+      payload: { account_update: { name: 'renamed' } }
+    })
+
+    get.mockResolvedValueOnce({ data: { items: [approval], total: 1, page: 1, page_size: 20, pages: 1 } })
+    await listApprovals({ status: 'pending', page: 1, page_size: 20 })
+    expect(get).toHaveBeenCalledWith('/admin/pool/approvals', {
+      params: { status: 'pending', page: 1, page_size: 20 }
+    })
+
+    post.mockResolvedValueOnce({ data: { ...approval, status: 'approved' } })
+    await approveApproval(19, 'checked')
+    expect(post).toHaveBeenNthCalledWith(2, '/admin/pool/approvals/19/approve', { reason: 'checked' })
+
+    const reveal = { account_id: 42, credentials: { token: 'secret' }, revealed_at: '2026-07-28T00:01:00Z' }
+    post.mockResolvedValueOnce({ data: reveal })
+    await expect(revealApproval(19)).resolves.toEqual(reveal)
+    expect(post).toHaveBeenNthCalledWith(3, '/admin/pool/approvals/19/reveal')
   })
 })

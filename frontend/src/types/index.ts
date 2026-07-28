@@ -99,6 +99,8 @@ export interface User {
   created_at: string
   updated_at: string
   deleted_at?: string | null
+  /** Fixed system-initial administrator; bypasses only the second-admin approval. */
+  is_primary_admin?: boolean
 }
 
 export interface AdminUser extends User {
@@ -1449,6 +1451,7 @@ export interface AdminDataImportResult {
   proxy_failed: number
   account_created: number
   account_failed: number
+  accounts?: Array<{ id: number; name: string }>
   errors?: AdminDataImportError[]
 }
 

@@ -425,10 +425,18 @@ func createAdminUser(cfg *SetupConfig) (bool, string, error) {
 		return false, "", err
 	}
 
-	_, err = db.ExecContext(
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return false, "", err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var adminID int64
+	err = tx.QueryRowContext(
 		ctx,
 		`INSERT INTO users (email, password_hash, role, balance, concurrency, status, created_at, updated_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		 RETURNING id`,
 		admin.Email,
 		admin.PasswordHash,
 		admin.Role,
@@ -437,8 +445,19 @@ func createAdminUser(cfg *SetupConfig) (bool, string, error) {
 		admin.Status,
 		admin.CreatedAt,
 		admin.UpdatedAt,
-	)
+	).Scan(&adminID)
 	if err != nil {
+		return false, "", err
+	}
+	// The first installed administrator is a stable identity. Never derive the
+	// approval bypass from the current minimum administrator ID.
+	if _, err = tx.ExecContext(ctx, `
+INSERT INTO settings(key, value, updated_at)
+VALUES ('primary_admin_user_id', $1, NOW())
+ON CONFLICT (key) DO NOTHING`, strconv.FormatInt(adminID, 10)); err != nil {
+		return false, "", err
+	}
+	if err = tx.Commit(); err != nil {
 		return false, "", err
 	}
 	return true, decision.reason, nil

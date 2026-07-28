@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	dbent "github.com/Wei-Shaw/sub2api/ent"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/shopspring/decimal"
 )
@@ -35,10 +36,10 @@ type PoolAccount struct {
 }
 
 type UpdatePoolAccountInput struct {
-	ProviderIdentity   *string
-	ContributorUserID  *int64
-	CreatedByUserID    *int64
-	CostSharingEnabled *bool
+	ProviderIdentity   *string `json:"provider_identity,omitempty"`
+	ContributorUserID  *int64  `json:"contributor_user_id,omitempty"`
+	CreatedByUserID    *int64  `json:"created_by_user_id,omitempty"`
+	CostSharingEnabled *bool   `json:"cost_sharing_enabled,omitempty"`
 }
 
 type PurchaseSource struct {
@@ -304,9 +305,24 @@ type PoolRepository interface {
 	GetRecovery(ctx context.Context, start, end time.Time) ([]AccountRecovery, error)
 }
 
-type PoolService struct{ repo PoolRepository }
+type PoolService struct {
+	repo         PoolRepository
+	approvalRepo PoolApprovalRepository
+	adminService AdminService
+	entClient    *dbent.Client
+	settings     *SettingService
+	tokenCache   TokenCacheInvalidator
+}
 
-func NewPoolService(repo PoolRepository) *PoolService { return &PoolService{repo: repo} }
+func NewPoolService(repo PoolRepository, approvalRepo PoolApprovalRepository, adminService AdminService, entClient *dbent.Client, settings *SettingService) *PoolService {
+	return &PoolService{repo: repo, approvalRepo: approvalRepo, adminService: adminService, entClient: entClient, settings: settings}
+}
+
+func (s *PoolService) SetTokenCacheInvalidator(invalidator TokenCacheInvalidator) {
+	if s != nil {
+		s.tokenCache = invalidator
+	}
+}
 
 func (s *PoolService) ListAccounts(ctx context.Context) ([]PoolAccount, error) {
 	return s.repo.ListAccounts(ctx)

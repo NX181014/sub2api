@@ -115,7 +115,7 @@ func (h *AuthHandler) respondWithTokenPair(c *gin.Context, user *service.User) {
 		response.Success(c, AuthResponse{
 			AccessToken: token,
 			TokenType:   "Bearer",
-			User:        dto.UserFromService(user),
+			User:        h.authUserResponse(c.Request.Context(), user),
 		})
 		return
 	}
@@ -124,8 +124,16 @@ func (h *AuthHandler) respondWithTokenPair(c *gin.Context, user *service.User) {
 		RefreshToken: tokenPair.RefreshToken,
 		ExpiresIn:    tokenPair.ExpiresIn,
 		TokenType:    "Bearer",
-		User:         dto.UserFromService(user),
+		User:         h.authUserResponse(c.Request.Context(), user),
 	})
+}
+
+func (h *AuthHandler) authUserResponse(ctx context.Context, user *service.User) *dto.User {
+	out := dto.UserFromService(user)
+	if out != nil && h.settingSvc != nil {
+		out.IsPrimaryAdmin = h.settingSvc.IsPrimaryAdmin(ctx, user.ID)
+	}
+	return out
 }
 
 func (h *AuthHandler) ensureBackendModeAllowsUser(ctx context.Context, user *service.User) error {
@@ -431,8 +439,12 @@ func (h *AuthHandler) GetCurrentUser(c *gin.Context) {
 		runMode = h.cfg.RunMode
 	}
 
+	profile := userProfileResponseFromService(user, identities)
+	if h.settingSvc != nil {
+		profile.IsPrimaryAdmin = h.settingSvc.IsPrimaryAdmin(c.Request.Context(), user.ID)
+	}
 	response.Success(c, UserResponse{
-		userProfileResponse: userProfileResponseFromService(user, identities),
+		userProfileResponse: profile,
 		RunMode:             runMode,
 	})
 }

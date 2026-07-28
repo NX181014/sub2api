@@ -812,6 +812,12 @@ export default {
       updating: 'Updating...',
       accountCreated: 'Account created successfully',
       accountUpdated: 'Account updated successfully',
+      approval: {
+        submit: 'Submit for review',
+        submitting: 'Submitting...',
+        updateSubmitted: 'Submitted for another administrator to review',
+        updateReason: 'Update account “{name}”'
+      },
       failedToCreate: 'Failed to create account',
       failedToUpdate: 'Failed to update account',
       pleaseSelectStatus: 'Please select a valid account status',

@@ -5,12 +5,38 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
+	"strings"
 	"sync/atomic"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"golang.org/x/sync/singleflight"
 )
+
+const SettingKeyPrimaryAdminUserID = "primary_admin_user_id"
+
+// PrimaryAdminID reads the immutable installer-owned administrator ID.
+func (s *SettingService) PrimaryAdminID(ctx context.Context) (int64, error) {
+	if s == nil || s.settingRepo == nil {
+		return 0, errors.New("primary administrator setting repository is unavailable")
+	}
+	raw, err := s.settingRepo.GetValue(ctx, SettingKeyPrimaryAdminUserID)
+	if err != nil {
+		return 0, fmt.Errorf("read primary administrator setting: %w", err)
+	}
+	primaryID, err := strconv.ParseInt(strings.TrimSpace(raw), 10, 64)
+	if err != nil || primaryID <= 0 {
+		return 0, fmt.Errorf("invalid primary administrator setting %q", raw)
+	}
+	return primaryID, nil
+}
+
+// IsPrimaryAdmin fails closed when the installer-owned setting is unavailable.
+func (s *SettingService) IsPrimaryAdmin(ctx context.Context, userID int64) bool {
+	primaryID, err := s.PrimaryAdminID(ctx)
+	return err == nil && primaryID == userID
+}
 
 var (
 	ErrRegistrationDisabled   = infraerrors.Forbidden("REGISTRATION_DISABLED", "registration is currently disabled")

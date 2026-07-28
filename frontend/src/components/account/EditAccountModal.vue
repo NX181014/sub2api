@@ -3,6 +3,8 @@
     :show="show"
     :title="t('admin.accounts.editAccount')"
     width="wide"
+    :close-on-escape="!submitting"
+    :show-close-button="!submitting"
     @close="handleClose"
   >
     <form
@@ -2540,40 +2542,14 @@
     </form>
 
     <template #footer>
-      <div v-if="account" class="flex justify-end gap-3">
-        <button @click="handleClose" type="button" class="btn btn-secondary">
-          {{ t('common.cancel') }}
-        </button>
-        <button
-          type="submit"
-          form="edit-account-form"
-          :disabled="submitting"
-          class="btn btn-primary"
-          data-tour="account-form-submit"
-        >
-          <svg
-            v-if="submitting"
-            class="-ml-1 mr-2 h-4 w-4 animate-spin"
-            fill="none"
-            viewBox="0 0 24 24"
-          >
-            <circle
-              class="opacity-25"
-              cx="12"
-              cy="12"
-              r="10"
-              stroke="currentColor"
-              stroke-width="4"
-            ></circle>
-            <path
-              class="opacity-75"
-              fill="currentColor"
-              d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-            ></path>
-          </svg>
-          {{ submitting ? t('admin.accounts.updating') : t('common.update') }}
-        </button>
-      </div>
+      <FormDialogActions
+        v-if="account"
+        form="edit-account-form"
+        :submitting="submitting"
+        :submit-text="authStore.user?.is_primary_admin ? t('common.update') : t('admin.accounts.approval.submit')"
+        submit-data-tour="account-form-submit"
+        @cancel="handleClose"
+      />
     </template>
   </BaseDialog>
 
@@ -2594,6 +2570,7 @@
 import { ref, reactive, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
+import FormDialogActions from '@/components/common/FormDialogActions.vue'
 import { useAuthStore } from '@/stores/auth'
 import { adminAPI } from '@/api/admin'
 import { useQuotaNotifyState } from '@/composables/useQuotaNotifyState'
@@ -2667,6 +2644,7 @@ const props = defineProps<Props>()
 const emit = defineEmits<{
   close: []
   updated: [account: Account]
+  submitted: []
 }>()
 
 const { t } = useI18n()
@@ -3997,6 +3975,7 @@ const parseDateTimeLocal = parseDateTimeLocalInput
 
 // Methods
 const handleClose = () => {
+  if (submitting.value) return
   antigravityMixedChannelConfirmed.value = false
   clearMixedChannelDialog()
   emit('close')
@@ -4005,9 +3984,25 @@ const handleClose = () => {
 const submitUpdateAccount = async (accountID: number, updatePayload: Record<string, unknown>) => {
   submitting.value = true
   try {
-    const updatedAccount = await adminAPI.accounts.update(accountID, withAntigravityConfirmFlag(updatePayload))
+    const accountUpdate = withAntigravityConfirmFlag(updatePayload)
+    if (!authStore.user?.is_primary_admin) {
+      await adminAPI.sharedPool.createApproval({
+        action_type: 'UPDATE_ACCOUNT',
+        account_id: accountID,
+        reason: t('admin.accounts.approval.updateReason', { name: props.account?.name || `#${accountID}` }),
+        payload: { account_update: accountUpdate }
+      })
+      appStore.showSuccess(t('admin.accounts.approval.updateSubmitted'))
+      emit('submitted')
+      submitting.value = false
+      handleClose()
+      return
+    }
+
+    const updatedAccount = await adminAPI.accounts.update(accountID, accountUpdate)
     appStore.showSuccess(t('admin.accounts.accountUpdated'))
     emit('updated', updatedAccount)
+    submitting.value = false
     handleClose()
   } catch (error: any) {
     if (error.status === 409 && error.error === 'mixed_channel_warning' && needsMixedChannelCheck()) {

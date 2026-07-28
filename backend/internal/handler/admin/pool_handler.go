@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -19,7 +20,30 @@ func NewPoolHandler(poolService *service.PoolService) *PoolHandler {
 	return &PoolHandler{poolService: poolService}
 }
 
+// RequirePrimaryAdmin protects operations that can export credentials outside
+// the one-time, single-account reveal flow.
+func (h *PoolHandler) RequirePrimaryAdmin(c *gin.Context) {
+	actorID, ok := poolActorID(c)
+	if !ok {
+		c.Abort()
+		return
+	}
+	if h == nil || h.poolService == nil || !h.poolService.IsPrimaryAdmin(c.Request.Context(), actorID) {
+		response.ErrorFrom(c, infraerrors.Forbidden(
+			"PRIMARY_ADMIN_REQUIRED",
+			"this credential export operation is limited to the primary administrator",
+		))
+		c.Abort()
+		return
+	}
+	c.Next()
+}
+
 func poolActorID(c *gin.Context) (int64, bool) {
+	if c.GetString("auth_method") == service.AuditAuthMethodAdminAPIKey {
+		response.Forbidden(c, "A signed-in administrator session is required")
+		return 0, false
+	}
 	subject, ok := middleware.GetAuthSubjectFromContext(c)
 	if !ok || subject.UserID <= 0 {
 		response.Unauthorized(c, "User not found in context")
@@ -69,6 +93,7 @@ type updatePoolAccountRequest struct {
 	ContributorUserID  *int64  `json:"contributor_user_id"`
 	CreatedByUserID    *int64  `json:"created_by_user_id"`
 	CostSharingEnabled *bool   `json:"cost_sharing_enabled"`
+	Reason             string  `json:"reason"`
 }
 
 func (h *PoolHandler) UpdateAccount(c *gin.Context) {
@@ -81,10 +106,172 @@ func (h *PoolHandler) UpdateAccount(c *gin.Context) {
 		response.BadRequest(c, "Invalid request: "+err.Error())
 		return
 	}
-	item, err := h.poolService.UpdateAccount(c.Request.Context(), id, service.UpdatePoolAccountInput{
+	actorID, ok := poolActorID(c)
+	if !ok {
+		return
+	}
+	update := service.UpdatePoolAccountInput{
 		ProviderIdentity: req.ProviderIdentity, ContributorUserID: req.ContributorUserID,
 		CreatedByUserID: req.CreatedByUserID, CostSharingEnabled: req.CostSharingEnabled,
+	}
+	if h.poolService.IsPrimaryAdmin(c.Request.Context(), actorID) {
+		item, err := h.poolService.UpdateAccount(c.Request.Context(), id, update)
+		if err != nil {
+			response.ErrorFrom(c, err)
+			return
+		}
+		response.Success(c, item)
+		return
+	}
+	reason := strings.TrimSpace(req.Reason)
+	if reason == "" {
+		reason = "update shared pool account metadata"
+	}
+	item, err := h.poolService.CreateApproval(c.Request.Context(), service.CreatePoolApprovalInput{
+		ActionType: service.PoolApprovalUpdateAccount, AccountID: id, Reason: reason,
+		RequesterID: actorID, Payload: service.PoolApprovalPayload{PoolUpdate: &update},
 	})
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Accepted(c, gin.H{"approval_required": true, "approval": item})
+}
+
+type createPoolApprovalRequest struct {
+	ActionType  string                      `json:"action_type"`
+	RequestType string                      `json:"request_type"`
+	AccountID   int64                       `json:"account_id" binding:"required"`
+	Reason      string                      `json:"reason" binding:"required"`
+	Payload     service.PoolApprovalPayload `json:"payload"`
+}
+
+func (h *PoolHandler) CreateApproval(c *gin.Context) {
+	actorID, ok := poolActorID(c)
+	if !ok {
+		return
+	}
+	var req createPoolApprovalRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+	action := req.ActionType
+	if strings.TrimSpace(action) == "" {
+		action = req.RequestType
+	}
+	item, err := h.poolService.CreateApproval(c.Request.Context(), service.CreatePoolApprovalInput{
+		ActionType: action, AccountID: req.AccountID, Reason: req.Reason, RequesterID: actorID, Payload: req.Payload,
+	})
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	if item.PrimaryBypass {
+		response.Success(c, item)
+		return
+	}
+	response.Created(c, item)
+}
+
+func (h *PoolHandler) ListApprovals(c *gin.Context) {
+	page, pageSize := response.ParsePagination(c)
+	filter := service.PoolApprovalFilter{Status: c.Query("status"), ActionType: c.Query("action_type")}
+	if filter.ActionType == "" {
+		filter.ActionType = c.Query("request_type")
+	}
+	var ok bool
+	if filter.AccountID, ok = optionalPoolQueryID(c, "account_id"); !ok {
+		return
+	}
+	if filter.RequestedByUserID, ok = optionalPoolQueryID(c, "requested_by_user_id"); !ok {
+		return
+	}
+	items, total, err := h.poolService.ListApprovals(c.Request.Context(), filter, page, pageSize)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Paginated(c, items, total, page, pageSize)
+}
+
+func (h *PoolHandler) GetApproval(c *gin.Context) {
+	id, ok := poolPathID(c)
+	if !ok {
+		return
+	}
+	item, err := h.poolService.GetApproval(c.Request.Context(), id)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, item)
+}
+
+type decidePoolApprovalRequest struct {
+	Reason string `json:"reason"`
+}
+
+func (h *PoolHandler) ApproveApproval(c *gin.Context) {
+	id, ok := poolPathID(c)
+	if !ok {
+		return
+	}
+	actorID, ok := poolActorID(c)
+	if !ok {
+		return
+	}
+	var req decidePoolApprovalRequest
+	if c.Request.ContentLength != 0 {
+		if err := c.ShouldBindJSON(&req); err != nil {
+			response.BadRequest(c, "Invalid request: "+err.Error())
+			return
+		}
+	}
+	item, err := h.poolService.ApproveApproval(c.Request.Context(), id, actorID, req.Reason)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, item)
+}
+
+func (h *PoolHandler) RejectApproval(c *gin.Context) {
+	id, ok := poolPathID(c)
+	if !ok {
+		return
+	}
+	actorID, ok := poolActorID(c)
+	if !ok {
+		return
+	}
+	var req decidePoolApprovalRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+	item, err := h.poolService.RejectApproval(c.Request.Context(), id, actorID, req.Reason)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, item)
+}
+
+func (h *PoolHandler) RevealCredential(c *gin.Context) {
+	if c.GetString("auth_method") == service.AuditAuthMethodAdminAPIKey {
+		response.Forbidden(c, "A signed-in administrator session is required")
+		return
+	}
+	id, ok := poolPathID(c)
+	if !ok {
+		return
+	}
+	actorID, ok := poolActorID(c)
+	if !ok {
+		return
+	}
+	item, err := h.poolService.RevealCredential(c.Request.Context(), id, actorID)
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return

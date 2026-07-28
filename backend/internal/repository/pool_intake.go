@@ -50,10 +50,7 @@ RETURNING id,name,website_url,notes,active,created_at,updated_at`, input.Purchas
 		}
 	}
 
-	result, err := tx.ExecContext(ctx, `
-UPDATE accounts SET provider_identity=$2,contributor_user_id=$3,created_by_user_id=$4,
-    cost_sharing_enabled=TRUE,updated_at=NOW()
-WHERE id=$1 AND deleted_at IS NULL`, input.AccountID, input.ProviderIdentity, input.ContributorUserID, input.UploaderUserID)
+	result, err := tx.ExecContext(ctx, accountIntakeUpdateSQL, input.AccountID, input.ProviderIdentity, input.ContributorUserID, input.UploaderUserID)
 	if err != nil {
 		return nil, fmt.Errorf("update intake account: %w", err)
 	}
@@ -62,6 +59,13 @@ WHERE id=$1 AND deleted_at IS NULL`, input.AccountID, input.ProviderIdentity, in
 		return nil, fmt.Errorf("read intake account result: %w", err)
 	}
 	if affected == 0 {
+		var exists bool
+		if err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM accounts WHERE id=$1 AND deleted_at IS NULL)`, input.AccountID).Scan(&exists); err != nil {
+			return nil, fmt.Errorf("check intake account: %w", err)
+		}
+		if exists {
+			return nil, infraerrors.Conflict("POOL_ACCOUNT_ALREADY_INTAKE", "account pool profile already exists; submit an approval request to change it")
+		}
 		return nil, service.ErrPoolAccountNotFound
 	}
 
@@ -108,3 +112,15 @@ RETURNING id`, input.AccountID, input.ContributorUserID, source.ID, input.Cost.E
 	}
 	return &service.AccountIntakeResult{Account: *account, Source: source, Cost: *cost}, nil
 }
+
+const accountIntakeUpdateSQL = `
+UPDATE accounts SET
+    provider_identity=$2,
+    contributor_user_id=$3,
+    created_by_user_id=$4,
+    cost_sharing_enabled=TRUE,updated_at=NOW()
+WHERE id=$1 AND deleted_at IS NULL
+  AND COALESCE(BTRIM(provider_identity), '') = ''
+  AND contributor_user_id IS NULL
+  AND cost_sharing_enabled = FALSE
+  AND NOT EXISTS (SELECT 1 FROM account_cost_entries WHERE account_id=$1)`

@@ -109,7 +109,7 @@ interface Props {
 
 interface Emits {
   (e: 'close'): void
-  (e: 'imported'): void
+  (e: 'imported', accounts: Array<{ id: number; name: string }>): void
 }
 
 const props = defineProps<Props>()
@@ -123,6 +123,7 @@ const files = ref<File[]>([])
 const dragDepth = ref(0)
 const dragActive = computed(() => dragDepth.value > 0)
 const hasCreatedData = ref(false)
+const createdAccounts = ref<Array<{ id: number; name: string }>>([])
 const result = ref<AdminDataImportResult | null>(null)
 
 const fileInput = ref<HTMLInputElement | null>(null)
@@ -142,6 +143,7 @@ watch(
       files.value = []
       dragDepth.value = 0
       hasCreatedData.value = false
+      createdAccounts.value = []
       result.value = null
       if (fileInput.value) {
         fileInput.value.value = ''
@@ -164,7 +166,7 @@ const handleClose = () => {
   if (importing.value) return
   if (hasCreatedData.value) {
     hasCreatedData.value = false
-    emit('imported')
+    emit('imported', createdAccounts.value)
   }
   emit('close')
 }
@@ -299,6 +301,7 @@ const handleImport = async () => {
     })
 
     result.value = res
+    createdAccounts.value = res.accounts || []
 
     const msgParams: Record<string, unknown> = {
       account_created: res.account_created,
@@ -315,7 +318,7 @@ const handleImport = async () => {
       appStore.showError(t('admin.accounts.dataImportCompletedWithErrors', msgParams))
     } else {
       appStore.showSuccess(t('admin.accounts.dataImportSuccess', msgParams))
-      emit('imported')
+      emit('imported', createdAccounts.value)
     }
   } catch (error: any) {
     appStore.showError(error?.message || t('admin.accounts.dataImportFailed'))

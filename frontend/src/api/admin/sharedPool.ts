@@ -5,6 +5,54 @@ export type PoolAccountStatus = 'active' | 'warning' | 'banned' | 'inactive'
 export type PoolSettlementStatus = 'draft' | 'locked' | 'paid'
 export type PoolLifecycleEventType = 'banned_confirmed' | 'recovered' | 'refund' | 'replaced' | 'retired'
 export type PoolCostEntryType = 'purchase' | 'renewal' | 'topup' | 'price_version' | 'adjustment'
+export type PoolApprovalAction = 'UPDATE_ACCOUNT' | 'VIEW_CREDENTIAL'
+export type PoolApprovalStatus = 'pending' | 'approved' | 'rejected' | 'expired' | 'consumed'
+
+export interface PoolApproval {
+  id: number
+  action_type: PoolApprovalAction
+  account_id: number
+  account_name: string
+  status: PoolApprovalStatus
+  reason: string
+  base_revision?: string | null
+  requested_by_user_id: number
+  requested_by_email: string
+  decided_by_user_id?: number | null
+  decided_by_email?: string | null
+  decision_reason?: string | null
+  requested_at: string
+  expires_at?: string | null
+  decided_at?: string | null
+  reveal_expires_at?: string | null
+  revealed_at?: string | null
+  is_primary_bypass?: boolean
+  changes?: Record<string, unknown> | null
+}
+
+export interface PoolApprovalList {
+  items: PoolApproval[]
+  total: number
+  page: number
+  page_size: number
+  pages: number
+}
+
+export interface CreatePoolApprovalRequest {
+  action_type: PoolApprovalAction
+  account_id: number
+  reason: string
+  payload?: {
+    account_update?: Record<string, unknown>
+    pool_update?: Record<string, unknown>
+  }
+}
+
+export interface PoolCredentialReveal {
+  account_id: number
+  credentials: Record<string, unknown>
+  revealed_at: string
+}
 
 export interface PoolPeriodParams {
   start: string
@@ -44,6 +92,7 @@ export interface SharedPoolAccountCost {
   service_start: string
   service_end: string
   warranty_end?: string | null
+  notes?: string | null
   status: PoolAccountStatus
   usage_value: number
   roi_rate: number
@@ -195,6 +244,7 @@ interface RawPoolCost {
   warranty_end?: string | null
   order_no?: string | null
   purchase_url?: string | null
+  note?: string | null
 }
 
 interface RawRecoveryAccount {
@@ -374,6 +424,7 @@ export async function listAccountCosts(params?: PoolPeriodParams): Promise<Share
       purchase_source_name: cost.purchase_source || '',
       purchase_url: cost.purchase_url,
       order_no: cost.order_no,
+      notes: cost.note,
       purchase_cost: minorToAmount(cost.cny_amount_minor),
       entry_type: cost.entry_type as PoolCostEntryType,
       currency: 'CNY',
@@ -513,6 +564,42 @@ export async function listSources(params?: PoolPeriodParams): Promise<SharedPool
   }
 }
 
+export async function createApproval(payload: CreatePoolApprovalRequest): Promise<PoolApproval> {
+  const { data } = await apiClient.post<PoolApproval>('/admin/pool/approvals', payload)
+  return data
+}
+
+export async function listApprovals(params: {
+  status?: PoolApprovalStatus
+  action_type?: PoolApprovalAction
+  account_id?: number
+  requested_by_user_id?: number
+  page?: number
+  page_size?: number
+} = {}): Promise<PoolApprovalList> {
+  const { data } = await apiClient.get<PoolApprovalList>('/admin/pool/approvals', { params })
+  return data
+}
+
+export async function approveApproval(id: number, reason?: string): Promise<PoolApproval> {
+  const { data } = await apiClient.post<PoolApproval>(`/admin/pool/approvals/${id}/approve`, {
+    reason: reason?.trim() || undefined
+  })
+  return data
+}
+
+export async function rejectApproval(id: number, reason: string): Promise<PoolApproval> {
+  const { data } = await apiClient.post<PoolApproval>(`/admin/pool/approvals/${id}/reject`, {
+    reason: reason.trim()
+  })
+  return data
+}
+
+export async function revealApproval(id: number): Promise<PoolCredentialReveal> {
+  const { data } = await apiClient.post<PoolCredentialReveal>(`/admin/pool/approvals/${id}/reveal`)
+  return data
+}
+
 export default {
   getOverview,
   listAccountCosts,
@@ -522,5 +609,10 @@ export default {
   saveFXRate,
   previewSettlement,
   lockSettlement,
-  listSources
+  listSources,
+  createApproval,
+  listApprovals,
+  approveApproval,
+  rejectApproval,
+  revealApproval
 }

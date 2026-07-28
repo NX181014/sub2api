@@ -57,6 +57,19 @@ func NewUserHandler(
 	}
 }
 
+func (h *UserHandler) primaryAdminID(c *gin.Context) (int64, bool) {
+	if h.settingService == nil {
+		response.Error(c, 503, "Primary administrator setting is unavailable")
+		return 0, false
+	}
+	primaryID, err := h.settingService.PrimaryAdminID(c.Request.Context())
+	if err != nil {
+		response.Error(c, 503, "Primary administrator setting is unavailable")
+		return 0, false
+	}
+	return primaryID, true
+}
+
 // CreateUserRequest represents admin create user request
 type CreateUserRequest struct {
 	Email         string   `json:"email" binding:"required,email"`
@@ -236,6 +249,20 @@ func (h *UserHandler) BindAuthIdentity(c *gin.Context) {
 		response.BadRequest(c, "Invalid user ID")
 		return
 	}
+	primaryID, ok := h.primaryAdminID(c)
+	if !ok {
+		return
+	}
+	if userID == primaryID {
+		actorID := getAdminIDFromContext(c)
+		if actorID != primaryID {
+			response.Error(c, 403, "Only the primary administrator can bind its authentication identity")
+			return
+		}
+		if !middleware.EnforceStepUp(c, h.totpService, h.userService, h.settingService) {
+			return
+		}
+	}
 
 	var req BindUserAuthIdentityRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -316,6 +343,33 @@ func (h *UserHandler) Update(c *gin.Context) {
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.BadRequest(c, "Invalid request: "+err.Error())
 		return
+	}
+	primaryID, ok := h.primaryAdminID(c)
+	if !ok {
+		return
+	}
+	if userID == primaryID {
+		target, getErr := h.adminService.GetUser(c.Request.Context(), userID)
+		if getErr != nil {
+			response.ErrorFrom(c, getErr)
+			return
+		}
+		sensitive := req.Password != "" || (req.Email != "" && req.Email != target.Email) ||
+			(req.Role != "" && req.Role != target.Role) || (req.Status != "" && req.Status != target.Status)
+		if sensitive {
+			actorID := getAdminIDFromContext(c)
+			if actorID != primaryID {
+				response.Error(c, 403, "Only the primary administrator can change its own login or role")
+				return
+			}
+			if req.Role == service.RoleUser || req.Status == service.StatusDisabled {
+				response.BadRequest(c, "primary administrator cannot be demoted or disabled")
+				return
+			}
+			if !middleware.EnforceStepUp(c, h.totpService, h.userService, h.settingService) {
+				return
+			}
+		}
 	}
 
 	// 防锁死保护：管理员不能把自己降级为普通用户(单管理员场景下会失去后台访问权)。

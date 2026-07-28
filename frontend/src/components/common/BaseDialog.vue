@@ -11,7 +11,7 @@
         @click.self="handleClose"
       >
         <!-- Modal panel -->
-        <div ref="dialogRef" :class="['modal-content', widthClasses]" @click.stop>
+        <div ref="dialogRef" :class="['modal-content', widthClasses]" tabindex="-1" @click.stop>
           <!-- Header -->
           <div class="modal-header">
             <h3 :id="dialogId" class="modal-title">
@@ -53,6 +53,26 @@ const dialogId = `modal-title-${++dialogIdCounter}`
 // 焦点管理
 const dialogRef = ref<HTMLElement | null>(null)
 let previousActiveElement: HTMLElement | null = null
+let bodyLocked = false
+
+const acquireBodyLock = () => {
+  if (bodyLocked) return
+  const count = Number(document.body.dataset.modalOpenCount || 0) + 1
+  document.body.dataset.modalOpenCount = String(count)
+  document.body.classList.add('modal-open')
+  bodyLocked = true
+}
+
+const releaseBodyLock = () => {
+  if (!bodyLocked) return
+  const count = Math.max(0, Number(document.body.dataset.modalOpenCount || 1) - 1)
+  if (count) document.body.dataset.modalOpenCount = String(count)
+  else {
+    delete document.body.dataset.modalOpenCount
+    document.body.classList.remove('modal-open')
+  }
+  bodyLocked = false
+}
 
 type DialogWidth = 'narrow' | 'normal' | 'wide' | 'extra-wide' | 'full'
 
@@ -105,9 +125,36 @@ const handleClose = () => {
   }
 }
 
-const handleEscape = (event: KeyboardEvent) => {
+const isTopmostDialog = () => {
+  const overlays = document.querySelectorAll<HTMLElement>('.modal-overlay[role="dialog"]')
+  return overlays.length > 0 && overlays[overlays.length - 1]?.contains(dialogRef.value)
+}
+
+const focusableElements = () => Array.from(dialogRef.value?.querySelectorAll<HTMLElement>(
+  '[autofocus], button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+) || [])
+
+const handleKeydown = (event: KeyboardEvent) => {
+  if (!props.show || !isTopmostDialog()) return
   if (props.show && props.closeOnEscape && event.key === 'Escape') {
     emit('close')
+    return
+  }
+  if (event.key !== 'Tab') return
+  const focusable = focusableElements()
+  if (!focusable.length) {
+    event.preventDefault()
+    dialogRef.value?.focus()
+    return
+  }
+  const first = focusable[0]
+  const last = focusable[focusable.length - 1]
+  if (event.shiftKey && document.activeElement === first) {
+    event.preventDefault()
+    last.focus()
+  } else if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault()
+    first.focus()
   }
 }
 
@@ -119,18 +166,16 @@ watch(
       // 保存当前焦点元素
       previousActiveElement = document.activeElement as HTMLElement
       // 使用CSS类而不是直接操作style,更易于管理多个对话框
-      document.body.classList.add('modal-open')
+      acquireBodyLock()
 
       // 等待DOM更新后设置焦点到对话框
       await nextTick()
       if (dialogRef.value) {
-        const firstFocusable = dialogRef.value.querySelector<HTMLElement>(
-          'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
-        )
-        firstFocusable?.focus()
+        const preferred = dialogRef.value.querySelector<HTMLElement>('[autofocus]')
+        ;(preferred || focusableElements()[0] || dialogRef.value).focus()
       }
     } else {
-      document.body.classList.remove('modal-open')
+      releaseBodyLock()
       // 恢复之前的焦点
       if (previousActiveElement && typeof previousActiveElement.focus === 'function') {
         previousActiveElement.focus()
@@ -142,12 +187,11 @@ watch(
 )
 
 onMounted(() => {
-  document.addEventListener('keydown', handleEscape)
+  document.addEventListener('keydown', handleKeydown)
 })
 
 onUnmounted(() => {
-  document.removeEventListener('keydown', handleEscape)
-  // 确保组件卸载时移除滚动锁定
-  document.body.classList.remove('modal-open')
+  document.removeEventListener('keydown', handleKeydown)
+  releaseBodyLock()
 })
 </script>

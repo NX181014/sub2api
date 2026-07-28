@@ -123,5 +123,8 @@ export type {
   SharedPoolOverview,
   SharedPoolAccountCost,
   SharedPoolSettlementPreview,
-  SharedPoolSourceStat
+  SharedPoolSourceStat,
+  PoolApproval,
+  PoolApprovalList,
+  PoolCredentialReveal
 } from './sharedPool'

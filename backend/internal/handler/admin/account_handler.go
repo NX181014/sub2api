@@ -64,6 +64,32 @@ type AccountHandler struct {
 	grokImportProber        grokImportProber
 	upstreamBillingProbe    *service.UpstreamBillingProbeService
 	ollamaCloudUsage        *service.OllamaCloudUsageService
+	poolService             *service.PoolService
+}
+
+func (h *AccountHandler) SetPoolService(poolService *service.PoolService) {
+	h.poolService = poolService
+	if poolService != nil {
+		poolService.SetTokenCacheInvalidator(h.tokenCacheInvalidator)
+	}
+}
+
+func (h *AccountHandler) requirePrimaryAdmin(c *gin.Context, operation string) bool {
+	if h.poolService == nil {
+		return true
+	}
+	actorID, ok := poolActorID(c)
+	if !ok {
+		return false
+	}
+	if h.poolService.IsPrimaryAdmin(c.Request.Context(), actorID) {
+		return true
+	}
+	response.ErrorFrom(c, infraerrors.Forbidden(
+		"POOL_APPROVAL_SINGLE_ACCOUNT_REQUIRED",
+		operation+" is limited to the primary administrator; use a single-account approval request",
+	))
+	return false
 }
 
 // SetUpstreamBillingProbeService attaches the optional remote billing probe service.
@@ -148,6 +174,7 @@ type UpdateAccountRequest struct {
 	ExpiresAt               *int64         `json:"expires_at"`
 	AutoPauseOnExpired      *bool          `json:"auto_pause_on_expired"`
 	ConfirmMixedChannelRisk *bool          `json:"confirm_mixed_channel_risk"` // 用户确认混合渠道风险
+	ApprovalReason          string         `json:"approval_reason"`
 }
 
 // BulkUpdateAccountsRequest represents the payload for bulk editing accounts
@@ -195,6 +222,14 @@ type AccountWithConcurrency struct {
 	CurrentWindowCost *float64 `json:"current_window_cost,omitempty"` // 当前窗口费用
 	ActiveSessions    *int     `json:"active_sessions,omitempty"`     // 当前活跃会话数
 	CurrentRPM        *int     `json:"current_rpm,omitempty"`         // 当前分钟 RPM 计数
+}
+
+// accountApprovalAcceptedResponse remains Account-shaped for legacy ReAuth
+// callers while exposing the pending approval state.
+type accountApprovalAcceptedResponse struct {
+	AccountWithConcurrency
+	ApprovalRequired bool                  `json:"approval_required"`
+	Approval         *service.PoolApproval `json:"approval"`
 }
 
 type AccountSchedulerScore struct {
@@ -972,7 +1007,7 @@ func (h *AccountHandler) Update(c *gin.Context) {
 	// 确定是否跳过混合渠道检查
 	skipCheck := req.ConfirmMixedChannelRisk != nil && *req.ConfirmMixedChannelRisk
 
-	account, err := h.adminService.UpdateAccount(c.Request.Context(), accountID, &service.UpdateAccountInput{
+	updateInput := &service.UpdateAccountInput{
 		Name:                  req.Name,
 		Notes:                 req.Notes,
 		Type:                  req.Type,
@@ -988,7 +1023,34 @@ func (h *AccountHandler) Update(c *gin.Context) {
 		ExpiresAt:             req.ExpiresAt,
 		AutoPauseOnExpired:    req.AutoPauseOnExpired,
 		SkipMixedChannelCheck: skipCheck,
-	})
+	}
+	if h.poolService != nil {
+		actorID, ok := poolActorID(c)
+		if !ok {
+			return
+		}
+		if !h.poolService.IsPrimaryAdmin(c.Request.Context(), actorID) {
+			reason := strings.TrimSpace(req.ApprovalReason)
+			if reason == "" {
+				reason = "update account information"
+			}
+			approval, approvalErr := h.poolService.CreateApproval(c.Request.Context(), service.CreatePoolApprovalInput{
+				ActionType:  service.PoolApprovalUpdateAccount,
+				AccountID:   accountID,
+				Reason:      reason,
+				RequesterID: actorID,
+				Payload:     service.PoolApprovalPayload{AccountUpdate: updateInput},
+			})
+			if approvalErr != nil {
+				response.ErrorFrom(c, approvalErr)
+				return
+			}
+			response.Accepted(c, gin.H{"approval_required": true, "approval": approval})
+			return
+		}
+	}
+
+	account, err := h.adminService.UpdateAccount(c.Request.Context(), accountID, updateInput)
 	if err != nil {
 		// 检查是否为混合渠道错误
 		var mixedErr *service.MixedChannelError
@@ -1363,9 +1425,10 @@ func (h *AccountHandler) Refresh(c *gin.Context) {
 
 // ApplyOAuthCredentialsRequest is the payload for persisting re-authorized OAuth credentials.
 type ApplyOAuthCredentialsRequest struct {
-	Type        string         `json:"type" binding:"required,oneof=oauth setup-token"`
-	Credentials map[string]any `json:"credentials" binding:"required"`
-	Extra       map[string]any `json:"extra"`
+	Type           string         `json:"type" binding:"required,oneof=oauth setup-token"`
+	Credentials    map[string]any `json:"credentials" binding:"required"`
+	Extra          map[string]any `json:"extra"`
+	ApprovalReason string         `json:"approval_reason"`
 }
 
 // ApplyOAuthCredentials 将"重新授权"得到的新凭据原子落库。
@@ -1409,6 +1472,39 @@ func (h *AccountHandler) ApplyOAuthCredentials(c *gin.Context) {
 	if err := service.ValidateOpenAILongContextBillingExtra(existing.Platform, req.Extra); err != nil {
 		response.ErrorFrom(c, err)
 		return
+	}
+	if h.poolService != nil {
+		actorID, ok := poolActorID(c)
+		if !ok {
+			return
+		}
+		if !h.poolService.IsPrimaryAdmin(ctx, actorID) {
+			reason := strings.TrimSpace(req.ApprovalReason)
+			if reason == "" {
+				reason = "reauthorize account credentials"
+			}
+			approval, approvalErr := h.poolService.CreateApproval(ctx, service.CreatePoolApprovalInput{
+				ActionType:  service.PoolApprovalUpdateAccount,
+				AccountID:   accountID,
+				Reason:      reason,
+				RequesterID: actorID,
+				Payload: service.PoolApprovalPayload{
+					AccountUpdate: &service.UpdateAccountInput{Type: req.Type, Credentials: req.Credentials},
+					ExtraMerge:    req.Extra,
+					Reauthorize:   true,
+				},
+			})
+			if approvalErr != nil {
+				response.ErrorFrom(c, approvalErr)
+				return
+			}
+			response.Accepted(c, accountApprovalAcceptedResponse{
+				AccountWithConcurrency: h.buildAccountResponseWithRuntime(ctx, existing),
+				ApprovalRequired:       true,
+				Approval:               approval,
+			})
+			return
+		}
 	}
 
 	updatedAccount, err := h.adminService.UpdateAccount(ctx, accountID, &service.UpdateAccountInput{
@@ -1828,6 +1924,9 @@ type BatchUpdateCredentialsRequest struct {
 // BatchUpdateCredentials handles batch updating credentials fields
 // POST /api/v1/admin/accounts/batch-update-credentials
 func (h *AccountHandler) BatchUpdateCredentials(c *gin.Context) {
+	if !h.requirePrimaryAdmin(c, "batch credential update") {
+		return
+	}
 	var req BatchUpdateCredentialsRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.BadRequest(c, "Invalid request: "+err.Error())
@@ -1910,6 +2009,9 @@ func (h *AccountHandler) BatchUpdateCredentials(c *gin.Context) {
 // BulkUpdate handles bulk updating accounts with selected fields/credentials.
 // POST /api/v1/admin/accounts/bulk-update
 func (h *AccountHandler) BulkUpdate(c *gin.Context) {
+	if !h.requirePrimaryAdmin(c, "bulk account update") {
+		return
+	}
 	var req BulkUpdateAccountsRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.BadRequest(c, "Invalid request: "+err.Error())

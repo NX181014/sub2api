@@ -3617,9 +3617,10 @@ interface Props {
 }
 
 const props = defineProps<Props>()
+type CreatedAccountRef = Pick<Account, 'id' | 'name'>
 const emit = defineEmits<{
   close: []
-  created: [account?: Account]
+  created: [accounts?: CreatedAccountRef[]]
 }>()
 
 const appStore = useAppStore()
@@ -4586,7 +4587,7 @@ const submitCreateAccount = async (payload: CreateAccountRequest) => {
       }
     }
     appStore.showSuccess(t('admin.accounts.accountCreated'))
-    emit('created', account)
+    emit('created', [account])
     handleClose()
   } catch (error: any) {
     if (error.response?.status === 409 && error.response?.data?.error === 'mixed_channel_warning' && needsMixedChannelCheck(form.platform)) {
@@ -5279,6 +5280,7 @@ const handleGrokValidateRT = async (refreshTokenInput: string) => {
   let successCount = 0
   let failedCount = 0
   const errors: string[] = []
+  const createdAccounts: CreatedAccountRef[] = []
 
   try {
     for (let i = 0; i < refreshTokens.length; i++) {
@@ -5304,7 +5306,7 @@ const handleGrokValidateRT = async (refreshTokenInput: string) => {
           return
         }
 
-        await adminAPI.accounts.create({
+        const account = await adminAPI.accounts.create({
           name: accountName,
           notes: form.notes,
           platform: 'grok',
@@ -5320,6 +5322,7 @@ const handleGrokValidateRT = async (refreshTokenInput: string) => {
           expires_at: form.expires_at,
           auto_pause_on_expired: autoPauseOnExpired.value
         })
+        createdAccounts.push(account)
         successCount++
       } catch (error: any) {
         failedCount++
@@ -5334,12 +5337,12 @@ const handleGrokValidateRT = async (refreshTokenInput: string) => {
           ? t('admin.accounts.oauth.batchSuccess', { count: successCount })
           : t('admin.accounts.accountCreated')
       )
-      emit('created')
+      emit('created', createdAccounts)
       handleClose()
     } else if (successCount > 0) {
       appStore.showWarning(t('admin.accounts.oauth.batchPartialSuccess', { success: successCount, failed: failedCount }))
       grokOAuth.error.value = errors.join('\n')
-      emit('created')
+      emit('created', createdAccounts)
     } else {
       grokOAuth.error.value = errors.join('\n')
       appStore.showError(t('admin.accounts.oauth.batchFailed'))
@@ -5396,7 +5399,7 @@ const handleGrokImportSSO = async (ssoInput: string) => {
           ? t('admin.accounts.oauth.batchSuccess', { count: successCount })
           : t('admin.accounts.accountCreated')
       )
-      emit('created')
+      emit('created', result.created.flatMap((item) => item.account ? [item.account] : []))
       handleClose()
     } else if (successCount > 0 && failedCount > 0) {
       // Same as OpenAI/Grok RT: keep input, show failures, refresh list.
@@ -5406,7 +5409,7 @@ const handleGrokImportSSO = async (ssoInput: string) => {
       grokOAuth.error.value = (result.failed || [])
         .map((item) => `#${item.index}: ${item.error || 'Unknown error'}`)
         .join('\n')
-      emit('created')
+      emit('created', result.created.flatMap((item) => item.account ? [item.account] : []))
     } else {
       grokOAuth.error.value = (result.failed || [])
         .map((item) => `#${item.index}: ${item.error || 'Unknown error'}`)
@@ -5469,8 +5472,9 @@ const handleOpenAIExchange = async (authCode: string) => {
       return
     }
 
+    const createdAccounts: CreatedAccountRef[] = []
     if (shouldCreateOpenAI) {
-      await adminAPI.accounts.create({
+      const account = await adminAPI.accounts.create({
         name: form.name,
         notes: form.notes,
         platform: 'openai',
@@ -5486,10 +5490,11 @@ const handleOpenAIExchange = async (authCode: string) => {
         expires_at: form.expires_at,
         auto_pause_on_expired: autoPauseOnExpired.value
       })
+      createdAccounts.push(account)
       appStore.showSuccess(t('admin.accounts.accountCreated'))
     }
 
-    emit('created')
+    emit('created', createdAccounts)
     handleClose()
   } catch (error: any) {
     oauthClient.error.value = error.response?.data?.detail || t('admin.accounts.oauth.authFailed')
@@ -5605,7 +5610,9 @@ const handleOpenAIImportCodexSession = async (content: string) => {
 
     if (successCount > 0 && result.failed === 0) {
       appStore.showSuccess(t('admin.accounts.oauth.openai.codexSessionImportSuccess', params))
-      emit('created')
+      emit('created', (result.items || [])
+        .filter((item) => item.action === 'created' && item.account_id)
+        .map((item) => ({ id: item.account_id!, name: item.name || `#${item.account_id}` })))
       handleClose()
       return
     }
@@ -5621,7 +5628,9 @@ const handleOpenAIImportCodexSession = async (content: string) => {
 
     if (successCount > 0) {
       appStore.showWarning(t('admin.accounts.oauth.openai.codexSessionImportPartial', params))
-      emit('created')
+      emit('created', (result.items || [])
+        .filter((item) => item.action === 'created' && item.account_id)
+        .map((item) => ({ id: item.account_id!, name: item.name || `#${item.account_id}` })))
       return
     }
 
@@ -5656,7 +5665,7 @@ const handleOpenAIImportCodexPAT = async (accessToken: string) => {
 
   try {
     const extra = buildOpenAICodexImportExtra()
-    await adminAPI.accounts.createOpenAICodexPAT({
+    const account = await adminAPI.accounts.createOpenAICodexPAT({
       access_token: trimmed,
       name: form.name,
       notes: form.notes || null,
@@ -5673,7 +5682,7 @@ const handleOpenAIImportCodexPAT = async (accessToken: string) => {
     })
 
     appStore.showSuccess(t('admin.accounts.messages.accountCreated'))
-    emit('created')
+    emit('created', [account])
     handleClose()
   } catch (error: any) {
     oauthClient.error.value =
@@ -5709,6 +5718,7 @@ const handleOpenAIBatchRT = async (refreshTokenInput: string, clientId?: string)
   let failedCount = 0
   const errors: string[] = []
   const shouldCreateOpenAI = form.platform === 'openai'
+  const createdAccounts: CreatedAccountRef[] = []
 
   try {
     for (let i = 0; i < refreshTokens.length; i++) {
@@ -5751,7 +5761,7 @@ const handleOpenAIBatchRT = async (refreshTokenInput: string, clientId?: string)
         const accountName = refreshTokens.length > 1 ? `${baseName} #${i + 1}` : baseName
 
         if (shouldCreateOpenAI) {
-          await adminAPI.accounts.create({
+          const account = await adminAPI.accounts.create({
             name: accountName,
             notes: form.notes,
             platform: 'openai',
@@ -5767,6 +5777,7 @@ const handleOpenAIBatchRT = async (refreshTokenInput: string, clientId?: string)
             expires_at: form.expires_at,
             auto_pause_on_expired: autoPauseOnExpired.value
           })
+          createdAccounts.push(account)
         }
 
         successCount++
@@ -5784,14 +5795,14 @@ const handleOpenAIBatchRT = async (refreshTokenInput: string, clientId?: string)
           ? t('admin.accounts.oauth.batchSuccess', { count: successCount })
           : t('admin.accounts.accountCreated')
       )
-      emit('created')
+      emit('created', createdAccounts)
       handleClose()
     } else if (successCount > 0 && failedCount > 0) {
       appStore.showWarning(
         t('admin.accounts.oauth.batchPartialSuccess', { success: successCount, failed: failedCount })
       )
       oauthClient.error.value = errors.join('\n')
-      emit('created')
+      emit('created', createdAccounts)
     } else {
       oauthClient.error.value = errors.join('\n')
       appStore.showError(t('admin.accounts.oauth.batchFailed'))
@@ -5828,6 +5839,7 @@ const handleAntigravityValidateRT = async (refreshTokenInput: string) => {
   let successCount = 0
   let failedCount = 0
   const errors: string[] = []
+  const createdAccounts: CreatedAccountRef[] = []
 
   try {
     for (let i = 0; i < refreshTokens.length; i++) {
@@ -5866,7 +5878,8 @@ const handleAntigravityValidateRT = async (refreshTokenInput: string) => {
           expires_at: form.expires_at,
           auto_pause_on_expired: autoPauseOnExpired.value
         })
-        await adminAPI.accounts.create(createPayload)
+        const account = await adminAPI.accounts.create(createPayload)
+        createdAccounts.push(account)
         successCount++
       } catch (error: any) {
         failedCount++
@@ -5882,14 +5895,14 @@ const handleAntigravityValidateRT = async (refreshTokenInput: string) => {
           ? t('admin.accounts.oauth.batchSuccess', { count: successCount })
           : t('admin.accounts.accountCreated')
       )
-      emit('created')
+      emit('created', createdAccounts)
       handleClose()
     } else if (successCount > 0 && failedCount > 0) {
       appStore.showWarning(
         t('admin.accounts.oauth.batchPartialSuccess', { success: successCount, failed: failedCount })
       )
       antigravityOAuth.error.value = errors.join('\n')
-      emit('created')
+      emit('created', createdAccounts)
     } else {
       antigravityOAuth.error.value = errors.join('\n')
       appStore.showError(t('admin.accounts.oauth.batchFailed'))
@@ -6155,6 +6168,7 @@ const handleCookieAuth = async (sessionKey: string) => {
     let successCount = 0
     let failedCount = 0
     const errors: string[] = []
+    const createdAccounts: CreatedAccountRef[] = []
 
     for (let i = 0; i < keys.length; i++) {
       try {
@@ -6231,7 +6245,7 @@ const handleCookieAuth = async (sessionKey: string) => {
           credentials.temp_unschedulable_rules = tempUnschedPayload
         }
 
-        await adminAPI.accounts.create({
+        const account = await adminAPI.accounts.create({
           name: accountName,
           notes: form.notes,
           platform: form.platform,
@@ -6247,6 +6261,7 @@ const handleCookieAuth = async (sessionKey: string) => {
           expires_at: form.expires_at,
           auto_pause_on_expired: autoPauseOnExpired.value
         })
+        createdAccounts.push(account)
 
         successCount++
       } catch (error: any) {
@@ -6263,10 +6278,10 @@ const handleCookieAuth = async (sessionKey: string) => {
     if (successCount > 0) {
       appStore.showSuccess(t('admin.accounts.oauth.successCreated', { count: successCount }))
       if (failedCount === 0) {
-        emit('created')
+        emit('created', createdAccounts)
         handleClose()
       } else {
-        emit('created')
+        emit('created', createdAccounts)
       }
     }
 

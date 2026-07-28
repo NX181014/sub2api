@@ -14,9 +14,26 @@
           <AccountTableActions
             :loading="loading"
             @refresh="handleManualRefresh"
-            @create="showCreate = true"
+            @create="handleCreateRequest"
           >
             <template #after>
+              <button
+                type="button"
+                class="btn btn-secondary relative px-2 md:px-3"
+                :title="t('admin.sharedPool.approval.title')"
+                :aria-label="t('admin.sharedPool.approval.title')"
+                @click="openApprovalCenter"
+              >
+                <Icon name="shield" size="sm" />
+                <span class="hidden md:inline">{{ t('admin.sharedPool.approval.title') }}</span>
+                <span
+                  v-if="pendingApprovalCount"
+                  class="inline-flex min-w-5 items-center justify-center rounded-full bg-amber-100 px-1.5 text-xs font-semibold tabular-nums text-amber-700 dark:bg-amber-900/40 dark:text-amber-300"
+                >
+                  {{ pendingApprovalCount > 99 ? '99+' : pendingApprovalCount }}
+                </span>
+              </button>
+
               <!-- Auto Refresh Dropdown -->
               <div class="relative" ref="autoRefreshDropdownRef">
                 <button
@@ -316,6 +333,25 @@
               :manual-refresh-token="usageManualRefreshToken"
             />
           </template>
+          <template #cell-pool_record="{ row }">
+            <button
+              type="button"
+              class="min-h-11 rounded-lg px-2 py-1 text-left transition-colors hover:bg-emerald-50 dark:hover:bg-emerald-900/20"
+              @click="emit('pool-record', row)"
+            >
+              <template v-if="poolRecordFor(row.id)">
+                <span class="block max-w-36 truncate text-xs font-medium text-emerald-700 dark:text-emerald-300">
+                  {{ poolRecordFor(row.id)?.purchase_source_name || t('admin.sharedPool.actions.poolRecord') }}
+                </span>
+                <span class="block text-xs tabular-nums text-gray-500 dark:text-gray-400">
+                  ¥{{ poolRecordFor(row.id)?.purchase_cost.toFixed(2) }} · {{ formatPoolPercent(poolRecordFor(row.id)?.roi_rate || 0) }}
+                </span>
+              </template>
+              <span v-else class="text-xs font-medium text-amber-600 dark:text-amber-300">
+                {{ t('admin.sharedPool.intake.pending') }}
+              </span>
+            </button>
+          </template>
           <template #cell-proxy="{ row }">
             <div class="flex flex-col gap-1">
               <div v-if="row.proxy" class="flex items-center gap-2">
@@ -416,6 +452,10 @@
                 <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10" /></svg>
                 <span class="text-xs">{{ t('common.edit') }}</span>
               </button>
+              <button @click="openCredentialRequest(row)" class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-amber-50 hover:text-amber-600 dark:hover:bg-amber-900/20 dark:hover:text-amber-400">
+                <Icon name="lock" size="sm" />
+                <span class="text-xs">{{ t('admin.sharedPool.approval.viewCredential') }}</span>
+              </button>
               <button @click="emit('pool-record', row)" class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-emerald-50 hover:text-emerald-600 dark:hover:bg-emerald-900/20 dark:hover:text-emerald-400">
                 <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M2.25 18.75a60.07 60.07 0 0115.797 0M6 6.75h12M6 10.5h12M6 14.25h12M3.75 5.25v10.5A1.5 1.5 0 005.25 17.25h13.5a1.5 1.5 0 001.5-1.5V5.25a1.5 1.5 0 00-1.5-1.5H5.25a1.5 1.5 0 00-1.5 1.5z" /></svg>
                 <span class="text-xs">{{ t('admin.sharedPool.actions.poolRecord') }}</span>
@@ -436,7 +476,7 @@
       <template #pagination><Pagination v-if="pagination.total > 0" :page="pagination.page" :total="pagination.total" :page-size="pagination.page_size" @update:page="handlePageChange" @update:pageSize="handlePageSizeChange" /></template>
     </TablePageLayout>
     <CreateAccountModal :show="showCreate" :proxies="proxies" :groups="groups" @close="showCreate = false" @created="handleAccountCreated" />
-    <EditAccountModal :show="showEdit" :account="edAcc" :proxies="proxies" :groups="groups" @close="showEdit = false" @updated="handleAccountUpdated" />
+    <EditAccountModal :show="showEdit" :account="edAcc" :proxies="proxies" :groups="groups" @close="showEdit = false" @updated="handleAccountUpdated" @submitted="handleApprovalSubmitted" />
     <ReAuthAccountModal :show="showReAuth" :account="reAuthAcc" @close="closeReAuthModal" @reauthorized="handleAccountUpdated" />
     <AccountTestModal :show="showTest" :account="testingAcc" @close="closeTestModal" />
     <AccountStatsModal :show="showStats" :account="statsAcc" @close="closeStatsModal" />
@@ -467,6 +507,183 @@
     <ErrorPassthroughRulesModal :show="showErrorPassthrough" @close="showErrorPassthrough = false" />
     <TLSFingerprintProfilesModal :show="showTLSFingerprintProfiles" @close="showTLSFingerprintProfiles = false" />
     <TotpStepUpDialog :controller="accountExportStepUp" />
+    <TotpStepUpDialog :controller="credentialStepUp" />
+
+    <BaseDialog
+      :show="showApprovalCenter"
+      :title="t('admin.sharedPool.approval.title')"
+      width="extra-wide"
+      @close="closeApprovalCenter"
+    >
+      <div class="space-y-4">
+        <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <p class="text-sm text-gray-500 dark:text-gray-400">
+            {{ t('admin.sharedPool.approval.subtitle') }}
+          </p>
+          <div class="flex items-center gap-2">
+            <label for="approval-status-filter" class="sr-only">{{ t('admin.sharedPool.approval.status') }}</label>
+            <select id="approval-status-filter" v-model="approvalStatusFilter" class="input min-h-11 w-36" @change="changeApprovalFilter">
+              <option value="pending">{{ t('admin.sharedPool.approval.pending') }}</option>
+              <option value="approved">{{ t('admin.sharedPool.approval.approved') }}</option>
+              <option value="rejected">{{ t('admin.sharedPool.approval.rejected') }}</option>
+              <option value="">{{ t('common.all') }}</option>
+            </select>
+            <button type="button" class="btn btn-secondary min-h-11 px-3" :disabled="approvalsLoading" @click="loadApprovals">
+              <Icon name="refresh" size="sm" :class="approvalsLoading ? 'animate-spin' : ''" />
+              <span>{{ t('common.refresh') }}</span>
+            </button>
+          </div>
+        </div>
+
+        <DataTable :columns="approvalColumns" :data="approvals" row-key="id" :loading="approvalsLoading">
+          <template #cell-action_type="{ row }">
+            <span class="text-sm font-medium text-gray-900 dark:text-white">
+              {{ approvalActionLabel(row.action_type) }}
+            </span>
+          </template>
+          <template #cell-account_name="{ row }">
+            <div class="min-w-0">
+              <p class="max-w-48 truncate font-medium text-gray-900 dark:text-white" :title="row.account_name">
+                {{ row.account_name || `#${row.account_id}` }}
+              </p>
+              <p class="text-xs text-gray-500 dark:text-gray-400">#{{ row.account_id }}</p>
+            </div>
+          </template>
+          <template #cell-requested_by_email="{ row }">
+            <span class="text-sm text-gray-600 dark:text-gray-300">{{ row.requested_by_email || `#${row.requested_by_user_id}` }}</span>
+          </template>
+          <template #cell-status="{ row }">
+            <StatusBadge :status="approvalStatusBadge(row.status)" :label="approvalStatusLabel(row.status)" />
+          </template>
+          <template #cell-requested_at="{ row }">
+            <span class="whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">{{ formatDateTime(row.requested_at) }}</span>
+          </template>
+          <template #cell-actions="{ row }">
+            <div class="flex flex-wrap justify-end gap-2">
+              <button type="button" class="btn btn-secondary min-h-11 px-3 text-xs" @click="selectApproval(row)">
+                {{ t('admin.sharedPool.approval.details') }}
+              </button>
+              <button
+                v-if="canRevealApproval(row)"
+                type="button"
+                class="btn btn-primary min-h-11 px-3 text-xs"
+                :disabled="approvalActionID === row.id"
+                @click="revealCredential(row)"
+              >
+                <LoadingSpinner v-if="approvalActionID === row.id" size="sm" />
+                {{ t('admin.sharedPool.approval.revealOnce') }}
+              </button>
+            </div>
+          </template>
+          <template #empty>
+            <div class="py-8 text-sm text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.approval.empty') }}</div>
+          </template>
+        </DataTable>
+        <Pagination
+          v-if="approvalPagination.total > approvalPagination.page_size"
+          :page="approvalPagination.page"
+          :total="approvalPagination.total"
+          :page-size="approvalPagination.page_size"
+          @update:page="handleApprovalPageChange"
+        />
+
+        <section v-if="selectedApproval" class="rounded-xl border border-gray-200 bg-gray-50/70 p-4 dark:border-dark-700 dark:bg-dark-900/40">
+          <div class="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h4 class="font-semibold text-gray-900 dark:text-white">
+                {{ approvalActionLabel(selectedApproval.action_type) }} · {{ selectedApproval.account_name || `#${selectedApproval.account_id}` }}
+              </h4>
+              <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">{{ selectedApproval.reason }}</p>
+            </div>
+            <StatusBadge :status="approvalStatusBadge(selectedApproval.status)" :label="approvalStatusLabel(selectedApproval.status)" />
+          </div>
+
+          <div v-if="approvalDiffRows.length" class="mt-4 overflow-hidden rounded-lg border border-gray-200 dark:border-dark-700">
+            <div class="hidden grid-cols-[minmax(8rem,0.8fr)_minmax(0,1fr)_minmax(0,1fr)] bg-gray-100 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:bg-dark-800 dark:text-gray-400 sm:grid">
+              <span>{{ t('admin.sharedPool.approval.field') }}</span>
+              <span>{{ t('admin.sharedPool.approval.before') }}</span>
+              <span>{{ t('admin.sharedPool.approval.after') }}</span>
+            </div>
+            <div
+              v-for="row in approvalDiffRows"
+              :key="row.field"
+              class="grid grid-cols-1 gap-2 border-t border-gray-200 px-3 py-3 text-sm dark:border-dark-700 sm:grid-cols-[minmax(8rem,0.8fr)_minmax(0,1fr)_minmax(0,1fr)] sm:gap-3 sm:py-2"
+            >
+              <span class="break-all font-mono text-xs text-gray-600 dark:text-gray-300"><span class="font-sans font-semibold sm:hidden">{{ t('admin.sharedPool.approval.field') }}: </span>{{ row.field }}</span>
+              <span class="break-all whitespace-pre-wrap text-gray-500 dark:text-gray-400"><span class="font-semibold sm:hidden">{{ t('admin.sharedPool.approval.before') }}: </span>{{ row.before }}</span>
+              <span class="break-all whitespace-pre-wrap text-gray-900 dark:text-white"><span class="font-semibold sm:hidden">{{ t('admin.sharedPool.approval.after') }}: </span>{{ row.after }}</span>
+            </div>
+          </div>
+
+          <div v-if="canReviewApproval(selectedApproval)" class="mt-4 space-y-3 border-t border-gray-200 pt-4 dark:border-dark-700">
+            <label for="approval-decision-reason" class="block text-sm font-medium text-gray-700 dark:text-gray-300">
+              {{ t('admin.sharedPool.approval.decisionReason') }}
+            </label>
+            <textarea
+              id="approval-decision-reason"
+              v-model.trim="approvalDecisionReason"
+              class="input min-h-24 w-full resize-y"
+              :placeholder="t('admin.sharedPool.approval.decisionReasonHint')"
+            ></textarea>
+            <div class="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+              <button type="button" class="btn btn-danger min-h-11 px-4" :disabled="approvalActionID !== null || !approvalDecisionReason.trim()" @click="decideApproval('reject')">
+                <LoadingSpinner v-if="approvalDecisionInProgress === 'reject'" size="sm" />
+                {{ t('admin.sharedPool.approval.reject') }}
+              </button>
+              <button type="button" class="btn btn-primary min-h-11 px-4" :disabled="approvalActionID !== null" @click="decideApproval('approve')">
+                <LoadingSpinner v-if="approvalDecisionInProgress === 'approve'" size="sm" />
+                {{ t('admin.sharedPool.approval.approve') }}
+              </button>
+            </div>
+          </div>
+          <p v-else-if="normalizeApprovalStatus(selectedApproval.status) === 'pending'" class="mt-4 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-700 dark:bg-amber-900/20 dark:text-amber-300">
+            {{ t('admin.sharedPool.approval.selfReviewBlocked') }}
+          </p>
+        </section>
+      </div>
+    </BaseDialog>
+
+    <BaseDialog
+      :show="showCredentialDialog"
+      :title="t('admin.sharedPool.approval.credentialTitle', { name: credentialAccount?.name || '' })"
+      width="normal"
+      @close="closeCredentialDialog"
+    >
+      <form id="credential-access-form" class="space-y-4" @submit.prevent="submitCredentialRequest">
+        <template v-if="credentialReveal">
+          <div class="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-700/40 dark:bg-amber-900/20 dark:text-amber-200">
+            {{ t('admin.sharedPool.approval.revealWarning') }}
+          </div>
+          <pre class="max-h-80 overflow-auto rounded-lg bg-gray-950 p-4 text-xs leading-5 text-gray-100">{{ credentialRevealJSON }}</pre>
+        </template>
+        <template v-else>
+          <p class="text-sm text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.approval.credentialHint') }}</p>
+          <label for="credential-purpose" class="block text-sm font-medium text-gray-700 dark:text-gray-300">
+            {{ t('admin.sharedPool.approval.purpose') }}
+          </label>
+          <textarea
+            id="credential-purpose"
+            v-model.trim="credentialPurpose"
+            class="input min-h-24 w-full resize-y"
+            :placeholder="t('admin.sharedPool.approval.purposeHint')"
+          ></textarea>
+        </template>
+      </form>
+      <template #footer>
+        <FormDialogActions
+          v-if="!credentialReveal"
+          form="credential-access-form"
+          :submitting="credentialSubmitting"
+          :disabled="!credentialPurpose.trim()"
+          :submit-text="authStore.user?.is_primary_admin ? t('admin.sharedPool.approval.verifyAndReveal') : t('admin.sharedPool.approval.submit')"
+          :cancel-text="t('common.close')"
+          @cancel="closeCredentialDialog"
+        />
+        <div v-else class="flex justify-end">
+          <button type="button" class="btn btn-secondary min-h-11 px-4" @click="closeCredentialDialog">{{ t('common.close') }}</button>
+        </div>
+      </template>
+    </BaseDialog>
   </component>
 </template>
 
@@ -485,9 +702,13 @@ import TotpStepUpDialog from '@/components/auth/TotpStepUpDialog.vue'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import TablePageLayout from '@/components/layout/TablePageLayout.vue'
 import DataTable from '@/components/common/DataTable.vue'
+import BaseDialog from '@/components/common/BaseDialog.vue'
 import HelpTooltip from '@/components/common/HelpTooltip.vue'
 import Pagination from '@/components/common/Pagination.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
+import StatusBadge from '@/components/common/StatusBadge.vue'
+import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
+import FormDialogActions from '@/components/common/FormDialogActions.vue'
 import { CreateAccountModal, EditAccountModal, BulkEditAccountModal, SyncFromCrsModal, TempUnschedStatusModal } from '@/components/account'
 import AccountTableActions from '@/components/admin/account/AccountTableActions.vue'
 import AccountTableFilters from '@/components/admin/account/AccountTableFilters.vue'
@@ -516,10 +737,19 @@ import { extractApiErrorMessage } from '@/utils/apiError'
 import { sanitizeUrl } from '@/utils/url'
 import { getFloatingPanelPosition } from '@/utils/floatingPanel'
 import type { Account, AccountPlatform, AccountSchedulerGroupScore, AccountType, Proxy as AccountProxy, AdminGroup, WindowStats, ClaudeModel, UpstreamBillingProbeSnapshot } from '@/types'
+import type { PoolApproval, PoolApprovalStatus, PoolCredentialReveal, SharedPoolAccountCost } from '@/api/admin/sharedPool'
 
-const { embedded = false } = defineProps<{ embedded?: boolean }>()
+const props = withDefaults(defineProps<{
+  embedded?: boolean
+  poolRecords?: Record<number, SharedPoolAccountCost>
+}>(), { embedded: false, poolRecords: () => ({}) })
+const embedded = props.embedded
 const emit = defineEmits<{
   'pool-record': [account: Account]
+  'pool-create-request': []
+  'pool-import-request': []
+  'pool-created': [accounts: Array<Pick<Account, 'id' | 'name'>>]
+  'pool-imported': [accounts: Array<{ id: number; name: string }>]
 }>()
 
 const { t } = useI18n()
@@ -585,6 +815,23 @@ const showTest = ref(false)
 const showStats = ref(false)
 const showErrorPassthrough = ref(false)
 const showTLSFingerprintProfiles = ref(false)
+const showApprovalCenter = ref(false)
+const approvalsLoading = ref(false)
+const approvals = ref<PoolApproval[]>([])
+const approvalStatusFilter = ref<PoolApprovalStatus | ''>('pending')
+const approvalPagination = reactive({ page: 1, page_size: 20, total: 0 })
+const pendingApprovalCount = ref(0)
+const selectedApproval = ref<PoolApproval | null>(null)
+const approvalDecisionReason = ref('')
+const approvalActionID = ref<number | null>(null)
+const approvalDecisionInProgress = ref<'approve' | 'reject' | null>(null)
+const showCredentialDialog = ref(false)
+const credentialAccount = ref<{ id: number; name: string } | null>(null)
+const credentialPurpose = ref('')
+const credentialReveal = ref<PoolCredentialReveal | null>(null)
+const credentialSubmitting = ref(false)
+const credentialStepUp = useStepUp()
+let credentialClearTimer: ReturnType<typeof setTimeout> | null = null
 const edAcc = ref<Account | null>(null)
 const tempUnschedAcc = ref<Account | null>(null)
 const deletingAcc = ref<Account | null>(null)
@@ -603,6 +850,71 @@ const upstreamBillingProbeGloballyEnabled = ref<boolean | undefined>(undefined)
 const upstreamBillingNow = ref(Date.now())
 let lastUpstreamBillingSortRefreshMinute = -1
 useIntervalFn(() => { upstreamBillingNow.value = Date.now() }, 60_000)
+
+const approvalColumns = computed(() => [
+  { key: 'action_type', label: t('admin.sharedPool.approval.type') },
+  { key: 'account_name', label: t('admin.sharedPool.columns.account') },
+  { key: 'requested_by_email', label: t('admin.sharedPool.approval.requester') },
+  { key: 'status', label: t('admin.sharedPool.approval.status') },
+  { key: 'requested_at', label: t('admin.sharedPool.approval.requestedAt') },
+  { key: 'actions', label: t('admin.sharedPool.columns.actions'), class: 'text-right' }
+])
+
+const credentialRevealJSON = computed(() => JSON.stringify(credentialReveal.value?.credentials ?? {}, null, 2))
+
+const SENSITIVE_APPROVAL_FIELD = /(credential|token|secret|password|api[_-]?key|cookie|authorization)/i
+const formatApprovalValue = (value: unknown, field: string): string => {
+  if (value === undefined || value === null || value === '') return '-'
+  if (field.endsWith('_keys') && Array.isArray(value)) return value.join(', ') || '-'
+  if (SENSITIVE_APPROVAL_FIELD.test(field)) return '••••••'
+  if (typeof value !== 'object') return String(value)
+  return JSON.stringify(value, (key, nested) => SENSITIVE_APPROVAL_FIELD.test(key) ? '••••••' : nested, 2)
+}
+
+const approvalDiffRows = computed(() => {
+  const changes = selectedApproval.value?.changes
+  if (!changes || typeof changes !== 'object') return []
+
+  const rows: Array<{ field: string; before: string; after: string }> = []
+  const before = changes.before
+  const after = changes.after
+  if (before && after && typeof before === 'object' && typeof after === 'object') {
+    const beforeRecord = before as Record<string, unknown>
+    const afterRecord = after as Record<string, unknown>
+    for (const field of new Set([...Object.keys(beforeRecord), ...Object.keys(afterRecord)])) {
+      rows.push({
+        field,
+        before: formatApprovalValue(beforeRecord[field], field),
+        after: formatApprovalValue(afterRecord[field], field)
+      })
+    }
+    return rows
+  }
+
+  for (const [section, rawSection] of Object.entries(changes)) {
+    if (rawSection && typeof rawSection === 'object' && !Array.isArray(rawSection)) {
+      for (const [field, rawChange] of Object.entries(rawSection as Record<string, unknown>)) {
+        const path = `${section}.${field}`
+        if (rawChange && typeof rawChange === 'object' && !Array.isArray(rawChange)) {
+          const change = rawChange as Record<string, unknown>
+          const hasPair = 'before' in change || 'after' in change || 'old' in change || 'new' in change
+          if (hasPair) {
+            rows.push({
+              field: path,
+              before: formatApprovalValue(change.before ?? change.old, path),
+              after: formatApprovalValue(change.after ?? change.new, path)
+            })
+            continue
+          }
+        }
+        rows.push({ field: path, before: '-', after: formatApprovalValue(rawChange, path) })
+      }
+      continue
+    }
+    rows.push({ field: section, before: '-', after: formatApprovalValue(rawSection, section) })
+  }
+  return rows
+})
 
 // Account tools dropdown
 const showAccountToolsDropdown = ref(false)
@@ -992,13 +1304,11 @@ const reload = async () => {
   await refreshTodayStatsBatch()
 }
 
-const handleAccountCreated = async (account?: Account) => {
+const handleAccountCreated = async (accounts: Array<Pick<Account, 'id' | 'name'>> = []) => {
   await reload()
-  if (account) {
-    emit('pool-record', account)
-    return
+  if (embedded) {
+    emit('pool-created', accounts)
   }
-  appStore.showWarning(t('admin.sharedPool.intake.pendingNotice'))
 }
 
 const refreshUpstreamBillingSortedList = async (force = false) => {
@@ -1238,8 +1548,24 @@ const openSyncFromCrs = () => {
 
 const openImportData = () => {
   closeAccountToolsDropdown()
+  if (embedded) {
+    emit('pool-import-request')
+    return
+  }
   showImportData.value = true
 }
+
+const handleCreateRequest = () => {
+  if (embedded) {
+    emit('pool-create-request')
+    return
+  }
+  showCreate.value = true
+}
+
+const continueCreateWithPoolDraft = () => { showCreate.value = true }
+const continueImportWithPoolDraft = () => { showImportData.value = true }
+defineExpose({ continueCreateWithPoolDraft, continueImportWithPoolDraft })
 
 const openExportDataDialogFromMenu = () => {
   closeAccountToolsDropdown()
@@ -1426,6 +1752,7 @@ const allColumns = computed(() => {
     c.push({ key: 'groups', label: t('admin.accounts.columns.groups'), sortable: false })
   }
   c.push({ key: 'usage', label: t('admin.accounts.columns.usageWindows'), sortable: false })
+  c.push({ key: 'pool_record', label: t('admin.sharedPool.actions.poolRecord'), sortable: false })
   c.push(
     { key: 'proxy', label: t('admin.accounts.columns.proxy'), sortable: false },
     { key: 'priority', label: t('admin.accounts.columns.priority'), sortable: true },
@@ -1454,6 +1781,217 @@ const cols = computed(() =>
 )
 
 const handleEdit = (a: Account) => { edAcc.value = a; showEdit.value = true }
+const poolRecordFor = (accountID: number) => props.poolRecords[accountID]
+const formatPoolPercent = (value: number) => `${Number(value || 0).toFixed(1)}%`
+
+const normalizeApprovalStatus = (status: string) => {
+  const normalized = status.toLowerCase()
+  return normalized === 'consumed' ? 'revealed' : normalized
+}
+
+const approvalActionLabel = (action: PoolApproval['action_type']) => t(
+  action === 'VIEW_CREDENTIAL'
+    ? 'admin.sharedPool.approval.viewCredential'
+    : 'admin.sharedPool.approval.updateAccount'
+)
+
+const approvalStatusLabel = (status: string) => {
+  const normalized = normalizeApprovalStatus(status)
+  const key = ['pending', 'approved', 'rejected', 'expired', 'consumed'].includes(normalized)
+    ? normalized
+    : 'pending'
+  return t(`admin.sharedPool.approval.${key}`)
+}
+
+const approvalStatusBadge = (status: string) => {
+  switch (normalizeApprovalStatus(status)) {
+    case 'approved':
+    case 'consumed': return 'success'
+    case 'rejected':
+    case 'expired': return 'danger'
+    default: return 'warning'
+  }
+}
+
+const canReviewApproval = (approval: PoolApproval) => (
+  normalizeApprovalStatus(approval.status) === 'pending' &&
+  approval.requested_by_user_id !== authStore.user?.id
+)
+
+const canRevealApproval = (approval: PoolApproval) => (
+  approval.action_type === 'VIEW_CREDENTIAL' &&
+  normalizeApprovalStatus(approval.status) === 'approved' &&
+  approval.requested_by_user_id === authStore.user?.id &&
+  !approval.revealed_at
+)
+
+const loadPendingApprovalCount = async () => {
+  try {
+    const result = await adminAPI.sharedPool.listApprovals({ status: 'pending', page: 1, page_size: 1 })
+    pendingApprovalCount.value = result.total
+  } catch {
+    pendingApprovalCount.value = 0
+  }
+}
+
+const loadApprovals = async () => {
+  approvalsLoading.value = true
+  try {
+    const result = await adminAPI.sharedPool.listApprovals({
+      status: approvalStatusFilter.value || undefined,
+      page: approvalPagination.page,
+      page_size: approvalPagination.page_size
+    })
+    approvals.value = result.items
+    approvalPagination.total = result.total
+    if (selectedApproval.value) {
+      selectedApproval.value = result.items.find(item => item.id === selectedApproval.value?.id) ?? null
+    }
+    await loadPendingApprovalCount()
+  } catch (error) {
+    appStore.showError(extractApiErrorMessage(error, t('admin.sharedPool.approval.loadFailed')))
+  } finally {
+    approvalsLoading.value = false
+  }
+}
+
+const openApprovalCenter = () => {
+  showApprovalCenter.value = true
+  selectedApproval.value = null
+  approvalDecisionReason.value = ''
+  void loadApprovals()
+}
+
+const selectApproval = (approval: PoolApproval) => {
+  selectedApproval.value = approval
+  approvalDecisionReason.value = ''
+}
+
+const changeApprovalFilter = () => {
+  approvalPagination.page = 1
+  selectedApproval.value = null
+  approvalDecisionReason.value = ''
+  void loadApprovals()
+}
+
+const handleApprovalPageChange = (page: number) => {
+  approvalPagination.page = page
+  selectedApproval.value = null
+  approvalDecisionReason.value = ''
+  void loadApprovals()
+}
+
+const closeApprovalCenter = () => {
+  if (approvalActionID.value !== null) return
+  showApprovalCenter.value = false
+  selectedApproval.value = null
+  approvalDecisionReason.value = ''
+}
+
+const decideApproval = async (decision: 'approve' | 'reject') => {
+  const approval = selectedApproval.value
+  if (!approval || !canReviewApproval(approval)) return
+  if (decision === 'reject' && !approvalDecisionReason.value.trim()) {
+    appStore.showError(t('admin.sharedPool.approval.rejectReasonRequired'))
+    return
+  }
+
+  approvalActionID.value = approval.id
+  approvalDecisionInProgress.value = decision
+  try {
+    const updated = decision === 'approve'
+      ? await adminAPI.sharedPool.approveApproval(approval.id, approvalDecisionReason.value)
+      : await adminAPI.sharedPool.rejectApproval(approval.id, approvalDecisionReason.value)
+    appStore.showSuccess(t(`admin.sharedPool.approval.${decision}Success`))
+    approvalDecisionReason.value = ''
+    selectedApproval.value = updated
+    await loadApprovals()
+  } catch (error) {
+    appStore.showError(extractApiErrorMessage(error, t('admin.sharedPool.approval.decisionFailed')))
+  } finally {
+    approvalActionID.value = null
+    approvalDecisionInProgress.value = null
+  }
+}
+
+const openCredentialRequest = (account: Account) => {
+  credentialAccount.value = { id: account.id, name: account.name }
+  credentialPurpose.value = ''
+  credentialReveal.value = null
+  showCredentialDialog.value = true
+}
+
+const closeCredentialDialog = () => {
+  if (credentialSubmitting.value) return
+  if (credentialClearTimer) {
+    clearTimeout(credentialClearTimer)
+    credentialClearTimer = null
+  }
+  showCredentialDialog.value = false
+  credentialAccount.value = null
+  credentialPurpose.value = ''
+  credentialReveal.value = null
+}
+
+const revealCredential = async (approval: PoolApproval) => {
+  approvalActionID.value = approval.id
+  credentialSubmitting.value = true
+  try {
+    const revealed = await credentialStepUp.run(() => adminAPI.sharedPool.revealApproval(approval.id))
+    credentialAccount.value = { id: approval.account_id, name: approval.account_name || `#${approval.account_id}` }
+    credentialPurpose.value = approval.reason
+    credentialReveal.value = revealed
+    showApprovalCenter.value = false
+    selectedApproval.value = null
+    showCredentialDialog.value = true
+    if (credentialClearTimer) clearTimeout(credentialClearTimer)
+    credentialClearTimer = setTimeout(() => {
+      credentialClearTimer = null
+      closeCredentialDialog()
+    }, 60_000)
+    await loadApprovals()
+  } catch (error) {
+    if (!isStepUpCancelled(error)) {
+      appStore.showError(extractApiErrorMessage(error, t('admin.sharedPool.approval.revealFailed')))
+    }
+  } finally {
+    credentialSubmitting.value = false
+    approvalActionID.value = null
+  }
+}
+
+const submitCredentialRequest = async () => {
+  const account = credentialAccount.value
+  const purpose = credentialPurpose.value.trim()
+  if (!account || !purpose) return
+
+  credentialSubmitting.value = true
+  try {
+    const approval = await adminAPI.sharedPool.createApproval({
+      action_type: 'VIEW_CREDENTIAL',
+      account_id: account.id,
+      reason: purpose
+    })
+    await loadPendingApprovalCount()
+    if (normalizeApprovalStatus(approval.status) === 'approved') {
+      credentialSubmitting.value = false
+      await revealCredential(approval)
+      return
+    }
+    appStore.showSuccess(t('admin.sharedPool.approval.credentialSubmitted'))
+    credentialSubmitting.value = false
+    closeCredentialDialog()
+  } catch (error) {
+    appStore.showError(extractApiErrorMessage(error, t('admin.sharedPool.approval.submitFailed')))
+  } finally {
+    credentialSubmitting.value = false
+  }
+}
+
+const handleApprovalSubmitted = () => {
+  void loadPendingApprovalCount()
+}
+
 const openMenu = (a: Account, e: MouseEvent) => {
   menu.acc = a
 
@@ -1729,7 +2267,11 @@ const handleBulkUpdated = () => {
   clearSelection()
   reload()
 }
-const handleDataImported = () => { showImportData.value = false; reload() }
+const handleDataImported = (importedAccounts: Array<{ id: number; name: string }>) => {
+  showImportData.value = false
+  void reload()
+  if (embedded) emit('pool-imported', importedAccounts)
+}
 const ACCOUNT_UNGROUPED_GROUP_QUERY_VALUE = 'ungrouped'
 const ACCOUNT_PRIVACY_MODE_UNSET_QUERY_VALUE = '__unset__'
 const buildAccountQueryFilters = () => ({
@@ -2113,6 +2655,7 @@ const handleClickOutside = (event: MouseEvent) => {
 onMounted(async () => {
   load()
   loadUpstreamBillingProbeGlobalState()
+  void loadPendingApprovalCount()
   try {
     const [p, g] = await Promise.all([adminAPI.proxies.getAll(), adminAPI.groups.getAll()])
     proxies.value = p
@@ -2133,6 +2676,8 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  if (credentialClearTimer) clearTimeout(credentialClearTimer)
+  credentialReveal.value = null
   window.removeEventListener('scroll', handleScroll, true)
   window.removeEventListener('resize', handleViewportResize)
   document.removeEventListener('click', handleClickOutside)

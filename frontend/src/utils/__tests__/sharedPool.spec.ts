@@ -3,6 +3,7 @@ import {
   accountStatusPresentation,
   buildPoolPeriodParams,
   formatPoolMoney,
+  latestPoolRecords,
   resolvePoolPeriod,
   settlementStatusPresentation
 } from '../sharedPool'
@@ -36,5 +37,28 @@ describe('shared pool presentation helpers', () => {
       start: '2026-07-01',
       end: '2026-07-18'
     })
+  })
+
+  it('keeps the newest pool record for each account', () => {
+    const base = {
+      account_id: 7,
+      account_name: 'account-7',
+      provider_identity: 'identity',
+      contributor_name: 'contributor',
+      uploader_name: 'uploader',
+      purchase_source_name: 'source',
+      purchase_cost: 20,
+      currency: 'CNY',
+      service_start: '2026-07-01',
+      service_end: '2026-08-01',
+      status: 'active' as const,
+      usage_value: 10,
+      roi_rate: 50,
+      remaining_cost: 10,
+      banned_loss: 0
+    }
+    const records = latestPoolRecords([{ ...base, id: 2 }, { ...base, id: 9, purchase_cost: 30 }])
+
+    expect(records[7]).toMatchObject({ id: 9, purchase_cost: 30 })
   })
 })

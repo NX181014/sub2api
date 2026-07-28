@@ -147,7 +147,7 @@ async function openCodexImportStep(toggleClicks = 0) {
 
 describe('CreateAccountModal OpenAI long-context billing', () => {
   beforeEach(() => {
-    createAccountMock.mockReset().mockResolvedValue({ id: 42, platform: 'openai', type: 'apikey' })
+    createAccountMock.mockReset().mockResolvedValue({ id: 42, name: 'account-42', platform: 'openai', type: 'apikey' })
     probeUpstreamBillingMock.mockReset().mockResolvedValue({})
     importCodexSessionMock.mockReset().mockResolvedValue({
       created: 1,
@@ -161,10 +161,11 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
   })
 
   it('sends false explicitly for normal OpenAI account creation by default', async () => {
-    await submitApiKeyAccount('openai')
+    const wrapper = await submitApiKeyAccount('openai')
 
     expect(createAccountMock).toHaveBeenCalledTimes(1)
     expect(createAccountMock.mock.calls[0]?.[0]?.extra?.openai_long_context_billing_enabled).toBe(false)
+    expect(wrapper.emitted('created')).toEqual([[[expect.objectContaining({ id: 42, name: 'account-42' })]]])
   })
 
   it('enables upstream billing probes by default for new OpenAI API key accounts', async () => {

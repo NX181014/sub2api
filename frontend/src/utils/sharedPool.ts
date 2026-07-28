@@ -1,5 +1,11 @@
 import { formatPaymentAmount } from '@/components/payment/currency'
-import type { PoolAccountStatus, PoolPeriodParams, PoolPeriodType, PoolSettlementStatus } from '@/api/admin/sharedPool'
+import type {
+  PoolAccountStatus,
+  PoolPeriodParams,
+  PoolPeriodType,
+  PoolSettlementStatus,
+  SharedPoolAccountCost
+} from '@/api/admin/sharedPool'
 
 const formatLocalDate = (date: Date): string => {
   const year = date.getFullYear()
@@ -55,4 +61,11 @@ export function settlementStatusPresentation(status: PoolSettlementStatus): { ba
     paid: { badge: 'active', key: 'paid' }
   }
   return states[status] ?? states.draft
+}
+
+export function latestPoolRecords(records: SharedPoolAccountCost[]): Record<number, SharedPoolAccountCost> {
+  return records.reduce<Record<number, SharedPoolAccountCost>>((latest, record) => {
+    if (!latest[record.account_id] || latest[record.account_id].id < record.id) latest[record.account_id] = record
+    return latest
+  }, {})
 }

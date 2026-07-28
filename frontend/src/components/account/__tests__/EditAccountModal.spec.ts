@@ -1,11 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { defineComponent } from 'vue'
-import { mount } from '@vue/test-utils'
+import { flushPromises, mount } from '@vue/test-utils'
 
-const { updateAccountMock, checkMixedChannelRiskMock, authIsSimpleMode } = vi.hoisted(() => ({
+const { updateAccountMock, checkMixedChannelRiskMock, createApprovalMock, authIsSimpleMode, authUser } = vi.hoisted(() => ({
   updateAccountMock: vi.fn(),
   checkMixedChannelRiskMock: vi.fn(),
-  authIsSimpleMode: { value: true }
+  createApprovalMock: vi.fn(),
+  authIsSimpleMode: { value: true },
+  authUser: { value: { id: 1, is_primary_admin: true } as { id: number; is_primary_admin: boolean } }
 }))
 
 vi.mock('@/stores/app', () => ({
@@ -20,7 +22,8 @@ vi.mock('@/stores/auth', () => ({
   useAuthStore: () => ({
     get isSimpleMode() {
       return authIsSimpleMode.value
-    }
+    },
+    get user() { return authUser.value }
   })
 }))
 
@@ -30,6 +33,7 @@ vi.mock('@/api/admin', () => ({
       update: updateAccountMock,
       checkMixedChannelRisk: checkMixedChannelRiskMock
     },
+    sharedPool: { createApproval: createApprovalMock },
     settings: {
       getWebSearchEmulationConfig: vi.fn().mockResolvedValue({ enabled: false, providers: [] }),
       getSettings: vi.fn().mockResolvedValue({})
@@ -314,6 +318,8 @@ function mountModal(account = buildAccount()) {
 describe('EditAccountModal', () => {
   beforeEach(() => {
     authIsSimpleMode.value = true
+    authUser.value = { id: 1, is_primary_admin: true }
+    createApprovalMock.mockReset()
   })
 
   it('reopening the same account rehydrates the OpenAI whitelist from props', async () => {
@@ -1016,5 +1022,26 @@ describe('EditAccountModal', () => {
     expect(updateAccountMock.mock.calls[0]?.[1]?.credentials).not.toHaveProperty(
       'antigravity_project_id'
     )
+  })
+
+  it('submits a complete update approval instead of PUT for a regular administrator', async () => {
+    const account = buildAccount()
+    authUser.value = { id: 2, is_primary_admin: false }
+    updateAccountMock.mockReset()
+    createApprovalMock.mockResolvedValue({ id: 88, status: 'pending' })
+
+    const wrapper = mountModal(account)
+    expect(wrapper.get('[data-tour="account-form-submit"]').text()).toContain('admin.accounts.approval.submit')
+
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(updateAccountMock).not.toHaveBeenCalled()
+    expect(createApprovalMock).toHaveBeenCalledWith(expect.objectContaining({
+      action_type: 'UPDATE_ACCOUNT',
+      account_id: account.id,
+      payload: { account_update: expect.objectContaining({ name: account.name, status: account.status }) }
+    }))
+    expect(wrapper.emitted('submitted')).toHaveLength(1)
   })
 })

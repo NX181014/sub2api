@@ -78,12 +78,18 @@ type DataImportRequest struct {
 }
 
 type DataImportResult struct {
-	ProxyCreated   int               `json:"proxy_created"`
-	ProxyReused    int               `json:"proxy_reused"`
-	ProxyFailed    int               `json:"proxy_failed"`
-	AccountCreated int               `json:"account_created"`
-	AccountFailed  int               `json:"account_failed"`
-	Errors         []DataImportError `json:"errors,omitempty"`
+	ProxyCreated   int                   `json:"proxy_created"`
+	ProxyReused    int                   `json:"proxy_reused"`
+	ProxyFailed    int                   `json:"proxy_failed"`
+	AccountCreated int                   `json:"account_created"`
+	AccountFailed  int                   `json:"account_failed"`
+	Accounts       []DataImportedAccount `json:"accounts,omitempty"`
+	Errors         []DataImportError     `json:"errors,omitempty"`
+}
+
+type DataImportedAccount struct {
+	ID   int64  `json:"id"`
+	Name string `json:"name"`
 }
 
 type DataImportError struct {
@@ -98,6 +104,9 @@ func buildProxyKey(protocol, host string, port int, username, password string) s
 }
 
 func (h *AccountHandler) ExportData(c *gin.Context) {
+	if !h.requirePrimaryAdmin(c, "raw account credential export") {
+		return
+	}
 	ctx := c.Request.Context()
 
 	selectedIDs, err := parseAccountIDs(c)
@@ -462,6 +471,7 @@ func (h *AccountHandler) importData(ctx context.Context, req DataImportRequest) 
 		}
 		h.scheduleGrokImportProbe(created)
 		result.AccountCreated++
+		result.Accounts = append(result.Accounts, DataImportedAccount{ID: created.ID, Name: created.Name})
 	}
 
 	// 异步设置 Antigravity 隐私，避免大量导入时阻塞请求
