@@ -475,6 +475,7 @@ func (h *PoolHandler) CreateCost(c *gin.Context) {
 			FXRate: req.FXRate, CNYAmountMinor: req.CNYAmountMinor, ServiceStart: start, ServiceEnd: end, WarrantyEnd: warrantyEnd,
 			PaidAt: paidAt, OrderNo: req.OrderNo, PurchaseURL: req.PurchaseURL, Note: req.Note,
 			SupersedesID: req.SupersedesID, RelatedAccountID: req.RelatedAccountID, CreatedByUserID: actorID,
+			OperationKey: strings.TrimSpace(c.GetHeader("Idempotency-Key")),
 		})
 	})
 }

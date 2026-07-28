@@ -216,12 +216,14 @@ LIMIT 1`, input.AccountID, input.ServiceStart, input.ServiceEnd).Scan(&conflictI
 INSERT INTO account_cost_entries(
     account_id, payer_user_id, purchase_source_id, entry_type, currency,
     original_amount, cny_amount_minor, fx_rate, service_start, service_end, warranty_end,
-    paid_at, order_no, purchase_url, note, supersedes_id, related_account_id, created_by_user_id)
-VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
+    paid_at, order_no, purchase_url, note, supersedes_id, related_account_id, created_by_user_id, operation_key)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,NULLIF(BTRIM($19),''))
+ON CONFLICT (created_by_user_id, operation_key) WHERE operation_key IS NOT NULL
+DO UPDATE SET operation_key = EXCLUDED.operation_key
 RETURNING id`, input.AccountID, input.PayerUserID, input.PurchaseSourceID, input.EntryType,
 		input.Currency, input.OriginalAmount, input.CNYAmountMinor, input.FXRate,
 		input.ServiceStart, input.ServiceEnd, input.WarrantyEnd, input.PaidAt, input.OrderNo, input.PurchaseURL,
-		input.Note, input.SupersedesID, input.RelatedAccountID, input.CreatedByUserID)
+		input.Note, input.SupersedesID, input.RelatedAccountID, input.CreatedByUserID, input.OperationKey)
 	var id int64
 	if err := row.Scan(&id); err != nil {
 		return nil, fmt.Errorf("create account cost: %w", err)

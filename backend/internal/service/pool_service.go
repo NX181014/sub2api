@@ -103,6 +103,7 @@ type CreateAccountCostInput struct {
 	SupersedesID     *int64
 	RelatedAccountID *int64
 	CreatedByUserID  int64
+	OperationKey     string
 }
 
 type AccountLifecycleEvent struct {
