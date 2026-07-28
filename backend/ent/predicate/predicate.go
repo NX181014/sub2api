@@ -12,8 +12,14 @@ type APIKey func(*sql.Selector)
 // Account is the predicate function for account builders.
 type Account func(*sql.Selector)
 
+// AccountCostEntry is the predicate function for accountcostentry builders.
+type AccountCostEntry func(*sql.Selector)
+
 // AccountGroup is the predicate function for accountgroup builders.
 type AccountGroup func(*sql.Selector)
+
+// AccountLifecycleEvent is the predicate function for accountlifecycleevent builders.
+type AccountLifecycleEvent func(*sql.Selector)
 
 // Announcement is the predicate function for announcement builders.
 type Announcement func(*sql.Selector)
@@ -75,6 +81,12 @@ type PaymentProviderInstance func(*sql.Selector)
 // PendingAuthSession is the predicate function for pendingauthsession builders.
 type PendingAuthSession func(*sql.Selector)
 
+// PoolSettlement is the predicate function for poolsettlement builders.
+type PoolSettlement func(*sql.Selector)
+
+// PoolSettlementLine is the predicate function for poolsettlementline builders.
+type PoolSettlementLine func(*sql.Selector)
+
 // PromoCode is the predicate function for promocode builders.
 type PromoCode func(*sql.Selector)
 
@@ -83,6 +95,9 @@ type PromoCodeUsage func(*sql.Selector)
 
 // Proxy is the predicate function for proxy builders.
 type Proxy func(*sql.Selector)
+
+// PurchaseSource is the predicate function for purchasesource builders.
+type PurchaseSource func(*sql.Selector)
 
 // RedeemCode is the predicate function for redeemcode builders.
 type RedeemCode func(*sql.Selector)
@@ -122,3 +137,6 @@ type UserPlatformQuota func(*sql.Selector)
 
 // UserSubscription is the predicate function for usersubscription builders.
 type UserSubscription func(*sql.Selector)
+
+// ValuationFXRate is the predicate function for valuationfxrate builders.
+type ValuationFXRate func(*sql.Selector)

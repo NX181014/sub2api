@@ -6,7 +6,9 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/ent/account"
+	"github.com/Wei-Shaw/sub2api/ent/accountcostentry"
 	"github.com/Wei-Shaw/sub2api/ent/accountgroup"
+	"github.com/Wei-Shaw/sub2api/ent/accountlifecycleevent"
 	"github.com/Wei-Shaw/sub2api/ent/announcement"
 	"github.com/Wei-Shaw/sub2api/ent/announcementread"
 	"github.com/Wei-Shaw/sub2api/ent/apikey"
@@ -28,9 +30,12 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/paymentorder"
 	"github.com/Wei-Shaw/sub2api/ent/paymentproviderinstance"
 	"github.com/Wei-Shaw/sub2api/ent/pendingauthsession"
+	"github.com/Wei-Shaw/sub2api/ent/poolsettlement"
+	"github.com/Wei-Shaw/sub2api/ent/poolsettlementline"
 	"github.com/Wei-Shaw/sub2api/ent/promocode"
 	"github.com/Wei-Shaw/sub2api/ent/promocodeusage"
 	"github.com/Wei-Shaw/sub2api/ent/proxy"
+	"github.com/Wei-Shaw/sub2api/ent/purchasesource"
 	"github.com/Wei-Shaw/sub2api/ent/redeemcode"
 	"github.com/Wei-Shaw/sub2api/ent/schema"
 	"github.com/Wei-Shaw/sub2api/ent/securitysecret"
@@ -45,6 +50,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/userattributevalue"
 	"github.com/Wei-Shaw/sub2api/ent/userplatformquota"
 	"github.com/Wei-Shaw/sub2api/ent/usersubscription"
+	"github.com/Wei-Shaw/sub2api/ent/valuationfxrate"
 	"github.com/Wei-Shaw/sub2api/internal/domain"
 )
 
@@ -182,8 +188,16 @@ func init() {
 			return nil
 		}
 	}()
+	// accountDescProviderIdentity is the schema descriptor for provider_identity field.
+	accountDescProviderIdentity := accountFields[2].Descriptor()
+	// account.ProviderIdentityValidator is a validator for the "provider_identity" field. It is called by the builders before save.
+	account.ProviderIdentityValidator = accountDescProviderIdentity.Validators[0].(func(string) error)
+	// accountDescCostSharingEnabled is the schema descriptor for cost_sharing_enabled field.
+	accountDescCostSharingEnabled := accountFields[5].Descriptor()
+	// account.DefaultCostSharingEnabled holds the default value on creation for the cost_sharing_enabled field.
+	account.DefaultCostSharingEnabled = accountDescCostSharingEnabled.Default.(bool)
 	// accountDescPlatform is the schema descriptor for platform field.
-	accountDescPlatform := accountFields[2].Descriptor()
+	accountDescPlatform := accountFields[6].Descriptor()
 	// account.PlatformValidator is a validator for the "platform" field. It is called by the builders before save.
 	account.PlatformValidator = func() func(string) error {
 		validators := accountDescPlatform.Validators
@@ -201,7 +215,7 @@ func init() {
 		}
 	}()
 	// accountDescType is the schema descriptor for type field.
-	accountDescType := accountFields[3].Descriptor()
+	accountDescType := accountFields[7].Descriptor()
 	// account.TypeValidator is a validator for the "type" field. It is called by the builders before save.
 	account.TypeValidator = func() func(string) error {
 		validators := accountDescType.Validators
@@ -219,43 +233,86 @@ func init() {
 		}
 	}()
 	// accountDescCredentials is the schema descriptor for credentials field.
-	accountDescCredentials := accountFields[4].Descriptor()
+	accountDescCredentials := accountFields[8].Descriptor()
 	// account.DefaultCredentials holds the default value on creation for the credentials field.
 	account.DefaultCredentials = accountDescCredentials.Default.(func() map[string]interface{})
 	// accountDescExtra is the schema descriptor for extra field.
-	accountDescExtra := accountFields[5].Descriptor()
+	accountDescExtra := accountFields[9].Descriptor()
 	// account.DefaultExtra holds the default value on creation for the extra field.
 	account.DefaultExtra = accountDescExtra.Default.(func() map[string]interface{})
 	// accountDescConcurrency is the schema descriptor for concurrency field.
-	accountDescConcurrency := accountFields[8].Descriptor()
+	accountDescConcurrency := accountFields[12].Descriptor()
 	// account.DefaultConcurrency holds the default value on creation for the concurrency field.
 	account.DefaultConcurrency = accountDescConcurrency.Default.(int)
 	// accountDescPriority is the schema descriptor for priority field.
-	accountDescPriority := accountFields[10].Descriptor()
+	accountDescPriority := accountFields[14].Descriptor()
 	// account.DefaultPriority holds the default value on creation for the priority field.
 	account.DefaultPriority = accountDescPriority.Default.(int)
 	// accountDescRateMultiplier is the schema descriptor for rate_multiplier field.
-	accountDescRateMultiplier := accountFields[11].Descriptor()
+	accountDescRateMultiplier := accountFields[15].Descriptor()
 	// account.DefaultRateMultiplier holds the default value on creation for the rate_multiplier field.
 	account.DefaultRateMultiplier = accountDescRateMultiplier.Default.(float64)
 	// accountDescStatus is the schema descriptor for status field.
-	accountDescStatus := accountFields[12].Descriptor()
+	accountDescStatus := accountFields[16].Descriptor()
 	// account.DefaultStatus holds the default value on creation for the status field.
 	account.DefaultStatus = accountDescStatus.Default.(string)
 	// account.StatusValidator is a validator for the "status" field. It is called by the builders before save.
 	account.StatusValidator = accountDescStatus.Validators[0].(func(string) error)
 	// accountDescAutoPauseOnExpired is the schema descriptor for auto_pause_on_expired field.
-	accountDescAutoPauseOnExpired := accountFields[16].Descriptor()
+	accountDescAutoPauseOnExpired := accountFields[20].Descriptor()
 	// account.DefaultAutoPauseOnExpired holds the default value on creation for the auto_pause_on_expired field.
 	account.DefaultAutoPauseOnExpired = accountDescAutoPauseOnExpired.Default.(bool)
 	// accountDescSchedulable is the schema descriptor for schedulable field.
-	accountDescSchedulable := accountFields[17].Descriptor()
+	accountDescSchedulable := accountFields[21].Descriptor()
 	// account.DefaultSchedulable holds the default value on creation for the schedulable field.
 	account.DefaultSchedulable = accountDescSchedulable.Default.(bool)
 	// accountDescSessionWindowStatus is the schema descriptor for session_window_status field.
-	accountDescSessionWindowStatus := accountFields[25].Descriptor()
+	accountDescSessionWindowStatus := accountFields[29].Descriptor()
 	// account.SessionWindowStatusValidator is a validator for the "session_window_status" field. It is called by the builders before save.
 	account.SessionWindowStatusValidator = accountDescSessionWindowStatus.Validators[0].(func(string) error)
+	accountcostentryMixin := schema.AccountCostEntry{}.Mixin()
+	accountcostentryMixinFields0 := accountcostentryMixin[0].Fields()
+	_ = accountcostentryMixinFields0
+	accountcostentryFields := schema.AccountCostEntry{}.Fields()
+	_ = accountcostentryFields
+	// accountcostentryDescCreatedAt is the schema descriptor for created_at field.
+	accountcostentryDescCreatedAt := accountcostentryMixinFields0[0].Descriptor()
+	// accountcostentry.DefaultCreatedAt holds the default value on creation for the created_at field.
+	accountcostentry.DefaultCreatedAt = accountcostentryDescCreatedAt.Default.(func() time.Time)
+	// accountcostentryDescUpdatedAt is the schema descriptor for updated_at field.
+	accountcostentryDescUpdatedAt := accountcostentryMixinFields0[1].Descriptor()
+	// accountcostentry.DefaultUpdatedAt holds the default value on creation for the updated_at field.
+	accountcostentry.DefaultUpdatedAt = accountcostentryDescUpdatedAt.Default.(func() time.Time)
+	// accountcostentry.UpdateDefaultUpdatedAt holds the default value on update for the updated_at field.
+	accountcostentry.UpdateDefaultUpdatedAt = accountcostentryDescUpdatedAt.UpdateDefault.(func() time.Time)
+	// accountcostentryDescEntryType is the schema descriptor for entry_type field.
+	accountcostentryDescEntryType := accountcostentryFields[3].Descriptor()
+	// accountcostentry.EntryTypeValidator is a validator for the "entry_type" field. It is called by the builders before save.
+	accountcostentry.EntryTypeValidator = accountcostentryDescEntryType.Validators[0].(func(string) error)
+	// accountcostentryDescCurrency is the schema descriptor for currency field.
+	accountcostentryDescCurrency := accountcostentryFields[4].Descriptor()
+	// accountcostentry.DefaultCurrency holds the default value on creation for the currency field.
+	accountcostentry.DefaultCurrency = accountcostentryDescCurrency.Default.(string)
+	// accountcostentry.CurrencyValidator is a validator for the "currency" field. It is called by the builders before save.
+	accountcostentry.CurrencyValidator = accountcostentryDescCurrency.Validators[0].(func(string) error)
+	// accountcostentryDescOriginalAmount is the schema descriptor for original_amount field.
+	accountcostentryDescOriginalAmount := accountcostentryFields[5].Descriptor()
+	// accountcostentry.OriginalAmountValidator is a validator for the "original_amount" field. It is called by the builders before save.
+	accountcostentry.OriginalAmountValidator = accountcostentryDescOriginalAmount.Validators[0].(func(string) error)
+	// accountcostentryDescFxRate is the schema descriptor for fx_rate field.
+	accountcostentryDescFxRate := accountcostentryFields[7].Descriptor()
+	// accountcostentry.DefaultFxRate holds the default value on creation for the fx_rate field.
+	accountcostentry.DefaultFxRate = accountcostentryDescFxRate.Default.(string)
+	// accountcostentry.FxRateValidator is a validator for the "fx_rate" field. It is called by the builders before save.
+	accountcostentry.FxRateValidator = accountcostentryDescFxRate.Validators[0].(func(string) error)
+	// accountcostentryDescOrderNo is the schema descriptor for order_no field.
+	accountcostentryDescOrderNo := accountcostentryFields[12].Descriptor()
+	// accountcostentry.OrderNoValidator is a validator for the "order_no" field. It is called by the builders before save.
+	accountcostentry.OrderNoValidator = accountcostentryDescOrderNo.Validators[0].(func(string) error)
+	// accountcostentryDescPurchaseURL is the schema descriptor for purchase_url field.
+	accountcostentryDescPurchaseURL := accountcostentryFields[13].Descriptor()
+	// accountcostentry.PurchaseURLValidator is a validator for the "purchase_url" field. It is called by the builders before save.
+	accountcostentry.PurchaseURLValidator = accountcostentryDescPurchaseURL.Validators[0].(func(string) error)
 	accountgroupFields := schema.AccountGroup{}.Fields()
 	_ = accountgroupFields
 	// accountgroupDescPriority is the schema descriptor for priority field.
@@ -266,6 +323,35 @@ func init() {
 	accountgroupDescCreatedAt := accountgroupFields[3].Descriptor()
 	// accountgroup.DefaultCreatedAt holds the default value on creation for the created_at field.
 	accountgroup.DefaultCreatedAt = accountgroupDescCreatedAt.Default.(func() time.Time)
+	accountlifecycleeventMixin := schema.AccountLifecycleEvent{}.Mixin()
+	accountlifecycleeventMixinFields0 := accountlifecycleeventMixin[0].Fields()
+	_ = accountlifecycleeventMixinFields0
+	accountlifecycleeventFields := schema.AccountLifecycleEvent{}.Fields()
+	_ = accountlifecycleeventFields
+	// accountlifecycleeventDescCreatedAt is the schema descriptor for created_at field.
+	accountlifecycleeventDescCreatedAt := accountlifecycleeventMixinFields0[0].Descriptor()
+	// accountlifecycleevent.DefaultCreatedAt holds the default value on creation for the created_at field.
+	accountlifecycleevent.DefaultCreatedAt = accountlifecycleeventDescCreatedAt.Default.(func() time.Time)
+	// accountlifecycleeventDescUpdatedAt is the schema descriptor for updated_at field.
+	accountlifecycleeventDescUpdatedAt := accountlifecycleeventMixinFields0[1].Descriptor()
+	// accountlifecycleevent.DefaultUpdatedAt holds the default value on creation for the updated_at field.
+	accountlifecycleevent.DefaultUpdatedAt = accountlifecycleeventDescUpdatedAt.Default.(func() time.Time)
+	// accountlifecycleevent.UpdateDefaultUpdatedAt holds the default value on update for the updated_at field.
+	accountlifecycleevent.UpdateDefaultUpdatedAt = accountlifecycleeventDescUpdatedAt.UpdateDefault.(func() time.Time)
+	// accountlifecycleeventDescEventType is the schema descriptor for event_type field.
+	accountlifecycleeventDescEventType := accountlifecycleeventFields[1].Descriptor()
+	// accountlifecycleevent.EventTypeValidator is a validator for the "event_type" field. It is called by the builders before save.
+	accountlifecycleevent.EventTypeValidator = accountlifecycleeventDescEventType.Validators[0].(func(string) error)
+	// accountlifecycleeventDescTransferredCostMinor is the schema descriptor for transferred_cost_minor field.
+	accountlifecycleeventDescTransferredCostMinor := accountlifecycleeventFields[5].Descriptor()
+	// accountlifecycleevent.DefaultTransferredCostMinor holds the default value on creation for the transferred_cost_minor field.
+	accountlifecycleevent.DefaultTransferredCostMinor = accountlifecycleeventDescTransferredCostMinor.Default.(int64)
+	// accountlifecycleeventDescSource is the schema descriptor for source field.
+	accountlifecycleeventDescSource := accountlifecycleeventFields[6].Descriptor()
+	// accountlifecycleevent.DefaultSource holds the default value on creation for the source field.
+	accountlifecycleevent.DefaultSource = accountlifecycleeventDescSource.Default.(string)
+	// accountlifecycleevent.SourceValidator is a validator for the "source" field. It is called by the builders before save.
+	accountlifecycleevent.SourceValidator = accountlifecycleeventDescSource.Validators[0].(func(string) error)
 	announcementFields := schema.Announcement{}.Fields()
 	_ = announcementFields
 	// announcementDescTitle is the schema descriptor for title field.
@@ -1524,6 +1610,130 @@ func init() {
 	pendingauthsessionDescCompletionCodeHash := pendingauthsessionFields[12].Descriptor()
 	// pendingauthsession.DefaultCompletionCodeHash holds the default value on creation for the completion_code_hash field.
 	pendingauthsession.DefaultCompletionCodeHash = pendingauthsessionDescCompletionCodeHash.Default.(string)
+	poolsettlementMixin := schema.PoolSettlement{}.Mixin()
+	poolsettlementMixinFields0 := poolsettlementMixin[0].Fields()
+	_ = poolsettlementMixinFields0
+	poolsettlementFields := schema.PoolSettlement{}.Fields()
+	_ = poolsettlementFields
+	// poolsettlementDescCreatedAt is the schema descriptor for created_at field.
+	poolsettlementDescCreatedAt := poolsettlementMixinFields0[0].Descriptor()
+	// poolsettlement.DefaultCreatedAt holds the default value on creation for the created_at field.
+	poolsettlement.DefaultCreatedAt = poolsettlementDescCreatedAt.Default.(func() time.Time)
+	// poolsettlementDescUpdatedAt is the schema descriptor for updated_at field.
+	poolsettlementDescUpdatedAt := poolsettlementMixinFields0[1].Descriptor()
+	// poolsettlement.DefaultUpdatedAt holds the default value on creation for the updated_at field.
+	poolsettlement.DefaultUpdatedAt = poolsettlementDescUpdatedAt.Default.(func() time.Time)
+	// poolsettlement.UpdateDefaultUpdatedAt holds the default value on update for the updated_at field.
+	poolsettlement.UpdateDefaultUpdatedAt = poolsettlementDescUpdatedAt.UpdateDefault.(func() time.Time)
+	// poolsettlementDescPeriodType is the schema descriptor for period_type field.
+	poolsettlementDescPeriodType := poolsettlementFields[0].Descriptor()
+	// poolsettlement.PeriodTypeValidator is a validator for the "period_type" field. It is called by the builders before save.
+	poolsettlement.PeriodTypeValidator = poolsettlementDescPeriodType.Validators[0].(func(string) error)
+	// poolsettlementDescTimezone is the schema descriptor for timezone field.
+	poolsettlementDescTimezone := poolsettlementFields[3].Descriptor()
+	// poolsettlement.DefaultTimezone holds the default value on creation for the timezone field.
+	poolsettlement.DefaultTimezone = poolsettlementDescTimezone.Default.(string)
+	// poolsettlement.TimezoneValidator is a validator for the "timezone" field. It is called by the builders before save.
+	poolsettlement.TimezoneValidator = poolsettlementDescTimezone.Validators[0].(func(string) error)
+	// poolsettlementDescStatus is the schema descriptor for status field.
+	poolsettlementDescStatus := poolsettlementFields[4].Descriptor()
+	// poolsettlement.DefaultStatus holds the default value on creation for the status field.
+	poolsettlement.DefaultStatus = poolsettlementDescStatus.Default.(string)
+	// poolsettlement.StatusValidator is a validator for the "status" field. It is called by the builders before save.
+	poolsettlement.StatusValidator = poolsettlementDescStatus.Validators[0].(func(string) error)
+	// poolsettlementDescPeriodCostMinor is the schema descriptor for period_cost_minor field.
+	poolsettlementDescPeriodCostMinor := poolsettlementFields[5].Descriptor()
+	// poolsettlement.DefaultPeriodCostMinor holds the default value on creation for the period_cost_minor field.
+	poolsettlement.DefaultPeriodCostMinor = poolsettlementDescPeriodCostMinor.Default.(int64)
+	// poolsettlementDescCarryInMinor is the schema descriptor for carry_in_minor field.
+	poolsettlementDescCarryInMinor := poolsettlementFields[6].Descriptor()
+	// poolsettlement.DefaultCarryInMinor holds the default value on creation for the carry_in_minor field.
+	poolsettlement.DefaultCarryInMinor = poolsettlementDescCarryInMinor.Default.(int64)
+	// poolsettlementDescCarryOutMinor is the schema descriptor for carry_out_minor field.
+	poolsettlementDescCarryOutMinor := poolsettlementFields[7].Descriptor()
+	// poolsettlement.DefaultCarryOutMinor holds the default value on creation for the carry_out_minor field.
+	poolsettlement.DefaultCarryOutMinor = poolsettlementDescCarryOutMinor.Default.(int64)
+	// poolsettlementDescTotalCostMinor is the schema descriptor for total_cost_minor field.
+	poolsettlementDescTotalCostMinor := poolsettlementFields[8].Descriptor()
+	// poolsettlement.DefaultTotalCostMinor holds the default value on creation for the total_cost_minor field.
+	poolsettlement.DefaultTotalCostMinor = poolsettlementDescTotalCostMinor.Default.(int64)
+	// poolsettlementDescTotalUsageWeight is the schema descriptor for total_usage_weight field.
+	poolsettlementDescTotalUsageWeight := poolsettlementFields[9].Descriptor()
+	// poolsettlement.DefaultTotalUsageWeight holds the default value on creation for the total_usage_weight field.
+	poolsettlement.DefaultTotalUsageWeight = poolsettlementDescTotalUsageWeight.Default.(string)
+	// poolsettlement.TotalUsageWeightValidator is a validator for the "total_usage_weight" field. It is called by the builders before save.
+	poolsettlement.TotalUsageWeightValidator = poolsettlementDescTotalUsageWeight.Validators[0].(func(string) error)
+	// poolsettlementDescPricingCoverage is the schema descriptor for pricing_coverage field.
+	poolsettlementDescPricingCoverage := poolsettlementFields[10].Descriptor()
+	// poolsettlement.DefaultPricingCoverage holds the default value on creation for the pricing_coverage field.
+	poolsettlement.DefaultPricingCoverage = poolsettlementDescPricingCoverage.Default.(string)
+	// poolsettlement.PricingCoverageValidator is a validator for the "pricing_coverage" field. It is called by the builders before save.
+	poolsettlement.PricingCoverageValidator = poolsettlementDescPricingCoverage.Validators[0].(func(string) error)
+	// poolsettlementDescUnpricedUsageCount is the schema descriptor for unpriced_usage_count field.
+	poolsettlementDescUnpricedUsageCount := poolsettlementFields[11].Descriptor()
+	// poolsettlement.DefaultUnpricedUsageCount holds the default value on creation for the unpriced_usage_count field.
+	poolsettlement.DefaultUnpricedUsageCount = poolsettlementDescUnpricedUsageCount.Default.(int64)
+	// poolsettlementDescFxRate is the schema descriptor for fx_rate field.
+	poolsettlementDescFxRate := poolsettlementFields[12].Descriptor()
+	// poolsettlement.DefaultFxRate holds the default value on creation for the fx_rate field.
+	poolsettlement.DefaultFxRate = poolsettlementDescFxRate.Default.(string)
+	// poolsettlement.FxRateValidator is a validator for the "fx_rate" field. It is called by the builders before save.
+	poolsettlement.FxRateValidator = poolsettlementDescFxRate.Validators[0].(func(string) error)
+	// poolsettlementDescFormulaVersion is the schema descriptor for formula_version field.
+	poolsettlementDescFormulaVersion := poolsettlementFields[13].Descriptor()
+	// poolsettlement.DefaultFormulaVersion holds the default value on creation for the formula_version field.
+	poolsettlement.DefaultFormulaVersion = poolsettlementDescFormulaVersion.Default.(string)
+	// poolsettlement.FormulaVersionValidator is a validator for the "formula_version" field. It is called by the builders before save.
+	poolsettlement.FormulaVersionValidator = poolsettlementDescFormulaVersion.Validators[0].(func(string) error)
+	poolsettlementlineMixin := schema.PoolSettlementLine{}.Mixin()
+	poolsettlementlineMixinFields0 := poolsettlementlineMixin[0].Fields()
+	_ = poolsettlementlineMixinFields0
+	poolsettlementlineFields := schema.PoolSettlementLine{}.Fields()
+	_ = poolsettlementlineFields
+	// poolsettlementlineDescCreatedAt is the schema descriptor for created_at field.
+	poolsettlementlineDescCreatedAt := poolsettlementlineMixinFields0[0].Descriptor()
+	// poolsettlementline.DefaultCreatedAt holds the default value on creation for the created_at field.
+	poolsettlementline.DefaultCreatedAt = poolsettlementlineDescCreatedAt.Default.(func() time.Time)
+	// poolsettlementlineDescUpdatedAt is the schema descriptor for updated_at field.
+	poolsettlementlineDescUpdatedAt := poolsettlementlineMixinFields0[1].Descriptor()
+	// poolsettlementline.DefaultUpdatedAt holds the default value on creation for the updated_at field.
+	poolsettlementline.DefaultUpdatedAt = poolsettlementlineDescUpdatedAt.Default.(func() time.Time)
+	// poolsettlementline.UpdateDefaultUpdatedAt holds the default value on update for the updated_at field.
+	poolsettlementline.UpdateDefaultUpdatedAt = poolsettlementlineDescUpdatedAt.UpdateDefault.(func() time.Time)
+	// poolsettlementlineDescUsageWeight is the schema descriptor for usage_weight field.
+	poolsettlementlineDescUsageWeight := poolsettlementlineFields[2].Descriptor()
+	// poolsettlementline.DefaultUsageWeight holds the default value on creation for the usage_weight field.
+	poolsettlementline.DefaultUsageWeight = poolsettlementlineDescUsageWeight.Default.(string)
+	// poolsettlementline.UsageWeightValidator is a validator for the "usage_weight" field. It is called by the builders before save.
+	poolsettlementline.UsageWeightValidator = poolsettlementlineDescUsageWeight.Validators[0].(func(string) error)
+	// poolsettlementlineDescUsageShare is the schema descriptor for usage_share field.
+	poolsettlementlineDescUsageShare := poolsettlementlineFields[3].Descriptor()
+	// poolsettlementline.DefaultUsageShare holds the default value on creation for the usage_share field.
+	poolsettlementline.DefaultUsageShare = poolsettlementlineDescUsageShare.Default.(string)
+	// poolsettlementline.UsageShareValidator is a validator for the "usage_share" field. It is called by the builders before save.
+	poolsettlementline.UsageShareValidator = poolsettlementlineDescUsageShare.Validators[0].(func(string) error)
+	// poolsettlementlineDescAllocatedCostMinor is the schema descriptor for allocated_cost_minor field.
+	poolsettlementlineDescAllocatedCostMinor := poolsettlementlineFields[4].Descriptor()
+	// poolsettlementline.DefaultAllocatedCostMinor holds the default value on creation for the allocated_cost_minor field.
+	poolsettlementline.DefaultAllocatedCostMinor = poolsettlementlineDescAllocatedCostMinor.Default.(int64)
+	// poolsettlementlineDescContributionCreditMinor is the schema descriptor for contribution_credit_minor field.
+	poolsettlementlineDescContributionCreditMinor := poolsettlementlineFields[5].Descriptor()
+	// poolsettlementline.DefaultContributionCreditMinor holds the default value on creation for the contribution_credit_minor field.
+	poolsettlementline.DefaultContributionCreditMinor = poolsettlementlineDescContributionCreditMinor.Default.(int64)
+	// poolsettlementlineDescAdjustmentMinor is the schema descriptor for adjustment_minor field.
+	poolsettlementlineDescAdjustmentMinor := poolsettlementlineFields[6].Descriptor()
+	// poolsettlementline.DefaultAdjustmentMinor holds the default value on creation for the adjustment_minor field.
+	poolsettlementline.DefaultAdjustmentMinor = poolsettlementlineDescAdjustmentMinor.Default.(int64)
+	// poolsettlementlineDescNetAmountMinor is the schema descriptor for net_amount_minor field.
+	poolsettlementlineDescNetAmountMinor := poolsettlementlineFields[7].Descriptor()
+	// poolsettlementline.DefaultNetAmountMinor holds the default value on creation for the net_amount_minor field.
+	poolsettlementline.DefaultNetAmountMinor = poolsettlementlineDescNetAmountMinor.Default.(int64)
+	// poolsettlementlineDescPaymentStatus is the schema descriptor for payment_status field.
+	poolsettlementlineDescPaymentStatus := poolsettlementlineFields[8].Descriptor()
+	// poolsettlementline.DefaultPaymentStatus holds the default value on creation for the payment_status field.
+	poolsettlementline.DefaultPaymentStatus = poolsettlementlineDescPaymentStatus.Default.(string)
+	// poolsettlementline.PaymentStatusValidator is a validator for the "payment_status" field. It is called by the builders before save.
+	poolsettlementline.PaymentStatusValidator = poolsettlementlineDescPaymentStatus.Validators[0].(func(string) error)
 	promocodeFields := schema.PromoCode{}.Fields()
 	_ = promocodeFields
 	// promocodeDescCode is the schema descriptor for code field.
@@ -1675,6 +1885,47 @@ func init() {
 	proxyDescExpiryWarnDays := proxyFields[10].Descriptor()
 	// proxy.DefaultExpiryWarnDays holds the default value on creation for the expiry_warn_days field.
 	proxy.DefaultExpiryWarnDays = proxyDescExpiryWarnDays.Default.(int)
+	purchasesourceMixin := schema.PurchaseSource{}.Mixin()
+	purchasesourceMixinFields0 := purchasesourceMixin[0].Fields()
+	_ = purchasesourceMixinFields0
+	purchasesourceFields := schema.PurchaseSource{}.Fields()
+	_ = purchasesourceFields
+	// purchasesourceDescCreatedAt is the schema descriptor for created_at field.
+	purchasesourceDescCreatedAt := purchasesourceMixinFields0[0].Descriptor()
+	// purchasesource.DefaultCreatedAt holds the default value on creation for the created_at field.
+	purchasesource.DefaultCreatedAt = purchasesourceDescCreatedAt.Default.(func() time.Time)
+	// purchasesourceDescUpdatedAt is the schema descriptor for updated_at field.
+	purchasesourceDescUpdatedAt := purchasesourceMixinFields0[1].Descriptor()
+	// purchasesource.DefaultUpdatedAt holds the default value on creation for the updated_at field.
+	purchasesource.DefaultUpdatedAt = purchasesourceDescUpdatedAt.Default.(func() time.Time)
+	// purchasesource.UpdateDefaultUpdatedAt holds the default value on update for the updated_at field.
+	purchasesource.UpdateDefaultUpdatedAt = purchasesourceDescUpdatedAt.UpdateDefault.(func() time.Time)
+	// purchasesourceDescName is the schema descriptor for name field.
+	purchasesourceDescName := purchasesourceFields[0].Descriptor()
+	// purchasesource.NameValidator is a validator for the "name" field. It is called by the builders before save.
+	purchasesource.NameValidator = func() func(string) error {
+		validators := purchasesourceDescName.Validators
+		fns := [...]func(string) error{
+			validators[0].(func(string) error),
+			validators[1].(func(string) error),
+		}
+		return func(name string) error {
+			for _, fn := range fns {
+				if err := fn(name); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}()
+	// purchasesourceDescWebsiteURL is the schema descriptor for website_url field.
+	purchasesourceDescWebsiteURL := purchasesourceFields[1].Descriptor()
+	// purchasesource.WebsiteURLValidator is a validator for the "website_url" field. It is called by the builders before save.
+	purchasesource.WebsiteURLValidator = purchasesourceDescWebsiteURL.Validators[0].(func(string) error)
+	// purchasesourceDescActive is the schema descriptor for active field.
+	purchasesourceDescActive := purchasesourceFields[3].Descriptor()
+	// purchasesource.DefaultActive holds the default value on creation for the active field.
+	purchasesource.DefaultActive = purchasesourceDescActive.Default.(bool)
 	redeemcodeFields := schema.RedeemCode{}.Fields()
 	_ = redeemcodeFields
 	// redeemcodeDescCode is the schema descriptor for code field.
@@ -2428,6 +2679,41 @@ func init() {
 	usersubscriptionDescAssignedAt := usersubscriptionFields[12].Descriptor()
 	// usersubscription.DefaultAssignedAt holds the default value on creation for the assigned_at field.
 	usersubscription.DefaultAssignedAt = usersubscriptionDescAssignedAt.Default.(func() time.Time)
+	valuationfxrateMixin := schema.ValuationFXRate{}.Mixin()
+	valuationfxrateMixinFields0 := valuationfxrateMixin[0].Fields()
+	_ = valuationfxrateMixinFields0
+	valuationfxrateFields := schema.ValuationFXRate{}.Fields()
+	_ = valuationfxrateFields
+	// valuationfxrateDescCreatedAt is the schema descriptor for created_at field.
+	valuationfxrateDescCreatedAt := valuationfxrateMixinFields0[0].Descriptor()
+	// valuationfxrate.DefaultCreatedAt holds the default value on creation for the created_at field.
+	valuationfxrate.DefaultCreatedAt = valuationfxrateDescCreatedAt.Default.(func() time.Time)
+	// valuationfxrateDescUpdatedAt is the schema descriptor for updated_at field.
+	valuationfxrateDescUpdatedAt := valuationfxrateMixinFields0[1].Descriptor()
+	// valuationfxrate.DefaultUpdatedAt holds the default value on creation for the updated_at field.
+	valuationfxrate.DefaultUpdatedAt = valuationfxrateDescUpdatedAt.Default.(func() time.Time)
+	// valuationfxrate.UpdateDefaultUpdatedAt holds the default value on update for the updated_at field.
+	valuationfxrate.UpdateDefaultUpdatedAt = valuationfxrateDescUpdatedAt.UpdateDefault.(func() time.Time)
+	// valuationfxrateDescBaseCurrency is the schema descriptor for base_currency field.
+	valuationfxrateDescBaseCurrency := valuationfxrateFields[0].Descriptor()
+	// valuationfxrate.DefaultBaseCurrency holds the default value on creation for the base_currency field.
+	valuationfxrate.DefaultBaseCurrency = valuationfxrateDescBaseCurrency.Default.(string)
+	// valuationfxrate.BaseCurrencyValidator is a validator for the "base_currency" field. It is called by the builders before save.
+	valuationfxrate.BaseCurrencyValidator = valuationfxrateDescBaseCurrency.Validators[0].(func(string) error)
+	// valuationfxrateDescQuoteCurrency is the schema descriptor for quote_currency field.
+	valuationfxrateDescQuoteCurrency := valuationfxrateFields[1].Descriptor()
+	// valuationfxrate.DefaultQuoteCurrency holds the default value on creation for the quote_currency field.
+	valuationfxrate.DefaultQuoteCurrency = valuationfxrateDescQuoteCurrency.Default.(string)
+	// valuationfxrate.QuoteCurrencyValidator is a validator for the "quote_currency" field. It is called by the builders before save.
+	valuationfxrate.QuoteCurrencyValidator = valuationfxrateDescQuoteCurrency.Validators[0].(func(string) error)
+	// valuationfxrateDescRate is the schema descriptor for rate field.
+	valuationfxrateDescRate := valuationfxrateFields[2].Descriptor()
+	// valuationfxrate.RateValidator is a validator for the "rate" field. It is called by the builders before save.
+	valuationfxrate.RateValidator = valuationfxrateDescRate.Validators[0].(func(string) error)
+	// valuationfxrateDescSource is the schema descriptor for source field.
+	valuationfxrateDescSource := valuationfxrateFields[4].Descriptor()
+	// valuationfxrate.SourceValidator is a validator for the "source" field. It is called by the builders before save.
+	valuationfxrate.SourceValidator = valuationfxrateDescSource.Validators[0].(func(string) error)
 }
 
 const (

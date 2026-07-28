@@ -505,14 +505,19 @@ const routes: RouteRecordRaw[] = [
   {
     path: '/admin/accounts',
     name: 'AdminAccounts',
-    component: () => import('@/views/admin/AccountsView.vue'),
+    component: () => import('@/views/admin/SharedPoolView.vue'),
     meta: {
       requiresAuth: true,
       requiresAdmin: true,
-      title: 'Account Management',
-      titleKey: 'admin.accounts.title',
-      descriptionKey: 'admin.accounts.description'
+      title: 'Shared Account Pool',
+      titleKey: 'admin.sharedPool.title',
+      descriptionKey: 'admin.sharedPool.description'
     }
+  },
+  {
+    path: '/admin/shared-pool',
+    name: 'AdminSharedPool',
+    redirect: (to) => ({ path: '/admin/accounts', query: to.query })
   },
   {
     path: '/admin/announcements',

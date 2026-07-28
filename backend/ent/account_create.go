@@ -87,6 +87,62 @@ func (_c *AccountCreate) SetNillableNotes(v *string) *AccountCreate {
 	return _c
 }
 
+// SetProviderIdentity sets the "provider_identity" field.
+func (_c *AccountCreate) SetProviderIdentity(v string) *AccountCreate {
+	_c.mutation.SetProviderIdentity(v)
+	return _c
+}
+
+// SetNillableProviderIdentity sets the "provider_identity" field if the given value is not nil.
+func (_c *AccountCreate) SetNillableProviderIdentity(v *string) *AccountCreate {
+	if v != nil {
+		_c.SetProviderIdentity(*v)
+	}
+	return _c
+}
+
+// SetContributorUserID sets the "contributor_user_id" field.
+func (_c *AccountCreate) SetContributorUserID(v int64) *AccountCreate {
+	_c.mutation.SetContributorUserID(v)
+	return _c
+}
+
+// SetNillableContributorUserID sets the "contributor_user_id" field if the given value is not nil.
+func (_c *AccountCreate) SetNillableContributorUserID(v *int64) *AccountCreate {
+	if v != nil {
+		_c.SetContributorUserID(*v)
+	}
+	return _c
+}
+
+// SetCreatedByUserID sets the "created_by_user_id" field.
+func (_c *AccountCreate) SetCreatedByUserID(v int64) *AccountCreate {
+	_c.mutation.SetCreatedByUserID(v)
+	return _c
+}
+
+// SetNillableCreatedByUserID sets the "created_by_user_id" field if the given value is not nil.
+func (_c *AccountCreate) SetNillableCreatedByUserID(v *int64) *AccountCreate {
+	if v != nil {
+		_c.SetCreatedByUserID(*v)
+	}
+	return _c
+}
+
+// SetCostSharingEnabled sets the "cost_sharing_enabled" field.
+func (_c *AccountCreate) SetCostSharingEnabled(v bool) *AccountCreate {
+	_c.mutation.SetCostSharingEnabled(v)
+	return _c
+}
+
+// SetNillableCostSharingEnabled sets the "cost_sharing_enabled" field if the given value is not nil.
+func (_c *AccountCreate) SetNillableCostSharingEnabled(v *bool) *AccountCreate {
+	if v != nil {
+		_c.SetCostSharingEnabled(*v)
+	}
+	return _c
+}
+
 // SetPlatform sets the "platform" field.
 func (_c *AccountCreate) SetPlatform(v string) *AccountCreate {
 	_c.mutation.SetPlatform(v)
@@ -539,6 +595,10 @@ func (_c *AccountCreate) defaults() error {
 		v := account.DefaultUpdatedAt()
 		_c.mutation.SetUpdatedAt(v)
 	}
+	if _, ok := _c.mutation.CostSharingEnabled(); !ok {
+		v := account.DefaultCostSharingEnabled
+		_c.mutation.SetCostSharingEnabled(v)
+	}
 	if _, ok := _c.mutation.Credentials(); !ok {
 		if account.DefaultCredentials == nil {
 			return fmt.Errorf("ent: uninitialized account.DefaultCredentials (forgotten import ent/runtime?)")
@@ -599,6 +659,14 @@ func (_c *AccountCreate) check() error {
 		if err := account.NameValidator(v); err != nil {
 			return &ValidationError{Name: "name", err: fmt.Errorf(`ent: validator failed for field "Account.name": %w`, err)}
 		}
+	}
+	if v, ok := _c.mutation.ProviderIdentity(); ok {
+		if err := account.ProviderIdentityValidator(v); err != nil {
+			return &ValidationError{Name: "provider_identity", err: fmt.Errorf(`ent: validator failed for field "Account.provider_identity": %w`, err)}
+		}
+	}
+	if _, ok := _c.mutation.CostSharingEnabled(); !ok {
+		return &ValidationError{Name: "cost_sharing_enabled", err: errors.New(`ent: missing required field "Account.cost_sharing_enabled"`)}
 	}
 	if _, ok := _c.mutation.Platform(); !ok {
 		return &ValidationError{Name: "platform", err: errors.New(`ent: missing required field "Account.platform"`)}
@@ -704,6 +772,22 @@ func (_c *AccountCreate) createSpec() (*Account, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.Notes(); ok {
 		_spec.SetField(account.FieldNotes, field.TypeString, value)
 		_node.Notes = &value
+	}
+	if value, ok := _c.mutation.ProviderIdentity(); ok {
+		_spec.SetField(account.FieldProviderIdentity, field.TypeString, value)
+		_node.ProviderIdentity = &value
+	}
+	if value, ok := _c.mutation.ContributorUserID(); ok {
+		_spec.SetField(account.FieldContributorUserID, field.TypeInt64, value)
+		_node.ContributorUserID = &value
+	}
+	if value, ok := _c.mutation.CreatedByUserID(); ok {
+		_spec.SetField(account.FieldCreatedByUserID, field.TypeInt64, value)
+		_node.CreatedByUserID = &value
+	}
+	if value, ok := _c.mutation.CostSharingEnabled(); ok {
+		_spec.SetField(account.FieldCostSharingEnabled, field.TypeBool, value)
+		_node.CostSharingEnabled = value
 	}
 	if value, ok := _c.mutation.Platform(); ok {
 		_spec.SetField(account.FieldPlatform, field.TypeString, value)
@@ -996,6 +1080,84 @@ func (u *AccountUpsert) UpdateNotes() *AccountUpsert {
 // ClearNotes clears the value of the "notes" field.
 func (u *AccountUpsert) ClearNotes() *AccountUpsert {
 	u.SetNull(account.FieldNotes)
+	return u
+}
+
+// SetProviderIdentity sets the "provider_identity" field.
+func (u *AccountUpsert) SetProviderIdentity(v string) *AccountUpsert {
+	u.Set(account.FieldProviderIdentity, v)
+	return u
+}
+
+// UpdateProviderIdentity sets the "provider_identity" field to the value that was provided on create.
+func (u *AccountUpsert) UpdateProviderIdentity() *AccountUpsert {
+	u.SetExcluded(account.FieldProviderIdentity)
+	return u
+}
+
+// ClearProviderIdentity clears the value of the "provider_identity" field.
+func (u *AccountUpsert) ClearProviderIdentity() *AccountUpsert {
+	u.SetNull(account.FieldProviderIdentity)
+	return u
+}
+
+// SetContributorUserID sets the "contributor_user_id" field.
+func (u *AccountUpsert) SetContributorUserID(v int64) *AccountUpsert {
+	u.Set(account.FieldContributorUserID, v)
+	return u
+}
+
+// UpdateContributorUserID sets the "contributor_user_id" field to the value that was provided on create.
+func (u *AccountUpsert) UpdateContributorUserID() *AccountUpsert {
+	u.SetExcluded(account.FieldContributorUserID)
+	return u
+}
+
+// AddContributorUserID adds v to the "contributor_user_id" field.
+func (u *AccountUpsert) AddContributorUserID(v int64) *AccountUpsert {
+	u.Add(account.FieldContributorUserID, v)
+	return u
+}
+
+// ClearContributorUserID clears the value of the "contributor_user_id" field.
+func (u *AccountUpsert) ClearContributorUserID() *AccountUpsert {
+	u.SetNull(account.FieldContributorUserID)
+	return u
+}
+
+// SetCreatedByUserID sets the "created_by_user_id" field.
+func (u *AccountUpsert) SetCreatedByUserID(v int64) *AccountUpsert {
+	u.Set(account.FieldCreatedByUserID, v)
+	return u
+}
+
+// UpdateCreatedByUserID sets the "created_by_user_id" field to the value that was provided on create.
+func (u *AccountUpsert) UpdateCreatedByUserID() *AccountUpsert {
+	u.SetExcluded(account.FieldCreatedByUserID)
+	return u
+}
+
+// AddCreatedByUserID adds v to the "created_by_user_id" field.
+func (u *AccountUpsert) AddCreatedByUserID(v int64) *AccountUpsert {
+	u.Add(account.FieldCreatedByUserID, v)
+	return u
+}
+
+// ClearCreatedByUserID clears the value of the "created_by_user_id" field.
+func (u *AccountUpsert) ClearCreatedByUserID() *AccountUpsert {
+	u.SetNull(account.FieldCreatedByUserID)
+	return u
+}
+
+// SetCostSharingEnabled sets the "cost_sharing_enabled" field.
+func (u *AccountUpsert) SetCostSharingEnabled(v bool) *AccountUpsert {
+	u.Set(account.FieldCostSharingEnabled, v)
+	return u
+}
+
+// UpdateCostSharingEnabled sets the "cost_sharing_enabled" field to the value that was provided on create.
+func (u *AccountUpsert) UpdateCostSharingEnabled() *AccountUpsert {
+	u.SetExcluded(account.FieldCostSharingEnabled)
 	return u
 }
 
@@ -1543,6 +1705,97 @@ func (u *AccountUpsertOne) UpdateNotes() *AccountUpsertOne {
 func (u *AccountUpsertOne) ClearNotes() *AccountUpsertOne {
 	return u.Update(func(s *AccountUpsert) {
 		s.ClearNotes()
+	})
+}
+
+// SetProviderIdentity sets the "provider_identity" field.
+func (u *AccountUpsertOne) SetProviderIdentity(v string) *AccountUpsertOne {
+	return u.Update(func(s *AccountUpsert) {
+		s.SetProviderIdentity(v)
+	})
+}
+
+// UpdateProviderIdentity sets the "provider_identity" field to the value that was provided on create.
+func (u *AccountUpsertOne) UpdateProviderIdentity() *AccountUpsertOne {
+	return u.Update(func(s *AccountUpsert) {
+		s.UpdateProviderIdentity()
+	})
+}
+
+// ClearProviderIdentity clears the value of the "provider_identity" field.
+func (u *AccountUpsertOne) ClearProviderIdentity() *AccountUpsertOne {
+	return u.Update(func(s *AccountUpsert) {
+		s.ClearProviderIdentity()
+	})
+}
+
+// SetContributorUserID sets the "contributor_user_id" field.
+func (u *AccountUpsertOne) SetContributorUserID(v int64) *AccountUpsertOne {
+	return u.Update(func(s *AccountUpsert) {
+		s.SetContributorUserID(v)
+	})
+}
+
+// AddContributorUserID adds v to the "contributor_user_id" field.
+func (u *AccountUpsertOne) AddContributorUserID(v int64) *AccountUpsertOne {
+	return u.Update(func(s *AccountUpsert) {
+		s.AddContributorUserID(v)
+	})
+}
+
+// UpdateContributorUserID sets the "contributor_user_id" field to the value that was provided on create.
+func (u *AccountUpsertOne) UpdateContributorUserID() *AccountUpsertOne {
+	return u.Update(func(s *AccountUpsert) {
+		s.UpdateContributorUserID()
+	})
+}
+
+// ClearContributorUserID clears the value of the "contributor_user_id" field.
+func (u *AccountUpsertOne) ClearContributorUserID() *AccountUpsertOne {
+	return u.Update(func(s *AccountUpsert) {
+		s.ClearContributorUserID()
+	})
+}
+
+// SetCreatedByUserID sets the "created_by_user_id" field.
+func (u *AccountUpsertOne) SetCreatedByUserID(v int64) *AccountUpsertOne {
+	return u.Update(func(s *AccountUpsert) {
+		s.SetCreatedByUserID(v)
+	})
+}
+
+// AddCreatedByUserID adds v to the "created_by_user_id" field.
+func (u *AccountUpsertOne) AddCreatedByUserID(v int64) *AccountUpsertOne {
+	return u.Update(func(s *AccountUpsert) {
+		s.AddCreatedByUserID(v)
+	})
+}
+
+// UpdateCreatedByUserID sets the "created_by_user_id" field to the value that was provided on create.
+func (u *AccountUpsertOne) UpdateCreatedByUserID() *AccountUpsertOne {
+	return u.Update(func(s *AccountUpsert) {
+		s.UpdateCreatedByUserID()
+	})
+}
+
+// ClearCreatedByUserID clears the value of the "created_by_user_id" field.
+func (u *AccountUpsertOne) ClearCreatedByUserID() *AccountUpsertOne {
+	return u.Update(func(s *AccountUpsert) {
+		s.ClearCreatedByUserID()
+	})
+}
+
+// SetCostSharingEnabled sets the "cost_sharing_enabled" field.
+func (u *AccountUpsertOne) SetCostSharingEnabled(v bool) *AccountUpsertOne {
+	return u.Update(func(s *AccountUpsert) {
+		s.SetCostSharingEnabled(v)
+	})
+}
+
+// UpdateCostSharingEnabled sets the "cost_sharing_enabled" field to the value that was provided on create.
+func (u *AccountUpsertOne) UpdateCostSharingEnabled() *AccountUpsertOne {
+	return u.Update(func(s *AccountUpsert) {
+		s.UpdateCostSharingEnabled()
 	})
 }
 
@@ -2328,6 +2581,97 @@ func (u *AccountUpsertBulk) UpdateNotes() *AccountUpsertBulk {
 func (u *AccountUpsertBulk) ClearNotes() *AccountUpsertBulk {
 	return u.Update(func(s *AccountUpsert) {
 		s.ClearNotes()
+	})
+}
+
+// SetProviderIdentity sets the "provider_identity" field.
+func (u *AccountUpsertBulk) SetProviderIdentity(v string) *AccountUpsertBulk {
+	return u.Update(func(s *AccountUpsert) {
+		s.SetProviderIdentity(v)
+	})
+}
+
+// UpdateProviderIdentity sets the "provider_identity" field to the value that was provided on create.
+func (u *AccountUpsertBulk) UpdateProviderIdentity() *AccountUpsertBulk {
+	return u.Update(func(s *AccountUpsert) {
+		s.UpdateProviderIdentity()
+	})
+}
+
+// ClearProviderIdentity clears the value of the "provider_identity" field.
+func (u *AccountUpsertBulk) ClearProviderIdentity() *AccountUpsertBulk {
+	return u.Update(func(s *AccountUpsert) {
+		s.ClearProviderIdentity()
+	})
+}
+
+// SetContributorUserID sets the "contributor_user_id" field.
+func (u *AccountUpsertBulk) SetContributorUserID(v int64) *AccountUpsertBulk {
+	return u.Update(func(s *AccountUpsert) {
+		s.SetContributorUserID(v)
+	})
+}
+
+// AddContributorUserID adds v to the "contributor_user_id" field.
+func (u *AccountUpsertBulk) AddContributorUserID(v int64) *AccountUpsertBulk {
+	return u.Update(func(s *AccountUpsert) {
+		s.AddContributorUserID(v)
+	})
+}
+
+// UpdateContributorUserID sets the "contributor_user_id" field to the value that was provided on create.
+func (u *AccountUpsertBulk) UpdateContributorUserID() *AccountUpsertBulk {
+	return u.Update(func(s *AccountUpsert) {
+		s.UpdateContributorUserID()
+	})
+}
+
+// ClearContributorUserID clears the value of the "contributor_user_id" field.
+func (u *AccountUpsertBulk) ClearContributorUserID() *AccountUpsertBulk {
+	return u.Update(func(s *AccountUpsert) {
+		s.ClearContributorUserID()
+	})
+}
+
+// SetCreatedByUserID sets the "created_by_user_id" field.
+func (u *AccountUpsertBulk) SetCreatedByUserID(v int64) *AccountUpsertBulk {
+	return u.Update(func(s *AccountUpsert) {
+		s.SetCreatedByUserID(v)
+	})
+}
+
+// AddCreatedByUserID adds v to the "created_by_user_id" field.
+func (u *AccountUpsertBulk) AddCreatedByUserID(v int64) *AccountUpsertBulk {
+	return u.Update(func(s *AccountUpsert) {
+		s.AddCreatedByUserID(v)
+	})
+}
+
+// UpdateCreatedByUserID sets the "created_by_user_id" field to the value that was provided on create.
+func (u *AccountUpsertBulk) UpdateCreatedByUserID() *AccountUpsertBulk {
+	return u.Update(func(s *AccountUpsert) {
+		s.UpdateCreatedByUserID()
+	})
+}
+
+// ClearCreatedByUserID clears the value of the "created_by_user_id" field.
+func (u *AccountUpsertBulk) ClearCreatedByUserID() *AccountUpsertBulk {
+	return u.Update(func(s *AccountUpsert) {
+		s.ClearCreatedByUserID()
+	})
+}
+
+// SetCostSharingEnabled sets the "cost_sharing_enabled" field.
+func (u *AccountUpsertBulk) SetCostSharingEnabled(v bool) *AccountUpsertBulk {
+	return u.Update(func(s *AccountUpsert) {
+		s.SetCostSharingEnabled(v)
+	})
+}
+
+// UpdateCostSharingEnabled sets the "cost_sharing_enabled" field to the value that was provided on create.
+func (u *AccountUpsertBulk) UpdateCostSharingEnabled() *AccountUpsertBulk {
+	return u.Update(func(s *AccountUpsert) {
+		s.UpdateCostSharingEnabled()
 	})
 }
 

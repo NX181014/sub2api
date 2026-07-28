@@ -42,6 +42,9 @@ func RegisterAdminRoutes(
 		// 账号管理
 		registerAccountRoutes(admin, h, stepUpAuth)
 
+		// 共享号池资产、结算与回本
+		registerPoolRoutes(admin, h)
+
 		// 公告管理
 		registerAnnouncementRoutes(admin, h)
 
@@ -119,6 +122,29 @@ func RegisterAdminRoutes(
 
 		// 操作审计日志
 		registerAuditLogRoutes(admin, h, stepUpAuth)
+	}
+}
+
+func registerPoolRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
+	pool := admin.Group("/pool")
+	{
+		pool.GET("/overview", h.Admin.Pool.GetOverview)
+		pool.GET("/accounts", h.Admin.Pool.ListAccounts)
+		pool.POST("/accounts/:id/intake", h.Admin.Pool.CreateAccountIntake)
+		pool.PUT("/accounts/:id", h.Admin.Pool.UpdateAccount)
+		pool.GET("/sources", h.Admin.Pool.ListSources)
+		pool.POST("/sources", h.Admin.Pool.CreateSource)
+		pool.GET("/costs", h.Admin.Pool.ListCosts)
+		pool.POST("/costs", h.Admin.Pool.CreateCost)
+		pool.GET("/lifecycle", h.Admin.Pool.ListLifecycle)
+		pool.POST("/lifecycle", h.Admin.Pool.CreateLifecycle)
+		pool.GET("/fx-rates", h.Admin.Pool.ListFXRates)
+		pool.POST("/fx-rates", h.Admin.Pool.CreateFXRate)
+		pool.GET("/settlements", h.Admin.Pool.ListSettlements)
+		pool.POST("/settlements/draft", h.Admin.Pool.CreateSettlementDraft)
+		pool.GET("/settlements/:id", h.Admin.Pool.GetSettlement)
+		pool.POST("/settlements/:id/recalculate", h.Admin.Pool.RecalculateSettlement)
+		pool.POST("/settlements/:id/lock", h.Admin.Pool.LockSettlement)
 	}
 }
 

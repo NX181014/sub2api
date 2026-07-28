@@ -39,6 +39,12 @@ type AccountRuntimeBlocker interface {
 	ClearAccountSchedulingBlock(accountID int64)
 }
 
+// automaticBanRecorder is deliberately narrower than AccountRepository so
+// existing gateway/test repositories do not inherit pool-accounting writes.
+type automaticBanRecorder interface {
+	RecordAutomaticBan(ctx context.Context, accountID int64, occurredAt time.Time, reason string) (bool, error)
+}
+
 // SuccessfulTestRecoveryResult 表示测试成功后恢复了哪些运行时状态。
 type SuccessfulTestRecoveryResult struct {
 	ClearedError     bool
@@ -235,6 +241,7 @@ func (s *RateLimitService) HandleUpstreamError(ctx context.Context, account *Acc
 		if strings.Contains(strings.ToLower(upstreamMsg), "organization has been disabled") {
 			msg := "Organization disabled (400): " + upstreamMsg
 			s.handleAuthError(ctx, account, msg)
+			s.recordAutomaticBan(ctx, account, "organization_disabled")
 			shouldDisable = true
 		} else if account.Platform == PlatformAnthropic && strings.Contains(strings.ToLower(upstreamMsg), "credit balance") {
 			// Anthropic API key 余额不足（语义等同 402），停止调度
@@ -777,6 +784,40 @@ func (s *RateLimitService) handleAuthError(ctx context.Context, account *Account
 	slog.Warn("account_disabled_auth_error", "account_id", account.ID, "error", errorMsg)
 }
 
+func (s *RateLimitService) recordAutomaticBan(ctx context.Context, account *Account, reason string) {
+	if account == nil || account.ID <= 0 || reason == "" {
+		return
+	}
+	recorder, ok := s.accountRepo.(automaticBanRecorder)
+	if !ok {
+		return
+	}
+	inserted, err := recorder.RecordAutomaticBan(ctx, account.ID, time.Now().UTC(), reason)
+	if err != nil {
+		slog.Warn("account_automatic_ban_record_failed", "account_id", account.ID, "reason", reason, "error", err)
+		return
+	}
+	if inserted {
+		slog.Info("account_automatic_ban_recorded", "account_id", account.ID, "reason", reason)
+	}
+}
+
+func confirmed403BanReason(upstreamMsg string) string {
+	lower := strings.ToLower(strings.TrimSpace(upstreamMsg))
+	switch {
+	case strings.Contains(lower, "terms of service") || strings.Contains(lower, "violation"):
+		return "terms_of_service_violation"
+	case strings.Contains(lower, "suspended"):
+		return "account_suspended"
+	case strings.Contains(lower, "deactivated"):
+		return "account_deactivated"
+	case strings.Contains(lower, "account has been disabled") || strings.Contains(lower, "organization has been disabled"):
+		return "account_disabled"
+	default:
+		return ""
+	}
+}
+
 func buildForbiddenErrorMessage(prefix string, upstreamMsg string, responseBody []byte, fallback string) string {
 	prefix = strings.TrimSpace(prefix)
 	if prefix != "" && !strings.HasSuffix(prefix, " ") {
@@ -819,6 +860,9 @@ func (s *RateLimitService) handle403(ctx context.Context, account *Account, upst
 		"account may be suspended or lack permissions",
 	)
 	s.handleAuthError(ctx, account, msg)
+	if reason := confirmed403BanReason(upstreamMsg); reason != "" {
+		s.recordAutomaticBan(ctx, account, reason)
+	}
 	return true
 }
 
@@ -845,6 +889,7 @@ func (s *RateLimitService) handleOpenAI403(ctx context.Context, account *Account
 	if count >= openAI403DisableThreshold {
 		msg = fmt.Sprintf("%s | consecutive_403=%d/%d", msg, count, openAI403DisableThreshold)
 		s.handleAuthError(ctx, account, msg)
+		s.recordAutomaticBan(ctx, account, "openai_consecutive_403")
 		return true
 	}
 
@@ -898,6 +943,7 @@ func (s *RateLimitService) handleAntigravity403(ctx context.Context, account *Ac
 			"terms of service violation",
 		)
 		s.handleAuthError(ctx, account, msg)
+		s.recordAutomaticBan(ctx, account, "terms_of_service_violation")
 		return true
 
 	default:

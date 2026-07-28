@@ -80,6 +80,26 @@ func Notes(v string) predicate.Account {
 	return predicate.Account(sql.FieldEQ(FieldNotes, v))
 }
 
+// ProviderIdentity applies equality check predicate on the "provider_identity" field. It's identical to ProviderIdentityEQ.
+func ProviderIdentity(v string) predicate.Account {
+	return predicate.Account(sql.FieldEQ(FieldProviderIdentity, v))
+}
+
+// ContributorUserID applies equality check predicate on the "contributor_user_id" field. It's identical to ContributorUserIDEQ.
+func ContributorUserID(v int64) predicate.Account {
+	return predicate.Account(sql.FieldEQ(FieldContributorUserID, v))
+}
+
+// CreatedByUserID applies equality check predicate on the "created_by_user_id" field. It's identical to CreatedByUserIDEQ.
+func CreatedByUserID(v int64) predicate.Account {
+	return predicate.Account(sql.FieldEQ(FieldCreatedByUserID, v))
+}
+
+// CostSharingEnabled applies equality check predicate on the "cost_sharing_enabled" field. It's identical to CostSharingEnabledEQ.
+func CostSharingEnabled(v bool) predicate.Account {
+	return predicate.Account(sql.FieldEQ(FieldCostSharingEnabled, v))
+}
+
 // Platform applies equality check predicate on the "platform" field. It's identical to PlatformEQ.
 func Platform(v string) predicate.Account {
 	return predicate.Account(sql.FieldEQ(FieldPlatform, v))
@@ -463,6 +483,191 @@ func NotesEqualFold(v string) predicate.Account {
 // NotesContainsFold applies the ContainsFold predicate on the "notes" field.
 func NotesContainsFold(v string) predicate.Account {
 	return predicate.Account(sql.FieldContainsFold(FieldNotes, v))
+}
+
+// ProviderIdentityEQ applies the EQ predicate on the "provider_identity" field.
+func ProviderIdentityEQ(v string) predicate.Account {
+	return predicate.Account(sql.FieldEQ(FieldProviderIdentity, v))
+}
+
+// ProviderIdentityNEQ applies the NEQ predicate on the "provider_identity" field.
+func ProviderIdentityNEQ(v string) predicate.Account {
+	return predicate.Account(sql.FieldNEQ(FieldProviderIdentity, v))
+}
+
+// ProviderIdentityIn applies the In predicate on the "provider_identity" field.
+func ProviderIdentityIn(vs ...string) predicate.Account {
+	return predicate.Account(sql.FieldIn(FieldProviderIdentity, vs...))
+}
+
+// ProviderIdentityNotIn applies the NotIn predicate on the "provider_identity" field.
+func ProviderIdentityNotIn(vs ...string) predicate.Account {
+	return predicate.Account(sql.FieldNotIn(FieldProviderIdentity, vs...))
+}
+
+// ProviderIdentityGT applies the GT predicate on the "provider_identity" field.
+func ProviderIdentityGT(v string) predicate.Account {
+	return predicate.Account(sql.FieldGT(FieldProviderIdentity, v))
+}
+
+// ProviderIdentityGTE applies the GTE predicate on the "provider_identity" field.
+func ProviderIdentityGTE(v string) predicate.Account {
+	return predicate.Account(sql.FieldGTE(FieldProviderIdentity, v))
+}
+
+// ProviderIdentityLT applies the LT predicate on the "provider_identity" field.
+func ProviderIdentityLT(v string) predicate.Account {
+	return predicate.Account(sql.FieldLT(FieldProviderIdentity, v))
+}
+
+// ProviderIdentityLTE applies the LTE predicate on the "provider_identity" field.
+func ProviderIdentityLTE(v string) predicate.Account {
+	return predicate.Account(sql.FieldLTE(FieldProviderIdentity, v))
+}
+
+// ProviderIdentityContains applies the Contains predicate on the "provider_identity" field.
+func ProviderIdentityContains(v string) predicate.Account {
+	return predicate.Account(sql.FieldContains(FieldProviderIdentity, v))
+}
+
+// ProviderIdentityHasPrefix applies the HasPrefix predicate on the "provider_identity" field.
+func ProviderIdentityHasPrefix(v string) predicate.Account {
+	return predicate.Account(sql.FieldHasPrefix(FieldProviderIdentity, v))
+}
+
+// ProviderIdentityHasSuffix applies the HasSuffix predicate on the "provider_identity" field.
+func ProviderIdentityHasSuffix(v string) predicate.Account {
+	return predicate.Account(sql.FieldHasSuffix(FieldProviderIdentity, v))
+}
+
+// ProviderIdentityIsNil applies the IsNil predicate on the "provider_identity" field.
+func ProviderIdentityIsNil() predicate.Account {
+	return predicate.Account(sql.FieldIsNull(FieldProviderIdentity))
+}
+
+// ProviderIdentityNotNil applies the NotNil predicate on the "provider_identity" field.
+func ProviderIdentityNotNil() predicate.Account {
+	return predicate.Account(sql.FieldNotNull(FieldProviderIdentity))
+}
+
+// ProviderIdentityEqualFold applies the EqualFold predicate on the "provider_identity" field.
+func ProviderIdentityEqualFold(v string) predicate.Account {
+	return predicate.Account(sql.FieldEqualFold(FieldProviderIdentity, v))
+}
+
+// ProviderIdentityContainsFold applies the ContainsFold predicate on the "provider_identity" field.
+func ProviderIdentityContainsFold(v string) predicate.Account {
+	return predicate.Account(sql.FieldContainsFold(FieldProviderIdentity, v))
+}
+
+// ContributorUserIDEQ applies the EQ predicate on the "contributor_user_id" field.
+func ContributorUserIDEQ(v int64) predicate.Account {
+	return predicate.Account(sql.FieldEQ(FieldContributorUserID, v))
+}
+
+// ContributorUserIDNEQ applies the NEQ predicate on the "contributor_user_id" field.
+func ContributorUserIDNEQ(v int64) predicate.Account {
+	return predicate.Account(sql.FieldNEQ(FieldContributorUserID, v))
+}
+
+// ContributorUserIDIn applies the In predicate on the "contributor_user_id" field.
+func ContributorUserIDIn(vs ...int64) predicate.Account {
+	return predicate.Account(sql.FieldIn(FieldContributorUserID, vs...))
+}
+
+// ContributorUserIDNotIn applies the NotIn predicate on the "contributor_user_id" field.
+func ContributorUserIDNotIn(vs ...int64) predicate.Account {
+	return predicate.Account(sql.FieldNotIn(FieldContributorUserID, vs...))
+}
+
+// ContributorUserIDGT applies the GT predicate on the "contributor_user_id" field.
+func ContributorUserIDGT(v int64) predicate.Account {
+	return predicate.Account(sql.FieldGT(FieldContributorUserID, v))
+}
+
+// ContributorUserIDGTE applies the GTE predicate on the "contributor_user_id" field.
+func ContributorUserIDGTE(v int64) predicate.Account {
+	return predicate.Account(sql.FieldGTE(FieldContributorUserID, v))
+}
+
+// ContributorUserIDLT applies the LT predicate on the "contributor_user_id" field.
+func ContributorUserIDLT(v int64) predicate.Account {
+	return predicate.Account(sql.FieldLT(FieldContributorUserID, v))
+}
+
+// ContributorUserIDLTE applies the LTE predicate on the "contributor_user_id" field.
+func ContributorUserIDLTE(v int64) predicate.Account {
+	return predicate.Account(sql.FieldLTE(FieldContributorUserID, v))
+}
+
+// ContributorUserIDIsNil applies the IsNil predicate on the "contributor_user_id" field.
+func ContributorUserIDIsNil() predicate.Account {
+	return predicate.Account(sql.FieldIsNull(FieldContributorUserID))
+}
+
+// ContributorUserIDNotNil applies the NotNil predicate on the "contributor_user_id" field.
+func ContributorUserIDNotNil() predicate.Account {
+	return predicate.Account(sql.FieldNotNull(FieldContributorUserID))
+}
+
+// CreatedByUserIDEQ applies the EQ predicate on the "created_by_user_id" field.
+func CreatedByUserIDEQ(v int64) predicate.Account {
+	return predicate.Account(sql.FieldEQ(FieldCreatedByUserID, v))
+}
+
+// CreatedByUserIDNEQ applies the NEQ predicate on the "created_by_user_id" field.
+func CreatedByUserIDNEQ(v int64) predicate.Account {
+	return predicate.Account(sql.FieldNEQ(FieldCreatedByUserID, v))
+}
+
+// CreatedByUserIDIn applies the In predicate on the "created_by_user_id" field.
+func CreatedByUserIDIn(vs ...int64) predicate.Account {
+	return predicate.Account(sql.FieldIn(FieldCreatedByUserID, vs...))
+}
+
+// CreatedByUserIDNotIn applies the NotIn predicate on the "created_by_user_id" field.
+func CreatedByUserIDNotIn(vs ...int64) predicate.Account {
+	return predicate.Account(sql.FieldNotIn(FieldCreatedByUserID, vs...))
+}
+
+// CreatedByUserIDGT applies the GT predicate on the "created_by_user_id" field.
+func CreatedByUserIDGT(v int64) predicate.Account {
+	return predicate.Account(sql.FieldGT(FieldCreatedByUserID, v))
+}
+
+// CreatedByUserIDGTE applies the GTE predicate on the "created_by_user_id" field.
+func CreatedByUserIDGTE(v int64) predicate.Account {
+	return predicate.Account(sql.FieldGTE(FieldCreatedByUserID, v))
+}
+
+// CreatedByUserIDLT applies the LT predicate on the "created_by_user_id" field.
+func CreatedByUserIDLT(v int64) predicate.Account {
+	return predicate.Account(sql.FieldLT(FieldCreatedByUserID, v))
+}
+
+// CreatedByUserIDLTE applies the LTE predicate on the "created_by_user_id" field.
+func CreatedByUserIDLTE(v int64) predicate.Account {
+	return predicate.Account(sql.FieldLTE(FieldCreatedByUserID, v))
+}
+
+// CreatedByUserIDIsNil applies the IsNil predicate on the "created_by_user_id" field.
+func CreatedByUserIDIsNil() predicate.Account {
+	return predicate.Account(sql.FieldIsNull(FieldCreatedByUserID))
+}
+
+// CreatedByUserIDNotNil applies the NotNil predicate on the "created_by_user_id" field.
+func CreatedByUserIDNotNil() predicate.Account {
+	return predicate.Account(sql.FieldNotNull(FieldCreatedByUserID))
+}
+
+// CostSharingEnabledEQ applies the EQ predicate on the "cost_sharing_enabled" field.
+func CostSharingEnabledEQ(v bool) predicate.Account {
+	return predicate.Account(sql.FieldEQ(FieldCostSharingEnabled, v))
+}
+
+// CostSharingEnabledNEQ applies the NEQ predicate on the "cost_sharing_enabled" field.
+func CostSharingEnabledNEQ(v bool) predicate.Account {
+	return predicate.Account(sql.FieldNEQ(FieldCostSharingEnabled, v))
 }
 
 // PlatformEQ applies the EQ predicate on the "platform" field.

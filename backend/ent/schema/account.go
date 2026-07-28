@@ -59,6 +59,18 @@ func (Account) Fields() []ent.Field {
 			Optional().
 			Nillable().
 			SchemaType(map[string]string{dialect.Postgres: "text"}),
+		field.String("provider_identity").
+			Optional().
+			Nillable().
+			MaxLen(255),
+		field.Int64("contributor_user_id").
+			Optional().
+			Nillable(),
+		field.Int64("created_by_user_id").
+			Optional().
+			Nillable(),
+		field.Bool("cost_sharing_enabled").
+			Default(false),
 
 		// platform: 所属平台，如 "claude", "gemini", "openai" 等
 		field.String("platform").
@@ -249,5 +261,7 @@ func (Account) Indexes() []ent.Index {
 		index.Fields("priority", "status"),
 		index.Fields("deleted_at"), // 软删除查询优化
 		index.Fields("parent_account_id"),
+		index.Fields("cost_sharing_enabled"),
+		index.Fields("contributor_user_id"),
 	}
 }

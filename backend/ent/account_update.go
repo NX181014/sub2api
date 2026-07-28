@@ -91,6 +91,94 @@ func (_u *AccountUpdate) ClearNotes() *AccountUpdate {
 	return _u
 }
 
+// SetProviderIdentity sets the "provider_identity" field.
+func (_u *AccountUpdate) SetProviderIdentity(v string) *AccountUpdate {
+	_u.mutation.SetProviderIdentity(v)
+	return _u
+}
+
+// SetNillableProviderIdentity sets the "provider_identity" field if the given value is not nil.
+func (_u *AccountUpdate) SetNillableProviderIdentity(v *string) *AccountUpdate {
+	if v != nil {
+		_u.SetProviderIdentity(*v)
+	}
+	return _u
+}
+
+// ClearProviderIdentity clears the value of the "provider_identity" field.
+func (_u *AccountUpdate) ClearProviderIdentity() *AccountUpdate {
+	_u.mutation.ClearProviderIdentity()
+	return _u
+}
+
+// SetContributorUserID sets the "contributor_user_id" field.
+func (_u *AccountUpdate) SetContributorUserID(v int64) *AccountUpdate {
+	_u.mutation.ResetContributorUserID()
+	_u.mutation.SetContributorUserID(v)
+	return _u
+}
+
+// SetNillableContributorUserID sets the "contributor_user_id" field if the given value is not nil.
+func (_u *AccountUpdate) SetNillableContributorUserID(v *int64) *AccountUpdate {
+	if v != nil {
+		_u.SetContributorUserID(*v)
+	}
+	return _u
+}
+
+// AddContributorUserID adds value to the "contributor_user_id" field.
+func (_u *AccountUpdate) AddContributorUserID(v int64) *AccountUpdate {
+	_u.mutation.AddContributorUserID(v)
+	return _u
+}
+
+// ClearContributorUserID clears the value of the "contributor_user_id" field.
+func (_u *AccountUpdate) ClearContributorUserID() *AccountUpdate {
+	_u.mutation.ClearContributorUserID()
+	return _u
+}
+
+// SetCreatedByUserID sets the "created_by_user_id" field.
+func (_u *AccountUpdate) SetCreatedByUserID(v int64) *AccountUpdate {
+	_u.mutation.ResetCreatedByUserID()
+	_u.mutation.SetCreatedByUserID(v)
+	return _u
+}
+
+// SetNillableCreatedByUserID sets the "created_by_user_id" field if the given value is not nil.
+func (_u *AccountUpdate) SetNillableCreatedByUserID(v *int64) *AccountUpdate {
+	if v != nil {
+		_u.SetCreatedByUserID(*v)
+	}
+	return _u
+}
+
+// AddCreatedByUserID adds value to the "created_by_user_id" field.
+func (_u *AccountUpdate) AddCreatedByUserID(v int64) *AccountUpdate {
+	_u.mutation.AddCreatedByUserID(v)
+	return _u
+}
+
+// ClearCreatedByUserID clears the value of the "created_by_user_id" field.
+func (_u *AccountUpdate) ClearCreatedByUserID() *AccountUpdate {
+	_u.mutation.ClearCreatedByUserID()
+	return _u
+}
+
+// SetCostSharingEnabled sets the "cost_sharing_enabled" field.
+func (_u *AccountUpdate) SetCostSharingEnabled(v bool) *AccountUpdate {
+	_u.mutation.SetCostSharingEnabled(v)
+	return _u
+}
+
+// SetNillableCostSharingEnabled sets the "cost_sharing_enabled" field if the given value is not nil.
+func (_u *AccountUpdate) SetNillableCostSharingEnabled(v *bool) *AccountUpdate {
+	if v != nil {
+		_u.SetCostSharingEnabled(*v)
+	}
+	return _u
+}
+
 // SetPlatform sets the "platform" field.
 func (_u *AccountUpdate) SetPlatform(v string) *AccountUpdate {
 	_u.mutation.SetPlatform(v)
@@ -762,6 +850,11 @@ func (_u *AccountUpdate) check() error {
 			return &ValidationError{Name: "name", err: fmt.Errorf(`ent: validator failed for field "Account.name": %w`, err)}
 		}
 	}
+	if v, ok := _u.mutation.ProviderIdentity(); ok {
+		if err := account.ProviderIdentityValidator(v); err != nil {
+			return &ValidationError{Name: "provider_identity", err: fmt.Errorf(`ent: validator failed for field "Account.provider_identity": %w`, err)}
+		}
+	}
 	if v, ok := _u.mutation.Platform(); ok {
 		if err := account.PlatformValidator(v); err != nil {
 			return &ValidationError{Name: "platform", err: fmt.Errorf(`ent: validator failed for field "Account.platform": %w`, err)}
@@ -819,6 +912,33 @@ func (_u *AccountUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if _u.mutation.NotesCleared() {
 		_spec.ClearField(account.FieldNotes, field.TypeString)
+	}
+	if value, ok := _u.mutation.ProviderIdentity(); ok {
+		_spec.SetField(account.FieldProviderIdentity, field.TypeString, value)
+	}
+	if _u.mutation.ProviderIdentityCleared() {
+		_spec.ClearField(account.FieldProviderIdentity, field.TypeString)
+	}
+	if value, ok := _u.mutation.ContributorUserID(); ok {
+		_spec.SetField(account.FieldContributorUserID, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.AddedContributorUserID(); ok {
+		_spec.AddField(account.FieldContributorUserID, field.TypeInt64, value)
+	}
+	if _u.mutation.ContributorUserIDCleared() {
+		_spec.ClearField(account.FieldContributorUserID, field.TypeInt64)
+	}
+	if value, ok := _u.mutation.CreatedByUserID(); ok {
+		_spec.SetField(account.FieldCreatedByUserID, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.AddedCreatedByUserID(); ok {
+		_spec.AddField(account.FieldCreatedByUserID, field.TypeInt64, value)
+	}
+	if _u.mutation.CreatedByUserIDCleared() {
+		_spec.ClearField(account.FieldCreatedByUserID, field.TypeInt64)
+	}
+	if value, ok := _u.mutation.CostSharingEnabled(); ok {
+		_spec.SetField(account.FieldCostSharingEnabled, field.TypeBool, value)
 	}
 	if value, ok := _u.mutation.Platform(); ok {
 		_spec.SetField(account.FieldPlatform, field.TypeString, value)
@@ -1228,6 +1348,94 @@ func (_u *AccountUpdateOne) SetNillableNotes(v *string) *AccountUpdateOne {
 // ClearNotes clears the value of the "notes" field.
 func (_u *AccountUpdateOne) ClearNotes() *AccountUpdateOne {
 	_u.mutation.ClearNotes()
+	return _u
+}
+
+// SetProviderIdentity sets the "provider_identity" field.
+func (_u *AccountUpdateOne) SetProviderIdentity(v string) *AccountUpdateOne {
+	_u.mutation.SetProviderIdentity(v)
+	return _u
+}
+
+// SetNillableProviderIdentity sets the "provider_identity" field if the given value is not nil.
+func (_u *AccountUpdateOne) SetNillableProviderIdentity(v *string) *AccountUpdateOne {
+	if v != nil {
+		_u.SetProviderIdentity(*v)
+	}
+	return _u
+}
+
+// ClearProviderIdentity clears the value of the "provider_identity" field.
+func (_u *AccountUpdateOne) ClearProviderIdentity() *AccountUpdateOne {
+	_u.mutation.ClearProviderIdentity()
+	return _u
+}
+
+// SetContributorUserID sets the "contributor_user_id" field.
+func (_u *AccountUpdateOne) SetContributorUserID(v int64) *AccountUpdateOne {
+	_u.mutation.ResetContributorUserID()
+	_u.mutation.SetContributorUserID(v)
+	return _u
+}
+
+// SetNillableContributorUserID sets the "contributor_user_id" field if the given value is not nil.
+func (_u *AccountUpdateOne) SetNillableContributorUserID(v *int64) *AccountUpdateOne {
+	if v != nil {
+		_u.SetContributorUserID(*v)
+	}
+	return _u
+}
+
+// AddContributorUserID adds value to the "contributor_user_id" field.
+func (_u *AccountUpdateOne) AddContributorUserID(v int64) *AccountUpdateOne {
+	_u.mutation.AddContributorUserID(v)
+	return _u
+}
+
+// ClearContributorUserID clears the value of the "contributor_user_id" field.
+func (_u *AccountUpdateOne) ClearContributorUserID() *AccountUpdateOne {
+	_u.mutation.ClearContributorUserID()
+	return _u
+}
+
+// SetCreatedByUserID sets the "created_by_user_id" field.
+func (_u *AccountUpdateOne) SetCreatedByUserID(v int64) *AccountUpdateOne {
+	_u.mutation.ResetCreatedByUserID()
+	_u.mutation.SetCreatedByUserID(v)
+	return _u
+}
+
+// SetNillableCreatedByUserID sets the "created_by_user_id" field if the given value is not nil.
+func (_u *AccountUpdateOne) SetNillableCreatedByUserID(v *int64) *AccountUpdateOne {
+	if v != nil {
+		_u.SetCreatedByUserID(*v)
+	}
+	return _u
+}
+
+// AddCreatedByUserID adds value to the "created_by_user_id" field.
+func (_u *AccountUpdateOne) AddCreatedByUserID(v int64) *AccountUpdateOne {
+	_u.mutation.AddCreatedByUserID(v)
+	return _u
+}
+
+// ClearCreatedByUserID clears the value of the "created_by_user_id" field.
+func (_u *AccountUpdateOne) ClearCreatedByUserID() *AccountUpdateOne {
+	_u.mutation.ClearCreatedByUserID()
+	return _u
+}
+
+// SetCostSharingEnabled sets the "cost_sharing_enabled" field.
+func (_u *AccountUpdateOne) SetCostSharingEnabled(v bool) *AccountUpdateOne {
+	_u.mutation.SetCostSharingEnabled(v)
+	return _u
+}
+
+// SetNillableCostSharingEnabled sets the "cost_sharing_enabled" field if the given value is not nil.
+func (_u *AccountUpdateOne) SetNillableCostSharingEnabled(v *bool) *AccountUpdateOne {
+	if v != nil {
+		_u.SetCostSharingEnabled(*v)
+	}
 	return _u
 }
 
@@ -1915,6 +2123,11 @@ func (_u *AccountUpdateOne) check() error {
 			return &ValidationError{Name: "name", err: fmt.Errorf(`ent: validator failed for field "Account.name": %w`, err)}
 		}
 	}
+	if v, ok := _u.mutation.ProviderIdentity(); ok {
+		if err := account.ProviderIdentityValidator(v); err != nil {
+			return &ValidationError{Name: "provider_identity", err: fmt.Errorf(`ent: validator failed for field "Account.provider_identity": %w`, err)}
+		}
+	}
 	if v, ok := _u.mutation.Platform(); ok {
 		if err := account.PlatformValidator(v); err != nil {
 			return &ValidationError{Name: "platform", err: fmt.Errorf(`ent: validator failed for field "Account.platform": %w`, err)}
@@ -1989,6 +2202,33 @@ func (_u *AccountUpdateOne) sqlSave(ctx context.Context) (_node *Account, err er
 	}
 	if _u.mutation.NotesCleared() {
 		_spec.ClearField(account.FieldNotes, field.TypeString)
+	}
+	if value, ok := _u.mutation.ProviderIdentity(); ok {
+		_spec.SetField(account.FieldProviderIdentity, field.TypeString, value)
+	}
+	if _u.mutation.ProviderIdentityCleared() {
+		_spec.ClearField(account.FieldProviderIdentity, field.TypeString)
+	}
+	if value, ok := _u.mutation.ContributorUserID(); ok {
+		_spec.SetField(account.FieldContributorUserID, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.AddedContributorUserID(); ok {
+		_spec.AddField(account.FieldContributorUserID, field.TypeInt64, value)
+	}
+	if _u.mutation.ContributorUserIDCleared() {
+		_spec.ClearField(account.FieldContributorUserID, field.TypeInt64)
+	}
+	if value, ok := _u.mutation.CreatedByUserID(); ok {
+		_spec.SetField(account.FieldCreatedByUserID, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.AddedCreatedByUserID(); ok {
+		_spec.AddField(account.FieldCreatedByUserID, field.TypeInt64, value)
+	}
+	if _u.mutation.CreatedByUserIDCleared() {
+		_spec.ClearField(account.FieldCreatedByUserID, field.TypeInt64)
+	}
+	if value, ok := _u.mutation.CostSharingEnabled(); ok {
+		_spec.SetField(account.FieldCostSharingEnabled, field.TypeBool, value)
 	}
 	if value, ok := _u.mutation.Platform(); ok {
 		_spec.SetField(account.FieldPlatform, field.TypeString, value)

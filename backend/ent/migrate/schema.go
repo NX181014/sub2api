@@ -101,6 +101,10 @@ var (
 		{Name: "deleted_at", Type: field.TypeTime, Nullable: true, SchemaType: map[string]string{"postgres": "timestamptz"}},
 		{Name: "name", Type: field.TypeString, Size: 100},
 		{Name: "notes", Type: field.TypeString, Nullable: true, SchemaType: map[string]string{"postgres": "text"}},
+		{Name: "provider_identity", Type: field.TypeString, Nullable: true, Size: 255},
+		{Name: "contributor_user_id", Type: field.TypeInt64, Nullable: true},
+		{Name: "created_by_user_id", Type: field.TypeInt64, Nullable: true},
+		{Name: "cost_sharing_enabled", Type: field.TypeBool, Default: false},
 		{Name: "platform", Type: field.TypeString, Size: 50},
 		{Name: "type", Type: field.TypeString, Size: 20},
 		{Name: "credentials", Type: field.TypeJSON, SchemaType: map[string]string{"postgres": "jsonb"}},
@@ -136,13 +140,13 @@ var (
 		ForeignKeys: []*schema.ForeignKey{
 			{
 				Symbol:     "accounts_proxies_proxy",
-				Columns:    []*schema.Column{AccountsColumns[30]},
+				Columns:    []*schema.Column{AccountsColumns[34]},
 				RefColumns: []*schema.Column{ProxiesColumns[0]},
 				OnDelete:   schema.SetNull,
 			},
 			{
 				Symbol:     "accounts_accounts_children",
-				Columns:    []*schema.Column{AccountsColumns[31]},
+				Columns:    []*schema.Column{AccountsColumns[35]},
 				RefColumns: []*schema.Column{AccountsColumns[0]},
 				OnDelete:   schema.Restrict,
 			},
@@ -151,62 +155,62 @@ var (
 			{
 				Name:    "account_platform",
 				Unique:  false,
-				Columns: []*schema.Column{AccountsColumns[6]},
+				Columns: []*schema.Column{AccountsColumns[10]},
 			},
 			{
 				Name:    "account_type",
 				Unique:  false,
-				Columns: []*schema.Column{AccountsColumns[7]},
+				Columns: []*schema.Column{AccountsColumns[11]},
 			},
 			{
 				Name:    "account_status",
 				Unique:  false,
-				Columns: []*schema.Column{AccountsColumns[15]},
+				Columns: []*schema.Column{AccountsColumns[19]},
 			},
 			{
 				Name:    "account_proxy_id",
 				Unique:  false,
-				Columns: []*schema.Column{AccountsColumns[30]},
+				Columns: []*schema.Column{AccountsColumns[34]},
 			},
 			{
 				Name:    "account_priority",
 				Unique:  false,
-				Columns: []*schema.Column{AccountsColumns[13]},
+				Columns: []*schema.Column{AccountsColumns[17]},
 			},
 			{
 				Name:    "account_last_used_at",
 				Unique:  false,
-				Columns: []*schema.Column{AccountsColumns[17]},
+				Columns: []*schema.Column{AccountsColumns[21]},
 			},
 			{
 				Name:    "account_schedulable",
 				Unique:  false,
-				Columns: []*schema.Column{AccountsColumns[20]},
+				Columns: []*schema.Column{AccountsColumns[24]},
 			},
 			{
 				Name:    "account_rate_limited_at",
 				Unique:  false,
-				Columns: []*schema.Column{AccountsColumns[21]},
+				Columns: []*schema.Column{AccountsColumns[25]},
 			},
 			{
 				Name:    "account_rate_limit_reset_at",
 				Unique:  false,
-				Columns: []*schema.Column{AccountsColumns[22]},
+				Columns: []*schema.Column{AccountsColumns[26]},
 			},
 			{
 				Name:    "account_overload_until",
 				Unique:  false,
-				Columns: []*schema.Column{AccountsColumns[23]},
+				Columns: []*schema.Column{AccountsColumns[27]},
 			},
 			{
 				Name:    "account_platform_priority",
 				Unique:  false,
-				Columns: []*schema.Column{AccountsColumns[6], AccountsColumns[13]},
+				Columns: []*schema.Column{AccountsColumns[10], AccountsColumns[17]},
 			},
 			{
 				Name:    "account_priority_status",
 				Unique:  false,
-				Columns: []*schema.Column{AccountsColumns[13], AccountsColumns[15]},
+				Columns: []*schema.Column{AccountsColumns[17], AccountsColumns[19]},
 			},
 			{
 				Name:    "account_deleted_at",
@@ -216,7 +220,64 @@ var (
 			{
 				Name:    "account_parent_account_id",
 				Unique:  false,
-				Columns: []*schema.Column{AccountsColumns[31]},
+				Columns: []*schema.Column{AccountsColumns[35]},
+			},
+			{
+				Name:    "account_cost_sharing_enabled",
+				Unique:  false,
+				Columns: []*schema.Column{AccountsColumns[9]},
+			},
+			{
+				Name:    "account_contributor_user_id",
+				Unique:  false,
+				Columns: []*schema.Column{AccountsColumns[7]},
+			},
+		},
+	}
+	// AccountCostEntriesColumns holds the columns for the "account_cost_entries" table.
+	AccountCostEntriesColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeInt64, Increment: true},
+		{Name: "created_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "updated_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "account_id", Type: field.TypeInt64},
+		{Name: "payer_user_id", Type: field.TypeInt64},
+		{Name: "purchase_source_id", Type: field.TypeInt64, Nullable: true},
+		{Name: "entry_type", Type: field.TypeString, Size: 30},
+		{Name: "currency", Type: field.TypeString, Size: 3, Default: "CNY"},
+		{Name: "original_amount", Type: field.TypeString, Size: 40},
+		{Name: "cny_amount_minor", Type: field.TypeInt64},
+		{Name: "fx_rate", Type: field.TypeString, Size: 40, Default: "1"},
+		{Name: "service_start", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "date"}},
+		{Name: "service_end", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "date"}},
+		{Name: "warranty_end", Type: field.TypeTime, Nullable: true, SchemaType: map[string]string{"postgres": "date"}},
+		{Name: "paid_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "order_no", Type: field.TypeString, Nullable: true, Size: 255},
+		{Name: "purchase_url", Type: field.TypeString, Nullable: true, Size: 2048},
+		{Name: "note", Type: field.TypeString, Nullable: true},
+		{Name: "supersedes_id", Type: field.TypeInt64, Nullable: true},
+		{Name: "related_account_id", Type: field.TypeInt64, Nullable: true},
+		{Name: "created_by_user_id", Type: field.TypeInt64},
+	}
+	// AccountCostEntriesTable holds the schema information for the "account_cost_entries" table.
+	AccountCostEntriesTable = &schema.Table{
+		Name:       "account_cost_entries",
+		Columns:    AccountCostEntriesColumns,
+		PrimaryKey: []*schema.Column{AccountCostEntriesColumns[0]},
+		Indexes: []*schema.Index{
+			{
+				Name:    "accountcostentry_account_id_service_start_service_end",
+				Unique:  false,
+				Columns: []*schema.Column{AccountCostEntriesColumns[3], AccountCostEntriesColumns[11], AccountCostEntriesColumns[12]},
+			},
+			{
+				Name:    "accountcostentry_payer_user_id",
+				Unique:  false,
+				Columns: []*schema.Column{AccountCostEntriesColumns[4]},
+			},
+			{
+				Name:    "accountcostentry_purchase_source_id",
+				Unique:  false,
+				Columns: []*schema.Column{AccountCostEntriesColumns[5]},
 			},
 		},
 	}
@@ -256,6 +317,33 @@ var (
 				Name:    "accountgroup_priority",
 				Unique:  false,
 				Columns: []*schema.Column{AccountGroupsColumns[0]},
+			},
+		},
+	}
+	// AccountLifecycleEventsColumns holds the columns for the "account_lifecycle_events" table.
+	AccountLifecycleEventsColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeInt64, Increment: true},
+		{Name: "created_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "updated_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "account_id", Type: field.TypeInt64},
+		{Name: "event_type", Type: field.TypeString, Size: 30},
+		{Name: "occurred_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "reason", Type: field.TypeString, Nullable: true},
+		{Name: "replacement_account_id", Type: field.TypeInt64, Nullable: true},
+		{Name: "transferred_cost_minor", Type: field.TypeInt64, Default: 0},
+		{Name: "source", Type: field.TypeString, Size: 20, Default: "manual"},
+		{Name: "created_by_user_id", Type: field.TypeInt64, Nullable: true},
+	}
+	// AccountLifecycleEventsTable holds the schema information for the "account_lifecycle_events" table.
+	AccountLifecycleEventsTable = &schema.Table{
+		Name:       "account_lifecycle_events",
+		Columns:    AccountLifecycleEventsColumns,
+		PrimaryKey: []*schema.Column{AccountLifecycleEventsColumns[0]},
+		Indexes: []*schema.Index{
+			{
+				Name:    "accountlifecycleevent_account_id_occurred_at",
+				Unique:  false,
+				Columns: []*schema.Column{AccountLifecycleEventsColumns[3], AccountLifecycleEventsColumns[5]},
 			},
 		},
 	}
@@ -1299,6 +1387,81 @@ var (
 			},
 		},
 	}
+	// PoolSettlementsColumns holds the columns for the "pool_settlements" table.
+	PoolSettlementsColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeInt64, Increment: true},
+		{Name: "created_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "updated_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "period_type", Type: field.TypeString, Size: 10},
+		{Name: "period_start", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "period_end", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "timezone", Type: field.TypeString, Size: 50, Default: "Asia/Shanghai"},
+		{Name: "status", Type: field.TypeString, Size: 20, Default: "draft"},
+		{Name: "period_cost_minor", Type: field.TypeInt64, Default: 0},
+		{Name: "carry_in_minor", Type: field.TypeInt64, Default: 0},
+		{Name: "carry_out_minor", Type: field.TypeInt64, Default: 0},
+		{Name: "total_cost_minor", Type: field.TypeInt64, Default: 0},
+		{Name: "total_usage_weight", Type: field.TypeString, Size: 50, Default: "0"},
+		{Name: "pricing_coverage", Type: field.TypeString, Size: 40, Default: "1"},
+		{Name: "unpriced_usage_count", Type: field.TypeInt64, Default: 0},
+		{Name: "fx_rate", Type: field.TypeString, Size: 40, Default: "1"},
+		{Name: "formula_version", Type: field.TypeString, Size: 20, Default: "v1"},
+		{Name: "cost_snapshot", Type: field.TypeJSON, SchemaType: map[string]string{"postgres": "jsonb"}},
+		{Name: "generated_by_user_id", Type: field.TypeInt64},
+		{Name: "locked_by_user_id", Type: field.TypeInt64, Nullable: true},
+		{Name: "locked_at", Type: field.TypeTime, Nullable: true, SchemaType: map[string]string{"postgres": "timestamptz"}},
+	}
+	// PoolSettlementsTable holds the schema information for the "pool_settlements" table.
+	PoolSettlementsTable = &schema.Table{
+		Name:       "pool_settlements",
+		Columns:    PoolSettlementsColumns,
+		PrimaryKey: []*schema.Column{PoolSettlementsColumns[0]},
+		Indexes: []*schema.Index{
+			{
+				Name:    "poolsettlement_status_period_start_period_end",
+				Unique:  false,
+				Columns: []*schema.Column{PoolSettlementsColumns[7], PoolSettlementsColumns[4], PoolSettlementsColumns[5]},
+			},
+			{
+				Name:    "poolsettlement_period_start_period_end",
+				Unique:  false,
+				Columns: []*schema.Column{PoolSettlementsColumns[4], PoolSettlementsColumns[5]},
+			},
+		},
+	}
+	// PoolSettlementLinesColumns holds the columns for the "pool_settlement_lines" table.
+	PoolSettlementLinesColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeInt64, Increment: true},
+		{Name: "created_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "updated_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "settlement_id", Type: field.TypeInt64},
+		{Name: "user_id", Type: field.TypeInt64},
+		{Name: "usage_weight", Type: field.TypeString, Size: 50, Default: "0"},
+		{Name: "usage_share", Type: field.TypeString, Size: 40, Default: "0"},
+		{Name: "allocated_cost_minor", Type: field.TypeInt64, Default: 0},
+		{Name: "contribution_credit_minor", Type: field.TypeInt64, Default: 0},
+		{Name: "adjustment_minor", Type: field.TypeInt64, Default: 0},
+		{Name: "net_amount_minor", Type: field.TypeInt64, Default: 0},
+		{Name: "payment_status", Type: field.TypeString, Size: 20, Default: "unpaid"},
+	}
+	// PoolSettlementLinesTable holds the schema information for the "pool_settlement_lines" table.
+	PoolSettlementLinesTable = &schema.Table{
+		Name:       "pool_settlement_lines",
+		Columns:    PoolSettlementLinesColumns,
+		PrimaryKey: []*schema.Column{PoolSettlementLinesColumns[0]},
+		Indexes: []*schema.Index{
+			{
+				Name:    "poolsettlementline_settlement_id_user_id",
+				Unique:  true,
+				Columns: []*schema.Column{PoolSettlementLinesColumns[3], PoolSettlementLinesColumns[4]},
+			},
+			{
+				Name:    "poolsettlementline_user_id",
+				Unique:  false,
+				Columns: []*schema.Column{PoolSettlementLinesColumns[4]},
+			},
+		},
+	}
 	// PromoCodesColumns holds the columns for the "promo_codes" table.
 	PromoCodesColumns = []*schema.Column{
 		{Name: "id", Type: field.TypeInt64, Increment: true},
@@ -1426,6 +1589,29 @@ var (
 				Name:    "proxy_backup_proxy_id",
 				Unique:  false,
 				Columns: []*schema.Column{ProxiesColumns[14]},
+			},
+		},
+	}
+	// PurchaseSourcesColumns holds the columns for the "purchase_sources" table.
+	PurchaseSourcesColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeInt64, Increment: true},
+		{Name: "created_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "updated_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "name", Type: field.TypeString, Size: 100},
+		{Name: "website_url", Type: field.TypeString, Nullable: true, Size: 2048},
+		{Name: "notes", Type: field.TypeString, Nullable: true},
+		{Name: "active", Type: field.TypeBool, Default: true},
+	}
+	// PurchaseSourcesTable holds the schema information for the "purchase_sources" table.
+	PurchaseSourcesTable = &schema.Table{
+		Name:       "purchase_sources",
+		Columns:    PurchaseSourcesColumns,
+		PrimaryKey: []*schema.Column{PurchaseSourcesColumns[0]},
+		Indexes: []*schema.Index{
+			{
+				Name:    "purchasesource_name",
+				Unique:  true,
+				Columns: []*schema.Column{PurchaseSourcesColumns[3]},
 			},
 		},
 	}
@@ -2061,11 +2247,38 @@ var (
 			},
 		},
 	}
+	// ValuationFxRatesColumns holds the columns for the "valuation_fx_rates" table.
+	ValuationFxRatesColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeInt64, Increment: true},
+		{Name: "created_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "updated_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "base_currency", Type: field.TypeString, Size: 3, Default: "USD"},
+		{Name: "quote_currency", Type: field.TypeString, Size: 3, Default: "CNY"},
+		{Name: "rate", Type: field.TypeString, Size: 40},
+		{Name: "effective_from", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "source", Type: field.TypeString, Nullable: true, Size: 100},
+		{Name: "created_by_user_id", Type: field.TypeInt64},
+	}
+	// ValuationFxRatesTable holds the schema information for the "valuation_fx_rates" table.
+	ValuationFxRatesTable = &schema.Table{
+		Name:       "valuation_fx_rates",
+		Columns:    ValuationFxRatesColumns,
+		PrimaryKey: []*schema.Column{ValuationFxRatesColumns[0]},
+		Indexes: []*schema.Index{
+			{
+				Name:    "valuationfxrate_base_currency_quote_currency_effective_from",
+				Unique:  true,
+				Columns: []*schema.Column{ValuationFxRatesColumns[3], ValuationFxRatesColumns[4], ValuationFxRatesColumns[6]},
+			},
+		},
+	}
 	// Tables holds all the tables in the schema.
 	Tables = []*schema.Table{
 		APIKeysTable,
 		AccountsTable,
+		AccountCostEntriesTable,
 		AccountGroupsTable,
+		AccountLifecycleEventsTable,
 		AnnouncementsTable,
 		AnnouncementReadsTable,
 		AuthIdentitiesTable,
@@ -2086,9 +2299,12 @@ var (
 		PaymentOrdersTable,
 		PaymentProviderInstancesTable,
 		PendingAuthSessionsTable,
+		PoolSettlementsTable,
+		PoolSettlementLinesTable,
 		PromoCodesTable,
 		PromoCodeUsagesTable,
 		ProxiesTable,
+		PurchaseSourcesTable,
 		RedeemCodesTable,
 		SecuritySecretsTable,
 		SettingsTable,
@@ -2102,6 +2318,7 @@ var (
 		UserAttributeValuesTable,
 		UserPlatformQuotasTable,
 		UserSubscriptionsTable,
+		ValuationFxRatesTable,
 	}
 )
 
@@ -2116,10 +2333,16 @@ func init() {
 	AccountsTable.Annotation = &entsql.Annotation{
 		Table: "accounts",
 	}
+	AccountCostEntriesTable.Annotation = &entsql.Annotation{
+		Table: "account_cost_entries",
+	}
 	AccountGroupsTable.ForeignKeys[0].RefTable = AccountsTable
 	AccountGroupsTable.ForeignKeys[1].RefTable = GroupsTable
 	AccountGroupsTable.Annotation = &entsql.Annotation{
 		Table: "account_groups",
+	}
+	AccountLifecycleEventsTable.Annotation = &entsql.Annotation{
+		Table: "account_lifecycle_events",
 	}
 	AnnouncementsTable.Annotation = &entsql.Annotation{
 		Table: "announcements",
@@ -2193,6 +2416,12 @@ func init() {
 	PendingAuthSessionsTable.Annotation = &entsql.Annotation{
 		Table: "pending_auth_sessions",
 	}
+	PoolSettlementsTable.Annotation = &entsql.Annotation{
+		Table: "pool_settlements",
+	}
+	PoolSettlementLinesTable.Annotation = &entsql.Annotation{
+		Table: "pool_settlement_lines",
+	}
 	PromoCodesTable.Annotation = &entsql.Annotation{
 		Table: "promo_codes",
 	}
@@ -2204,6 +2433,9 @@ func init() {
 	ProxiesTable.ForeignKeys[0].RefTable = ProxiesTable
 	ProxiesTable.Annotation = &entsql.Annotation{
 		Table: "proxies",
+	}
+	PurchaseSourcesTable.Annotation = &entsql.Annotation{
+		Table: "purchase_sources",
 	}
 	RedeemCodesTable.ForeignKeys[0].RefTable = GroupsTable
 	RedeemCodesTable.ForeignKeys[1].RefTable = UsersTable
@@ -2258,5 +2490,8 @@ func init() {
 	UserSubscriptionsTable.ForeignKeys[2].RefTable = UsersTable
 	UserSubscriptionsTable.Annotation = &entsql.Annotation{
 		Table: "user_subscriptions",
+	}
+	ValuationFxRatesTable.Annotation = &entsql.Annotation{
+		Table: "valuation_fx_rates",
 	}
 }

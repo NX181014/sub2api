@@ -26,6 +26,14 @@ const (
 	FieldName = "name"
 	// FieldNotes holds the string denoting the notes field in the database.
 	FieldNotes = "notes"
+	// FieldProviderIdentity holds the string denoting the provider_identity field in the database.
+	FieldProviderIdentity = "provider_identity"
+	// FieldContributorUserID holds the string denoting the contributor_user_id field in the database.
+	FieldContributorUserID = "contributor_user_id"
+	// FieldCreatedByUserID holds the string denoting the created_by_user_id field in the database.
+	FieldCreatedByUserID = "created_by_user_id"
+	// FieldCostSharingEnabled holds the string denoting the cost_sharing_enabled field in the database.
+	FieldCostSharingEnabled = "cost_sharing_enabled"
 	// FieldPlatform holds the string denoting the platform field in the database.
 	FieldPlatform = "platform"
 	// FieldType holds the string denoting the type field in the database.
@@ -136,6 +144,10 @@ var Columns = []string{
 	FieldDeletedAt,
 	FieldName,
 	FieldNotes,
+	FieldProviderIdentity,
+	FieldContributorUserID,
+	FieldCreatedByUserID,
+	FieldCostSharingEnabled,
 	FieldPlatform,
 	FieldType,
 	FieldCredentials,
@@ -196,6 +208,10 @@ var (
 	UpdateDefaultUpdatedAt func() time.Time
 	// NameValidator is a validator for the "name" field. It is called by the builders before save.
 	NameValidator func(string) error
+	// ProviderIdentityValidator is a validator for the "provider_identity" field. It is called by the builders before save.
+	ProviderIdentityValidator func(string) error
+	// DefaultCostSharingEnabled holds the default value on creation for the "cost_sharing_enabled" field.
+	DefaultCostSharingEnabled bool
 	// PlatformValidator is a validator for the "platform" field. It is called by the builders before save.
 	PlatformValidator func(string) error
 	// TypeValidator is a validator for the "type" field. It is called by the builders before save.
@@ -279,6 +295,26 @@ func ByName(opts ...sql.OrderTermOption) OrderOption {
 // ByNotes orders the results by the notes field.
 func ByNotes(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldNotes, opts...).ToFunc()
+}
+
+// ByProviderIdentity orders the results by the provider_identity field.
+func ByProviderIdentity(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldProviderIdentity, opts...).ToFunc()
+}
+
+// ByContributorUserID orders the results by the contributor_user_id field.
+func ByContributorUserID(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldContributorUserID, opts...).ToFunc()
+}
+
+// ByCreatedByUserID orders the results by the created_by_user_id field.
+func ByCreatedByUserID(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldCreatedByUserID, opts...).ToFunc()
+}
+
+// ByCostSharingEnabled orders the results by the cost_sharing_enabled field.
+func ByCostSharingEnabled(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldCostSharingEnabled, opts...).ToFunc()
 }
 
 // ByPlatform orders the results by the platform field.
