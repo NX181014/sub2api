@@ -42,6 +42,7 @@ type CodexSessionImportRequest struct {
 	ConfirmMixedChannelRisk *bool          `json:"confirm_mixed_channel_risk"`
 	uploaderUserID          *int64
 	importBatchID           string
+	skipExistingUpdates     bool
 }
 
 type CodexSessionImportResult struct {
@@ -144,10 +145,6 @@ func (h *AccountHandler) ImportCodexSession(c *gin.Context) {
 		response.BadRequest(c, "load_factor must be <= 10000")
 		return
 	}
-	if (req.UpdateExisting == nil || *req.UpdateExisting) && !h.requirePrimaryAdmin(c, "updating existing accounts through Codex import") {
-		return
-	}
-
 	entries, err := parseCodexSessionImportEntries(req)
 	if err != nil {
 		response.BadRequest(c, err.Error())
@@ -160,6 +157,7 @@ func (h *AccountHandler) ImportCodexSession(c *gin.Context) {
 	actorID, _ := optionalPoolActorID(c)
 	req.uploaderUserID = optionalPositiveInt64(actorID)
 	req.importBatchID = uuid.NewString()
+	req.skipExistingUpdates = h.poolService != nil && !h.poolService.IsPrimaryAdmin(c.Request.Context(), actorID)
 
 	executeAdminIdempotentJSON(c, "admin.accounts.import_codex_session", req, service.DefaultWriteIdempotencyTTL(), func(ctx context.Context) (any, error) {
 		return h.importCodexSessions(ctx, req, entries)
@@ -263,6 +261,24 @@ func (h *AccountHandler) importCodexSessions(ctx context.Context, req CodexSessi
 		markCodexIdentitySeen(seenIdentity, item.IdentityKeys, entry.Index, item.UserID)
 
 		existing, matchedKey := index.Find(item.IdentityKeys, item.UserID)
+		if existing != nil && req.skipExistingUpdates {
+			message := "账号已存在；更新需通过单账号审批，已跳过"
+			result.Skipped++
+			result.Items = append(result.Items, CodexSessionImportItem{
+				Index:     entry.Index,
+				Name:      accountName,
+				Action:    "skipped",
+				AccountID: existing.ID,
+				Message:   message,
+			})
+			result.Warnings = append(result.Warnings, CodexSessionImportMessage{
+				Index:   entry.Index,
+				Name:    accountName,
+				Message: message,
+			})
+			continue
+		}
+
 		if existing != nil && updateExisting {
 			if strings.HasPrefix(matchedKey, "account:") && item.UserID != "" &&
 				codexCredentialString(existing.Credentials, "chatgpt_user_id") == "" {

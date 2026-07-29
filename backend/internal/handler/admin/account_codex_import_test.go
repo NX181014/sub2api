@@ -5,11 +5,16 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
+	"github.com/gin-gonic/gin"
 )
 
 func TestParseCodexSessionImportEntriesSupportsRawTokenJSONAndArray(t *testing.T) {
@@ -720,6 +725,69 @@ func TestImportCodexSessionsAccessTokenOnlySameUserUpdatesExisting(t *testing.T)
 	}
 	if got := svc.updatedAccounts[0].input.Extra["openai_long_context_billing_enabled"]; got != false {
 		t.Fatalf("openai_long_context_billing_enabled = %v, want false", got)
+	}
+}
+
+func TestImportCodexSessionNonPrimaryCreatesNewAndSkipsExisting(t *testing.T) {
+	existingToken := buildCodexAccessToken(t, "workspace-1", "user-1", time.Now().Add(time.Hour))
+	newToken := buildCodexAccessToken(t, "workspace-2", "user-2", time.Now().Add(time.Hour))
+	svc := newCodexImportMemoryAdminService([]service.Account{{
+		ID:       10,
+		Name:     "existing",
+		Platform: service.PlatformOpenAI,
+		Type:     service.AccountTypeOAuth,
+		Credentials: map[string]any{
+			"chatgpt_account_id": "workspace-1",
+			"chatgpt_user_id":    "user-1",
+			"access_token":       existingToken,
+		},
+	}})
+	handler := NewAccountHandler(svc, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	settings := service.NewSettingService(approvalGateSettingRepo{primaryID: "1"}, nil)
+	handler.SetPoolService(service.NewPoolService(nil, nil, svc, nil, settings))
+
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: 2})
+		c.Next()
+	})
+	router.POST("/accounts/import-codex-session", handler.ImportCodexSession)
+
+	body, err := json.Marshal(CodexSessionImportRequest{
+		Content:              existingToken + "\n" + newToken,
+		UpdateExisting:       boolPtr(true),
+		SkipDefaultGroupBind: boolPtr(true),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/accounts/import-codex-session", strings.NewReader(string(body)))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Idempotency-Key", "non-primary-codex-import")
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+	var envelope struct {
+		Data CodexSessionImportResult `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &envelope); err != nil {
+		t.Fatal(err)
+	}
+	result := envelope.Data
+	if result.Created != 1 || result.Updated != 0 || result.Skipped != 1 || result.Failed != 0 {
+		t.Fatalf("result=%+v, want one created and one skipped", result)
+	}
+	if len(svc.createdAccounts) != 1 || len(svc.updatedAccounts) != 0 {
+		t.Fatalf("created=%d updated=%d", len(svc.createdAccounts), len(svc.updatedAccounts))
+	}
+	if !slices.ContainsFunc(result.Warnings, func(item CodexSessionImportMessage) bool {
+		return strings.Contains(item.Message, "单账号审批")
+	}) {
+		t.Fatalf("warnings=%+v", result.Warnings)
 	}
 }
 
