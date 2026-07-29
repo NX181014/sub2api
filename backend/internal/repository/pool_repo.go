@@ -839,7 +839,7 @@ ORDER BY c.id`, args...)
 	for costRows.Next() {
 		var item service.PoolCostSlice
 		if err := costRows.Scan(&item.EntryID, &item.AccountID, &item.PayerUserID, &item.EntryType, &item.AmountMinor, &item.ServiceStart, &item.ServiceEnd); err != nil {
-			costRows.Close()
+			_ = costRows.Close()
 			return nil, nil, service.PoolUsageCoverage{}, nil, err
 		}
 		costs = append(costs, item)
@@ -872,12 +872,12 @@ GROUP BY ul.user_id,u.email,u.username ORDER BY ul.user_id`, args...)
 		var item service.PoolUsageWeight
 		var raw string
 		if err := usageRows.Scan(&item.UserID, &item.Email, &item.Username, &raw); err != nil {
-			usageRows.Close()
+			_ = usageRows.Close()
 			return nil, nil, service.PoolUsageCoverage{}, nil, err
 		}
 		item.Weight, err = decimal.NewFromString(raw)
 		if err != nil {
-			usageRows.Close()
+			_ = usageRows.Close()
 			return nil, nil, service.PoolUsageCoverage{}, nil, err
 		}
 		weights = append(weights, item)

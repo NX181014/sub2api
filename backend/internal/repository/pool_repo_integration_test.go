@@ -94,7 +94,7 @@ func TestPoolRepository_GetRecoveryKeepsPhysicalAccountsSeparate(t *testing.T) {
 
 	addUsage(replacement.ID, 4, 240)
 	addUsage(replacement.ID, 5, 240)
-	addUsage(replacement.ID, 7, 240) // Three effective days across seven observed natural days.
+	addUsage(replacement.ID, 7, 240) // Three effective days in the Jan 1-9 reporting window.
 
 	items, err := repo.GetRecovery(ctx, date(1), date(10))
 	require.NoError(t, err)
@@ -125,9 +125,9 @@ func TestPoolRepository_GetRecoveryKeepsPhysicalAccountsSeparate(t *testing.T) {
 	require.Equal(t, int64(6000), gotReplacement.ValueMinor)
 	require.Zero(t, gotReplacement.NetProfitMinor)
 	require.Equal(t, "1", gotReplacement.RecoveryRate)
-	require.Equal(t, int64(103), gotReplacement.AverageDailyTokens)
+	require.Equal(t, int64(80), gotReplacement.AverageDailyTokens)
 	require.Equal(t, int64(3), gotReplacement.EffectiveUsageDays)
-	require.Equal(t, int64(7), gotReplacement.ObservationDays)
+	require.Equal(t, int64(9), gotReplacement.ObservationDays)
 	require.True(t, gotReplacement.CurrentlyRecovered)
 	require.WithinDuration(t, date(7).Add(12*time.Hour), *gotReplacement.FirstRecoveryAt, time.Second)
 	require.WithinDuration(t, *gotReplacement.FirstRecoveryAt, *gotReplacement.LatestRecoveryAt, time.Second)
