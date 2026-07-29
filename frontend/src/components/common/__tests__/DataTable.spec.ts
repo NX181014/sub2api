@@ -357,4 +357,24 @@ describe('DataTable', () => {
 
     expect(wrapper.emitted('update:selectedKeys')?.at(-1)?.[0]).toEqual([99, 1, 2])
   })
+
+  it('renders only the ordered mobile column subset when configured', () => {
+    stubMobileMatchMedia()
+    const wrapper = mount(DataTable, {
+      props: {
+        columns: [
+          { key: 'name', label: 'Name' },
+          { key: 'uploader', label: 'Uploader' },
+          { key: 'cost', label: 'Cost' },
+          { key: 'status', label: 'Status' }
+        ],
+        mobileColumnKeys: ['uploader', 'cost', 'status'],
+        data: [{ id: 1, name: 'Account', uploader: 'admin@example.com', cost: 12, status: 'active' }],
+        rowKey: 'id'
+      }
+    })
+
+    expect(wrapper.find('[data-field="name"]').exists()).toBe(false)
+    expect(wrapper.findAll('[data-field]').map((field) => field.attributes('data-field'))).toEqual(['uploader', 'cost', 'status'])
+  })
 })

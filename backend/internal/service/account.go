@@ -42,6 +42,18 @@ type Account struct {
 	AutoPauseOnExpired bool
 	CreatedAt          time.Time
 	UpdatedAt          time.Time
+	ProviderIdentity   *string
+	ContributorUserID  *int64
+	CreatedByUserID    *int64
+	CostSharingEnabled bool
+	// Pool list metrics are populated for paginated admin account listings only.
+	UploaderEmail          *string
+	ExpectedTokenCount     *int64
+	PoolTotalUsageTokens   int64
+	PoolNetCostMinor       int64
+	PoolRemainingCostMinor int64
+	PoolCostProgress       *string
+	PoolLifecycleStatus    string
 
 	Schedulable bool
 

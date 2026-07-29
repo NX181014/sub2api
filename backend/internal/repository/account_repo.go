@@ -806,7 +806,7 @@ func (r *accountRepository) List(ctx context.Context, params pagination.Paginati
 	return r.ListWithFilters(ctx, params, "", "", "", "", 0, "")
 }
 
-func (r *accountRepository) accountListFilteredQuery(platform, accountType, status, search string, groupID int64, privacyMode string) *dbent.AccountQuery {
+func (r *accountRepository) accountListFilteredQuery(platform, accountType, status, search string, groupID int64, privacyMode string, uploaderUserID *int64) *dbent.AccountQuery {
 	q := r.client.Account.Query()
 
 	if platform != "" {
@@ -898,12 +898,33 @@ func (r *accountRepository) accountListFilteredQuery(platform, accountType, stat
 			}
 		}))
 	}
+	if uploaderUserID != nil {
+		q = q.Where(dbaccount.CreatedByUserIDEQ(*uploaderUserID))
+	}
 
 	return q
 }
 
 func (r *accountRepository) ListWithFilters(ctx context.Context, params pagination.PaginationParams, platform, accountType, status, search string, groupID int64, privacyMode string) ([]service.Account, *pagination.PaginationResult, error) {
-	q := r.accountListFilteredQuery(platform, accountType, status, search, groupID, privacyMode)
+	return r.listWithFilters(ctx, params, platform, accountType, status, search, groupID, privacyMode, nil, false)
+}
+
+// ListWithFiltersByUploader keeps uploader filtering inside the database query,
+// so totals and page boundaries remain correct.
+func (r *accountRepository) ListWithFiltersByUploader(ctx context.Context, params pagination.PaginationParams, platform, accountType, status, search string, groupID int64, privacyMode string, uploaderUserID int64) ([]service.Account, *pagination.PaginationResult, error) {
+	return r.listWithFilters(ctx, params, platform, accountType, status, search, groupID, privacyMode, &uploaderUserID, false)
+}
+
+func (r *accountRepository) ListWithFiltersByUploaderAndPoolMetrics(ctx context.Context, params pagination.PaginationParams, platform, accountType, status, search string, groupID int64, privacyMode string, uploaderUserID int64) ([]service.Account, *pagination.PaginationResult, error) {
+	return r.listWithFilters(ctx, params, platform, accountType, status, search, groupID, privacyMode, &uploaderUserID, true)
+}
+
+func (r *accountRepository) ListWithFiltersAndPoolMetrics(ctx context.Context, params pagination.PaginationParams, platform, accountType, status, search string, groupID int64, privacyMode string) ([]service.Account, *pagination.PaginationResult, error) {
+	return r.listWithFilters(ctx, params, platform, accountType, status, search, groupID, privacyMode, nil, true)
+}
+
+func (r *accountRepository) listWithFilters(ctx context.Context, params pagination.PaginationParams, platform, accountType, status, search string, groupID int64, privacyMode string, uploaderUserID *int64, includePoolMetrics bool) ([]service.Account, *pagination.PaginationResult, error) {
+	q := r.accountListFilteredQuery(platform, accountType, status, search, groupID, privacyMode, uploaderUserID)
 	// Clone before Count so interceptor-appended predicates (SoftDeleteMixin's
 	// deleted_at IS NULL) don't accumulate on the shared builder and pollute the
 	// subsequent list query. Same pattern used in group_repo/promo_code_repo/user_repo
@@ -929,15 +950,117 @@ func (r *accountRepository) ListWithFilters(ctx context.Context, params paginati
 	if err != nil {
 		return nil, nil, err
 	}
+	if includePoolMetrics {
+		if err := r.enrichAccountListPoolMetrics(ctx, outAccounts); err != nil {
+			return nil, nil, err
+		}
+	}
 	return outAccounts, paginationResultFromTotal(int64(total), params), nil
 }
 
 func (r *accountRepository) ListAllWithFilters(ctx context.Context, platform, accountType, status, search string, groupID int64, privacyMode string) ([]service.Account, error) {
-	accounts, err := r.accountListFilteredQuery(platform, accountType, status, search, groupID, privacyMode).All(ctx)
+	accounts, err := r.accountListFilteredQuery(platform, accountType, status, search, groupID, privacyMode, nil).All(ctx)
 	if err != nil {
 		return nil, err
 	}
 	return r.accountsToService(ctx, accounts)
+}
+
+func (r *accountRepository) enrichAccountListPoolMetrics(ctx context.Context, accounts []service.Account) error {
+	if len(accounts) == 0 || r.sql == nil {
+		return nil
+	}
+
+	args := make([]any, len(accounts))
+	placeholders := make([]string, len(accounts))
+	byID := make(map[int64]*service.Account, len(accounts))
+	for i := range accounts {
+		args[i] = accounts[i].ID
+		placeholders[i] = "$" + strconv.Itoa(i+1)
+		byID[accounts[i].ID] = &accounts[i]
+	}
+
+	rows, err := r.sql.QueryContext(ctx, `
+SELECT a.id,uploader.email,a.expected_token_count,
+       COALESCE(costs.cost_basis_minor,0)::bigint,
+       COALESCE(costs.refund_minor,0)::bigint,
+       COALESCE(costs.transferred_out_minor,0)::bigint,
+       COALESCE(costs.written_off_minor,0)::bigint,
+       COALESCE(costs.net_cost_minor,0)::bigint,
+	   COALESCE(costs.tranches,'[]'::jsonb),
+       COALESCE(usage.total_tokens,0)::bigint,
+       COALESCE(lifecycle.event_type,'active')
+FROM accounts a
+LEFT JOIN users uploader ON uploader.id=a.created_by_user_id
+LEFT JOIN LATERAL (
+    SELECT COALESCE(SUM(c.cny_amount_minor) FILTER (WHERE c.entry_type NOT IN ('refund','replacement_out','write_off')),0)::bigint cost_basis_minor,
+           COALESCE(-SUM(c.cny_amount_minor) FILTER (WHERE c.entry_type='refund' AND c.cny_amount_minor<0),0)::bigint refund_minor,
+           COALESCE(-SUM(c.cny_amount_minor) FILTER (WHERE c.entry_type='replacement_out' AND c.cny_amount_minor<0),0)::bigint transferred_out_minor,
+           COALESCE(-SUM(c.cny_amount_minor) FILTER (WHERE c.entry_type='write_off' AND c.cny_amount_minor<0),0)::bigint written_off_minor,
+           COALESCE(SUM(c.cny_amount_minor) FILTER (WHERE c.entry_type<>'write_off'),0)::bigint net_cost_minor,
+	       COALESCE((SELECT jsonb_agg(jsonb_build_object(
+	         'id',priced.id,'cost_minor',priced.cny_amount_minor,'expected_tokens',priced.expected_token_count,
+	         'paid_at',priced.paid_at,'payer_user_id',priced.payer_user_id,'purchase_source_id',priced.purchase_source_id,
+	         'service_start',priced.service_start,'service_end',priced.service_end,
+	         'usage_tokens',COALESCE((SELECT SUM(ul.input_tokens::bigint+ul.output_tokens::bigint+ul.cache_creation_tokens::bigint+
+	           ul.cache_read_tokens::bigint+ul.image_output_tokens::bigint+ul.image_input_tokens::bigint)
+	           FROM usage_logs ul WHERE ul.account_id=a.id AND ul.created_at>=priced.paid_at
+	             AND (priced.next_paid_at IS NULL OR ul.created_at<priced.next_paid_at)),0)) ORDER BY priced.paid_at,priced.id)
+	         FROM (SELECT c2.*,LEAD(c2.paid_at) OVER (ORDER BY c2.paid_at,c2.id) next_paid_at
+	               FROM account_cost_entries c2 WHERE c2.account_id=a.id AND c2.cny_amount_minor>0 AND c2.expected_token_count>0) priced),'[]'::jsonb) tranches
+    FROM account_cost_entries c WHERE c.account_id=a.id
+) costs ON TRUE
+LEFT JOIN LATERAL (
+    SELECT COALESCE(SUM(ul.input_tokens::bigint+ul.output_tokens::bigint+ul.cache_creation_tokens::bigint+
+           ul.cache_read_tokens::bigint+ul.image_output_tokens::bigint+ul.image_input_tokens::bigint),0)::bigint total_tokens
+    FROM usage_logs ul WHERE ul.account_id=a.id
+) usage ON TRUE
+LEFT JOIN LATERAL (
+    SELECT e.event_type FROM account_lifecycle_events e
+    WHERE e.account_id=a.id AND e.event_type<>'refund'
+    ORDER BY e.occurred_at DESC,e.id DESC LIMIT 1
+) lifecycle ON TRUE
+WHERE a.id IN (`+strings.Join(placeholders, ",")+`)`, args...)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var (
+			accountID                                  int64
+			uploaderEmail                              sql.NullString
+			expectedTokens                             sql.NullInt64
+			costBasis, refund, transferred, writtenOff int64
+			netCost, totalUsage                        int64
+			trancheJSON                                []byte
+			lifecycleStatus                            string
+		)
+		if err := rows.Scan(&accountID, &uploaderEmail, &expectedTokens, &costBasis, &refund, &transferred, &writtenOff, &netCost, &trancheJSON, &totalUsage, &lifecycleStatus); err != nil {
+			return err
+		}
+		tranches, err := decodePoolCostTranches(trancheJSON)
+		if err != nil {
+			return err
+		}
+		account := byID[accountID]
+		if account == nil {
+			continue
+		}
+		if uploaderEmail.Valid {
+			account.UploaderEmail = &uploaderEmail.String
+		}
+		if expectedTokens.Valid {
+			account.ExpectedTokenCount = &expectedTokens.Int64
+		}
+		account.PoolTotalUsageTokens = totalUsage
+		account.PoolNetCostMinor = netCost
+		_, account.PoolRemainingCostMinor, account.PoolCostProgress = service.CalculateAccountCostRecognitionByTranches(
+			costBasis, refund+transferred+writtenOff, totalUsage, tranches,
+		)
+		account.PoolLifecycleStatus = lifecycleStatus
+	}
+	return rows.Err()
 }
 
 func (r *accountRepository) ListOpsAccountsForStats(ctx context.Context, platformFilter string, groupIDFilter *int64) ([]service.Account, error) {
@@ -3242,6 +3365,10 @@ func accountEntityToService(m *dbent.Account) *service.Account {
 		AutoPauseOnExpired:      m.AutoPauseOnExpired,
 		CreatedAt:               m.CreatedAt,
 		UpdatedAt:               m.UpdatedAt,
+		ProviderIdentity:        m.ProviderIdentity,
+		ContributorUserID:       m.ContributorUserID,
+		CreatedByUserID:         m.CreatedByUserID,
+		CostSharingEnabled:      m.CostSharingEnabled,
 		Schedulable:             m.Schedulable,
 		RateLimitedAt:           m.RateLimitedAt,
 		RateLimitResetAt:        m.RateLimitResetAt,

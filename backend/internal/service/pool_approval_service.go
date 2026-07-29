@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"reflect"
 	"sort"
 	"strings"
 	"time"
@@ -18,6 +19,7 @@ import (
 const (
 	PoolApprovalUpdateAccount  = "UPDATE_ACCOUNT"
 	PoolApprovalViewCredential = "VIEW_CREDENTIAL"
+	PoolApprovalDeleteAccount  = "DELETE_ACCOUNT"
 
 	PoolApprovalPending  = "pending"
 	PoolApprovalApproved = "approved"
@@ -37,8 +39,15 @@ var (
 type PoolApprovalPayload struct {
 	AccountUpdate *UpdateAccountInput     `json:"account_update,omitempty"`
 	PoolUpdate    *UpdatePoolAccountInput `json:"pool_update,omitempty"`
+	CostUpdate    *PoolCostUpdate         `json:"cost_update,omitempty"`
 	ExtraMerge    map[string]any          `json:"extra_merge,omitempty"`
 	Reauthorize   bool                    `json:"reauthorize,omitempty"`
+	DeleteOptions *AccountDeleteOptions   `json:"delete_options,omitempty"`
+}
+
+type PoolCostUpdate struct {
+	CostID int64                  `json:"cost_id"`
+	Cost   CreateAccountCostInput `json:"cost"`
 }
 
 type PoolApprovalValueChange struct {
@@ -113,6 +122,8 @@ type PoolApprovalRepository interface {
 	LockAccount(ctx context.Context, accountID int64) error
 	GetApprovalAccountState(ctx context.Context, accountID int64) (*PoolApprovalAccountState, error)
 	UpdatePoolAccountApproved(ctx context.Context, accountID int64, input UpdatePoolAccountInput) error
+	UpdateCostApproved(ctx context.Context, update PoolCostUpdate) error
+	InvalidateCredentialApprovals(ctx context.Context, accountID int64, reason string) error
 	SetDecision(ctx context.Context, id int64, status string, actorID int64, reason *string, revealExpiresAt *time.Time) error
 	MarkExpired(ctx context.Context, id int64, reason string) error
 	LoadCredentials(ctx context.Context, accountID int64) (map[string]any, error)
@@ -132,6 +143,10 @@ func (s *PoolService) CreateApproval(ctx context.Context, input CreatePoolApprov
 	if input.AccountID <= 0 || input.RequesterID <= 0 {
 		return nil, infraerrors.BadRequest("INVALID_APPROVAL_PARTY", "account and requester are required")
 	}
+	primaryBypass := s.IsPrimaryAdmin(ctx, input.RequesterID)
+	if input.Reason == "" && primaryBypass && input.ActionType == PoolApprovalViewCredential {
+		input.Reason = "primary administrator direct credential access"
+	}
 	if input.Reason == "" || len(input.Reason) > 1000 {
 		return nil, infraerrors.BadRequest("INVALID_APPROVAL_REASON", "reason is required and must not exceed 1000 characters")
 	}
@@ -149,6 +164,13 @@ func (s *PoolService) CreateApproval(ctx context.Context, input CreatePoolApprov
 	if err != nil {
 		return nil, err
 	}
+	var costBefore *AccountCostEntry
+	if input.Payload.CostUpdate != nil {
+		costBefore, err = s.approvalCostEntry(ctx, input.AccountID, input.Payload.CostUpdate.CostID)
+		if err != nil {
+			return nil, err
+		}
+	}
 	revision, err := poolApprovalRevision(account, poolState, input.Payload)
 	if err != nil {
 		return nil, err
@@ -162,8 +184,8 @@ func (s *PoolService) CreateApproval(ctx context.Context, input CreatePoolApprov
 		ActionType: input.ActionType, AccountID: input.AccountID, Status: PoolApprovalPending,
 		Reason: input.Reason, BaseRevision: revision, RequestedByUserID: input.RequesterID,
 		RequestedAt: now, ExpiresAt: now.Add(poolApprovalPendingTTL),
-		PrimaryBypass: s.IsPrimaryAdmin(ctx, input.RequesterID),
-		Changes:       buildPoolApprovalSummary(account, poolState, input.Payload),
+		PrimaryBypass: primaryBypass,
+		Changes:       buildPoolApprovalSummary(account, poolState, costBefore, input.Payload),
 		Payload:       payload,
 	})
 	if err != nil {
@@ -175,18 +197,59 @@ func (s *PoolService) CreateApproval(ctx context.Context, input CreatePoolApprov
 	return created, nil
 }
 
+func (s *PoolService) RequestCostUpdate(ctx context.Context, costID, accountID, actorID int64, reason string, cost CreateAccountCostInput, poolUpdate *UpdatePoolAccountInput) (*PoolApproval, error) {
+	cost.AccountID = accountID
+	cost.CreatedByUserID = actorID
+	cost.SupersedesID = nil
+	cost.OperationKey = ""
+	normalized, err := normalizePoolCostInput(cost)
+	if err != nil {
+		return nil, err
+	}
+	normalized.OrderAccountKey = poolCostOrderAccountKey(normalized)
+	return s.CreateApproval(ctx, CreatePoolApprovalInput{
+		ActionType: PoolApprovalUpdateAccount, AccountID: accountID, RequesterID: actorID,
+		Reason: strings.TrimSpace(reason), Payload: PoolApprovalPayload{
+			PoolUpdate: poolUpdate, CostUpdate: &PoolCostUpdate{CostID: costID, Cost: normalized},
+		},
+	})
+}
+
+func (s *PoolService) approvalCostEntry(ctx context.Context, accountID, costID int64) (*AccountCostEntry, error) {
+	if costID <= 0 {
+		return nil, infraerrors.BadRequest("INVALID_COST_ENTRY", "invalid cost entry")
+	}
+	items, err := s.repo.ListCosts(ctx, &accountID)
+	if err != nil {
+		return nil, err
+	}
+	for i := range items {
+		if items[i].ID == costID {
+			return &items[i], nil
+		}
+	}
+	return nil, infraerrors.NotFound("POOL_COST_NOT_FOUND", "cost entry not found")
+}
+
 func validateApprovalPayload(action string, payload PoolApprovalPayload) error {
 	switch action {
 	case PoolApprovalUpdateAccount:
-		if !hasAccountApprovalUpdate(payload.AccountUpdate) && !hasPoolApprovalUpdate(payload.PoolUpdate) && len(payload.ExtraMerge) == 0 {
-			return infraerrors.BadRequest("EMPTY_APPROVAL_UPDATE", "account_update or pool_update is required")
+		if payload.DeleteOptions != nil {
+			return infraerrors.BadRequest("INVALID_UPDATE_APPROVAL_PAYLOAD", "account update requests do not accept delete_options")
+		}
+		if !hasAccountApprovalUpdate(payload.AccountUpdate) && !hasPoolApprovalUpdate(payload.PoolUpdate) && payload.CostUpdate == nil && len(payload.ExtraMerge) == 0 {
+			return infraerrors.BadRequest("EMPTY_APPROVAL_UPDATE", "account_update, pool_update, or cost_update is required")
 		}
 	case PoolApprovalViewCredential:
-		if payload.AccountUpdate != nil || payload.PoolUpdate != nil || len(payload.ExtraMerge) > 0 || payload.Reauthorize {
+		if payload.AccountUpdate != nil || payload.PoolUpdate != nil || payload.CostUpdate != nil || len(payload.ExtraMerge) > 0 || payload.Reauthorize || payload.DeleteOptions != nil {
 			return infraerrors.BadRequest("INVALID_CREDENTIAL_APPROVAL_PAYLOAD", "credential view requests do not accept update payloads")
 		}
+	case PoolApprovalDeleteAccount:
+		if payload.DeleteOptions == nil || payload.AccountUpdate != nil || payload.PoolUpdate != nil || payload.CostUpdate != nil || len(payload.ExtraMerge) > 0 || payload.Reauthorize {
+			return infraerrors.BadRequest("INVALID_DELETE_APPROVAL_PAYLOAD", "delete approval requires delete_options only")
+		}
 	default:
-		return infraerrors.BadRequest("INVALID_APPROVAL_ACTION", "action_type must be UPDATE_ACCOUNT or VIEW_CREDENTIAL")
+		return infraerrors.BadRequest("INVALID_APPROVAL_ACTION", "action_type must be UPDATE_ACCOUNT, VIEW_CREDENTIAL, or DELETE_ACCOUNT")
 	}
 	return nil
 }
@@ -318,6 +381,11 @@ func (s *PoolService) decideApproval(ctx context.Context, id, actorID int64, rea
 			if err != nil {
 				return nil, err
 			}
+			if len(payload.AccountUpdate.Credentials) > 0 {
+				if err := s.approvalRepo.InvalidateCredentialApprovals(txCtx, item.AccountID, "credentials changed"); err != nil {
+					return nil, err
+				}
+			}
 		}
 		if len(payload.ExtraMerge) > 0 {
 			if err := s.adminService.UpdateAccountExtra(txCtx, item.AccountID, payload.ExtraMerge); err != nil {
@@ -329,9 +397,26 @@ func (s *PoolService) decideApproval(ctx context.Context, id, actorID int64, rea
 				return nil, err
 			}
 		}
+		if payload.CostUpdate != nil {
+			if err := s.approvalRepo.UpdateCostApproved(txCtx, *payload.CostUpdate); err != nil {
+				return nil, err
+			}
+		}
 	case PoolApprovalViewCredential:
 		expires := time.Now().UTC().Add(poolRevealGrantTTL)
 		revealExpiresAt = &expires
+	case PoolApprovalDeleteAccount:
+		deleter, ok := s.adminService.(interface {
+			DeleteAccountWithOptions(context.Context, int64, AccountDeleteOptions) (*AccountDeleteResult, error)
+		})
+		if !ok || payload.DeleteOptions == nil {
+			return nil, fmt.Errorf("account lifecycle deletion service is not configured")
+		}
+		options := *payload.DeleteOptions
+		options.ActorUserID = actorID
+		if _, err = deleter.DeleteAccountWithOptions(txCtx, item.AccountID, options); err != nil {
+			return nil, err
+		}
 	default:
 		return nil, infraerrors.BadRequest("INVALID_APPROVAL_ACTION", "invalid stored approval action")
 	}
@@ -412,11 +497,9 @@ func poolApprovalRevision(account *Account, pool *PoolApprovalAccountState, payl
 			snapshot["type"] = account.Type
 		}
 		if len(u.Credentials) > 0 {
-			current := make(map[string]any, len(u.Credentials))
-			for key := range u.Credentials {
-				current[key] = account.Credentials[key]
-			}
-			snapshot["credentials"] = current
+			// Credential updates replace every non-sensitive key. Hash the complete
+			// current object so a pending request cannot erase a concurrent change.
+			snapshot["credentials"] = account.Credentials
 		}
 		if u.Extra != nil {
 			snapshot["extra"] = approvalManagedExtra(account.Extra)
@@ -470,6 +553,16 @@ func poolApprovalRevision(account *Account, pool *PoolApprovalAccountState, payl
 		}
 		snapshot["extra_merge"] = current
 	}
+	if payload.CostUpdate != nil {
+		snapshot["cost_entry_updated_at"] = account.UpdatedAt
+	}
+	if payload.DeleteOptions != nil {
+		snapshot["delete_account"] = map[string]any{
+			"account_updated_at": account.UpdatedAt,
+			"provider_identity":  pool.ProviderIdentity,
+			"cost_sharing":       pool.CostSharingEnabled,
+		}
+	}
 	raw, err := json.Marshal(snapshot)
 	if err != nil {
 		return "", fmt.Errorf("encode approval revision: %w", err)
@@ -498,7 +591,7 @@ func isApprovalRuntimeExtraKey(key string) bool {
 	return false
 }
 
-func buildPoolApprovalSummary(account *Account, pool *PoolApprovalAccountState, payload PoolApprovalPayload) PoolApprovalChangeSummary {
+func buildPoolApprovalSummary(account *Account, pool *PoolApprovalAccountState, costBefore *AccountCostEntry, payload PoolApprovalPayload) PoolApprovalChangeSummary {
 	result := PoolApprovalChangeSummary{Fields: make(map[string]PoolApprovalValueChange)}
 	add := func(key string, before, after any) {
 		result.Fields[key] = PoolApprovalValueChange{Before: before, After: after}
@@ -514,7 +607,7 @@ func buildPoolApprovalSummary(account *Account, pool *PoolApprovalAccountState, 
 			add("type", account.Type, u.Type)
 		}
 		if len(u.Credentials) > 0 {
-			result.CredentialKeys = sortedMapKeys(u.Credentials)
+			result.CredentialKeys = changedApprovalCredentialKeys(account.Credentials, u.Credentials)
 		}
 		if u.Extra != nil {
 			result.ExtraKeys = sortedMapKeys(u.Extra)
@@ -561,6 +654,33 @@ func buildPoolApprovalSummary(account *Account, pool *PoolApprovalAccountState, 
 			add("cost_sharing_enabled", pool.CostSharingEnabled, *u.CostSharingEnabled)
 		}
 	}
+	if u := payload.CostUpdate; u != nil && costBefore != nil {
+		add("cost_entry_id", costBefore.ID, u.CostID)
+		add("cost_payer_user_id", costBefore.PayerUserID, u.Cost.PayerUserID)
+		add("cost_purchase_source_id", costBefore.PurchaseSourceID, u.Cost.PurchaseSourceID)
+		add("cost_entry_type", costBefore.EntryType, u.Cost.EntryType)
+		add("cost_original_amount", costBefore.OriginalAmount, u.Cost.OriginalAmount)
+		add("cost_currency", costBefore.Currency, u.Cost.Currency)
+		add("cost_fx_rate", costBefore.FXRate, u.Cost.FXRate)
+		add("cost_service_start", costBefore.ServiceStart, u.Cost.ServiceStart)
+		add("cost_service_end", costBefore.ServiceEnd, u.Cost.ServiceEnd)
+		add("cost_warranty_end", costBefore.WarrantyEnd, u.Cost.WarrantyEnd)
+		add("cost_paid_at", costBefore.PaidAt, u.Cost.PaidAt)
+		add("cost_order_no", costBefore.OrderNo, u.Cost.OrderNo)
+		add("cost_purchase_url", costBefore.PurchaseURL, u.Cost.PurchaseURL)
+		add("cost_note", costBefore.Note, u.Cost.Note)
+		add("cost_expected_token_count", costBefore.ExpectedTokenCount, u.Cost.ExpectedTokenCount)
+	}
+	if u := payload.DeleteOptions; u != nil {
+		add("delete_account", false, true)
+		add("cost_disposition", nil, u.CostDisposition)
+		if u.ReplacementAccountID != nil {
+			add("replacement_account_id", nil, *u.ReplacementAccountID)
+		}
+		if u.RefundAmountMinor != nil {
+			add("refund_amount_minor", nil, *u.RefundAmountMinor)
+		}
+	}
 	if len(payload.ExtraMerge) > 0 {
 		result.ExtraKeys = mergeSortedKeys(result.ExtraKeys, payload.ExtraMerge)
 	}
@@ -568,6 +688,26 @@ func buildPoolApprovalSummary(account *Account, pool *PoolApprovalAccountState, 
 		result.Fields = nil
 	}
 	return result
+}
+
+func changedApprovalCredentialKeys(current, requested map[string]any) []string {
+	merged := MergePreservingSensitiveCreds(current, requested)
+	keys := make(map[string]any, len(current)+len(merged))
+	for key := range current {
+		keys[key] = nil
+	}
+	for key := range merged {
+		keys[key] = nil
+	}
+	changed := make(map[string]any)
+	for key := range keys {
+		before, beforeOK := current[key]
+		after, afterOK := merged[key]
+		if beforeOK != afterOK || !reflect.DeepEqual(before, after) {
+			changed[key] = nil
+		}
+	}
+	return sortedMapKeys(changed)
 }
 
 func sortedMapKeys(values map[string]any) []string {

@@ -29,6 +29,44 @@ func (s *adminServiceImpl) ListAccounts(ctx context.Context, page, pageSize int,
 	return accounts, result.Total, nil
 }
 
+func (s *adminServiceImpl) ListAccountsByUploader(ctx context.Context, page, pageSize int, platform, accountType, status, search string, groupID int64, privacyMode string, uploaderUserID int64, includePoolMetrics bool, sortBy, sortOrder string) ([]Account, int64, error) {
+	repo, ok := s.accountRepo.(interface {
+		ListWithFiltersByUploader(context.Context, pagination.PaginationParams, string, string, string, string, int64, string, int64) ([]Account, *pagination.PaginationResult, error)
+		ListWithFiltersByUploaderAndPoolMetrics(context.Context, pagination.PaginationParams, string, string, string, string, int64, string, int64) ([]Account, *pagination.PaginationResult, error)
+	})
+	if !ok {
+		return nil, 0, infraerrors.InternalServer("ACCOUNT_UPLOADER_FILTER_UNAVAILABLE", "account uploader filter is unavailable")
+	}
+	params := pagination.PaginationParams{Page: page, PageSize: pageSize, SortBy: sortBy, SortOrder: sortOrder}
+	var accounts []Account
+	var result *pagination.PaginationResult
+	var err error
+	if includePoolMetrics {
+		accounts, result, err = repo.ListWithFiltersByUploaderAndPoolMetrics(ctx, params, platform, accountType, status, search, groupID, privacyMode, uploaderUserID)
+	} else {
+		accounts, result, err = repo.ListWithFiltersByUploader(ctx, params, platform, accountType, status, search, groupID, privacyMode, uploaderUserID)
+	}
+	if err != nil {
+		return nil, 0, err
+	}
+	return accounts, result.Total, nil
+}
+
+func (s *adminServiceImpl) ListAccountsWithPoolMetrics(ctx context.Context, page, pageSize int, platform, accountType, status, search string, groupID int64, privacyMode string, sortBy, sortOrder string) ([]Account, int64, error) {
+	repo, ok := s.accountRepo.(interface {
+		ListWithFiltersAndPoolMetrics(context.Context, pagination.PaginationParams, string, string, string, string, int64, string) ([]Account, *pagination.PaginationResult, error)
+	})
+	if !ok {
+		return nil, 0, infraerrors.InternalServer("ACCOUNT_POOL_METRICS_UNAVAILABLE", "account pool metrics are unavailable")
+	}
+	params := pagination.PaginationParams{Page: page, PageSize: pageSize, SortBy: sortBy, SortOrder: sortOrder}
+	accounts, result, err := repo.ListWithFiltersAndPoolMetrics(ctx, params, platform, accountType, status, search, groupID, privacyMode)
+	if err != nil {
+		return nil, 0, err
+	}
+	return accounts, result.Total, nil
+}
+
 func (s *adminServiceImpl) ListAccountsForSchedulerScoreFilter(ctx context.Context, platform, accountType, status, search string, groupID int64, privacyMode string) ([]Account, error) {
 	if s == nil || s.accountRepo == nil {
 		return nil, nil
@@ -1144,19 +1182,16 @@ func (s *adminServiceImpl) resolveBulkUpdateTargetIDs(ctx context.Context, filte
 	accountIDs := make([]int64, 0, pageSize)
 
 	for {
-		accounts, total, err := s.ListAccounts(
-			ctx,
-			page,
-			pageSize,
-			filters.Platform,
-			filters.Type,
-			filters.Status,
-			filters.Search,
-			groupID,
-			filters.PrivacyMode,
-			"",
-			"",
+		var (
+			accounts []Account
+			total    int64
+			err      error
 		)
+		if filters.UploaderUserID > 0 {
+			accounts, total, err = s.ListAccountsByUploader(ctx, page, pageSize, filters.Platform, filters.Type, filters.Status, filters.Search, groupID, filters.PrivacyMode, filters.UploaderUserID, false, "", "")
+		} else {
+			accounts, total, err = s.ListAccounts(ctx, page, pageSize, filters.Platform, filters.Type, filters.Status, filters.Search, groupID, filters.PrivacyMode, "", "")
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -1170,7 +1205,7 @@ func (s *adminServiceImpl) resolveBulkUpdateTargetIDs(ctx context.Context, filte
 	}
 }
 
-func (s *adminServiceImpl) DeleteAccount(ctx context.Context, id int64) error {
+func (s *adminServiceImpl) deleteAccountLegacy(ctx context.Context, id int64) error {
 	// 级联删除 spark 影子账号（先删影子，再删母账号）
 	shadows, err := s.accountRepo.ListShadowsByParent(ctx, id)
 	if err != nil {
@@ -1185,6 +1220,53 @@ func (s *adminServiceImpl) DeleteAccount(ctx context.Context, id int64) error {
 		return err
 	}
 	return nil
+}
+
+type AccountDeleteOptions struct {
+	ActorUserID          int64
+	CostDisposition      string
+	ReplacementAccountID *int64
+	RefundAmountMinor    *int64
+	Reason               string
+}
+
+type AccountDeleteResult struct {
+	AccountID          int64   `json:"account_id"`
+	Archived           bool    `json:"archived"`
+	AlreadyDeleted     bool    `json:"already_deleted"`
+	RemainingCostMinor int64   `json:"remaining_cost_minor"`
+	CostDisposition    string  `json:"cost_disposition,omitempty"`
+	RefundAmountMinor  int64   `json:"refund_amount_minor,omitempty"`
+	WrittenOffMinor    int64   `json:"written_off_minor,omitempty"`
+	AffectedAccountIDs []int64 `json:"affected_account_ids"`
+}
+
+type accountLifecycleDeleteRepository interface {
+	DeleteAccountWithLifecycle(context.Context, int64, AccountDeleteOptions) (*AccountDeleteResult, error)
+}
+
+func (s *adminServiceImpl) DeleteAccountWithOptions(ctx context.Context, id int64, options AccountDeleteOptions) (*AccountDeleteResult, error) {
+	if repo, ok := s.accountRepo.(accountLifecycleDeleteRepository); ok {
+		result, err := repo.DeleteAccountWithLifecycle(ctx, id, options)
+		if err != nil {
+			return nil, err
+		}
+		if s.runtimeBlocker != nil {
+			for _, accountID := range result.AffectedAccountIDs {
+				s.runtimeBlocker.ClearAccountSchedulingBlock(accountID)
+			}
+		}
+		return result, nil
+	}
+	if err := s.deleteAccountLegacy(ctx, id); err != nil {
+		return nil, err
+	}
+	return &AccountDeleteResult{AccountID: id, AffectedAccountIDs: []int64{id}}, nil
+}
+
+func (s *adminServiceImpl) DeleteAccount(ctx context.Context, id int64) error {
+	_, err := s.DeleteAccountWithOptions(ctx, id, AccountDeleteOptions{})
+	return err
 }
 
 func (s *adminServiceImpl) RefreshAccountCredentials(ctx context.Context, id int64) (*Account, error) {

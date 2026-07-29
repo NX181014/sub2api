@@ -10,7 +10,7 @@ import (
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 )
 
-func TestPoolApprovalRevisionTracksOnlyRequestedFields(t *testing.T) {
+func TestPoolApprovalRevisionRejectsConcurrentCredentialReplacement(t *testing.T) {
 	account := &Account{
 		Name:        "before",
 		Credentials: map[string]any{"access_token": "secret-a", "unrelated": "one"},
@@ -33,8 +33,8 @@ func TestPoolApprovalRevisionTracksOnlyRequestedFields(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if base != afterRuntimeUpdate {
-		t.Fatal("unrelated credential and runtime usage updates must not stale an approval")
+	if base == afterRuntimeUpdate {
+		t.Fatal("a concurrent credential change must stale a replacement approval")
 	}
 
 	account.Credentials["access_token"] = "secret-b"
@@ -44,6 +44,26 @@ func TestPoolApprovalRevisionTracksOnlyRequestedFields(t *testing.T) {
 	}
 	if base == afterCredentialUpdate {
 		t.Fatal("a requested credential key change must stale an approval")
+	}
+}
+
+func TestPoolApprovalSummaryListsOnlyChangedCredentialKeys(t *testing.T) {
+	summary := buildPoolApprovalSummary(
+		&Account{Credentials: map[string]any{"access_token": "preserved", "base_url": "before", "removed": true}},
+		&PoolApprovalAccountState{},
+		nil,
+		PoolApprovalPayload{AccountUpdate: &UpdateAccountInput{Credentials: map[string]any{
+			"base_url": "after",
+		}}},
+	)
+	want := []string{"base_url", "removed"}
+	if len(summary.CredentialKeys) != len(want) {
+		t.Fatalf("unexpected changed credential keys: %#v", summary.CredentialKeys)
+	}
+	for index := range want {
+		if summary.CredentialKeys[index] != want[index] {
+			t.Fatalf("unexpected changed credential keys: %#v", summary.CredentialKeys)
+		}
 	}
 }
 
@@ -79,6 +99,7 @@ func TestPoolApprovalSummaryRedactsCredentialAndProviderValues(t *testing.T) {
 	summary := buildPoolApprovalSummary(
 		&Account{Credentials: map[string]any{"access_token": "old-secret"}},
 		&PoolApprovalAccountState{ProviderIdentity: &beforeProvider},
+		nil,
 		PoolApprovalPayload{
 			AccountUpdate: &UpdateAccountInput{Credentials: map[string]any{"access_token": "new-secret"}},
 			PoolUpdate:    &UpdatePoolAccountInput{ProviderIdentity: &afterProvider},
@@ -128,6 +149,16 @@ func TestValidatePoolApprovalPayload(t *testing.T) {
 	}
 	if err := validateApprovalPayload(PoolApprovalViewCredential, PoolApprovalPayload{Reauthorize: true}); infraerrors.Reason(err) != "INVALID_CREDENTIAL_APPROVAL_PAYLOAD" {
 		t.Fatalf("unexpected reauthorization credential payload result: %v", err)
+	}
+	deleteOptions := &AccountDeleteOptions{CostDisposition: "write_off"}
+	if err := validateApprovalPayload(PoolApprovalDeleteAccount, PoolApprovalPayload{DeleteOptions: deleteOptions}); err != nil {
+		t.Fatalf("valid delete payload rejected: %v", err)
+	}
+	if err := validateApprovalPayload(PoolApprovalDeleteAccount, PoolApprovalPayload{}); infraerrors.Reason(err) != "INVALID_DELETE_APPROVAL_PAYLOAD" {
+		t.Fatalf("unexpected empty delete payload result: %v", err)
+	}
+	if err := validateApprovalPayload(PoolApprovalUpdateAccount, PoolApprovalPayload{AccountUpdate: &UpdateAccountInput{Name: "x"}, DeleteOptions: deleteOptions}); infraerrors.Reason(err) != "INVALID_UPDATE_APPROVAL_PAYLOAD" {
+		t.Fatalf("unexpected mixed update/delete payload result: %v", err)
 	}
 }
 

@@ -2,6 +2,7 @@ package admin
 
 import (
 	"context"
+	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -142,7 +143,7 @@ type createPoolApprovalRequest struct {
 	ActionType  string                      `json:"action_type"`
 	RequestType string                      `json:"request_type"`
 	AccountID   int64                       `json:"account_id" binding:"required"`
-	Reason      string                      `json:"reason" binding:"required"`
+	Reason      string                      `json:"reason"`
 	Payload     service.PoolApprovalPayload `json:"payload"`
 }
 
@@ -296,6 +297,7 @@ type createPoolAccountIntakeRequest struct {
 	OrderNo            *string `json:"order_no"`
 	PurchaseURL        *string `json:"purchase_url"`
 	Notes              *string `json:"notes"`
+	ExpectedTokenCount int64   `json:"expected_token_count" binding:"required,gt=0"`
 }
 
 func (h *PoolHandler) CreateAccountIntake(c *gin.Context) {
@@ -354,6 +356,7 @@ func (h *PoolHandler) CreateAccountIntake(c *gin.Context) {
 				FXRate: req.FXRate, CNYAmountMinor: req.CNYAmountMinor,
 				ServiceStart: serviceStart, ServiceEnd: serviceEnd, WarrantyEnd: warrantyEnd,
 				PaidAt: paidAt, OrderNo: req.OrderNo, PurchaseURL: req.PurchaseURL, Note: req.Notes,
+				ExpectedTokenCount: &req.ExpectedTokenCount,
 			},
 		})
 	})
@@ -408,24 +411,152 @@ func (h *PoolHandler) ListCosts(c *gin.Context) {
 	response.Success(c, items)
 }
 
+func (h *PoolHandler) ListCostEntries(c *gin.Context) {
+	accountID, ok := optionalPoolQueryID(c, "account_id")
+	if !ok {
+		return
+	}
+	uploaderID, ok := optionalPoolQueryID(c, "uploader_user_id")
+	if !ok {
+		return
+	}
+	payerID, ok := optionalPoolQueryID(c, "payer_user_id")
+	if !ok {
+		return
+	}
+	sourceID, ok := optionalPoolQueryID(c, "purchase_source_id")
+	if !ok {
+		return
+	}
+	var paidFrom, paidTo *time.Time
+	startRaw := strings.TrimSpace(c.Query("start"))
+	if startRaw == "" {
+		startRaw = strings.TrimSpace(c.Query("start_date"))
+	}
+	if raw := startRaw; raw != "" {
+		parsed, err := parsePoolDate(raw)
+		if err != nil {
+			response.BadRequest(c, "start must be YYYY-MM-DD")
+			return
+		}
+		paidFrom = &parsed
+	}
+	endRaw := strings.TrimSpace(c.Query("end"))
+	if endRaw == "" {
+		endRaw = strings.TrimSpace(c.Query("end_date"))
+	}
+	if raw := endRaw; raw != "" {
+		parsed, err := parsePoolDate(raw)
+		if err != nil {
+			response.BadRequest(c, "end must be YYYY-MM-DD")
+			return
+		}
+		parsed = parsed.AddDate(0, 0, 1)
+		paidTo = &parsed
+	}
+	page, pageSize := response.ParsePagination(c)
+	items, total, err := h.poolService.ListCostEntries(c.Request.Context(), service.AccountCostEntryFilter{
+		Search: strings.TrimSpace(c.Query("search")), AccountID: accountID, UploaderUserID: uploaderID,
+		PayerUserID: payerID, PurchaseSourceID: sourceID, EntryType: strings.TrimSpace(c.Query("entry_type")),
+		PaidFrom: paidFrom, PaidTo: paidTo,
+	}, page, pageSize)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Paginated(c, items, total, page, pageSize)
+}
+
+func (h *PoolHandler) ListCostSummaries(c *gin.Context) {
+	uploaderID, ok := optionalPoolQueryID(c, "uploader_user_id")
+	if !ok {
+		return
+	}
+	payerID, ok := optionalPoolQueryID(c, "payer_user_id")
+	if !ok {
+		return
+	}
+	sourceID, ok := optionalPoolQueryID(c, "purchase_source_id")
+	if !ok {
+		return
+	}
+	var hasCost *bool
+	if raw := strings.TrimSpace(c.Query("has_cost")); raw != "" {
+		value, err := strconv.ParseBool(raw)
+		if err != nil {
+			response.BadRequest(c, "has_cost must be true or false")
+			return
+		}
+		hasCost = &value
+	}
+	page, pageSize := response.ParsePagination(c)
+	items, total, err := h.poolService.ListCostSummaries(c.Request.Context(), service.AccountCostSummaryFilter{
+		Search: strings.TrimSpace(c.Query("search")), UploaderUserID: uploaderID, PayerUserID: payerID,
+		PurchaseSourceID: sourceID, LifecycleStatus: strings.TrimSpace(c.Query("lifecycle_status")),
+		EntryType: strings.TrimSpace(c.Query("entry_type")), HasCost: hasCost,
+	}, page, pageSize)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Paginated(c, items, total, page, pageSize)
+}
+
 type createPoolCostRequest struct {
-	AccountID        int64   `json:"account_id" binding:"required"`
-	PayerUserID      int64   `json:"payer_user_id" binding:"required"`
-	PurchaseSourceID *int64  `json:"purchase_source_id"`
-	EntryType        string  `json:"entry_type" binding:"required"`
-	OriginalAmount   string  `json:"original_amount" binding:"required"`
-	Currency         string  `json:"currency" binding:"required"`
-	FXRate           string  `json:"fx_rate"`
-	CNYAmountMinor   int64   `json:"cny_amount_minor"`
-	ServiceStart     string  `json:"service_start" binding:"required"`
-	ServiceEnd       string  `json:"service_end" binding:"required"`
-	WarrantyEnd      *string `json:"warranty_end"`
-	PaidAt           *string `json:"paid_at"`
-	OrderNo          *string `json:"order_no"`
-	PurchaseURL      *string `json:"purchase_url"`
-	Note             *string `json:"notes"`
-	SupersedesID     *int64  `json:"supersedes_id"`
-	RelatedAccountID *int64  `json:"related_account_id"`
+	AccountID          int64   `json:"account_id" binding:"required"`
+	PayerUserID        int64   `json:"payer_user_id" binding:"required"`
+	PurchaseSourceID   *int64  `json:"purchase_source_id"`
+	EntryType          string  `json:"entry_type" binding:"required"`
+	OriginalAmount     string  `json:"original_amount" binding:"required"`
+	Currency           string  `json:"currency" binding:"required"`
+	FXRate             string  `json:"fx_rate"`
+	CNYAmountMinor     int64   `json:"cny_amount_minor"`
+	ServiceStart       string  `json:"service_start" binding:"required"`
+	ServiceEnd         string  `json:"service_end" binding:"required"`
+	WarrantyEnd        *string `json:"warranty_end"`
+	PaidAt             *string `json:"paid_at"`
+	OrderNo            *string `json:"order_no"`
+	PurchaseURL        *string `json:"purchase_url"`
+	Note               *string `json:"notes"`
+	SupersedesID       *int64  `json:"supersedes_id"`
+	RelatedAccountID   *int64  `json:"related_account_id"`
+	ExpectedTokenCount *int64  `json:"expected_token_count"`
+	ProviderIdentity   *string `json:"provider_identity"`
+	ContributorUserID  *int64  `json:"contributor_user_id"`
+	UploaderUserID     *int64  `json:"uploader_user_id"`
+	CostSharingEnabled *bool   `json:"cost_sharing_enabled"`
+	ApprovalReason     string  `json:"approval_reason"`
+}
+
+type batchPoolCostCommonRequest struct {
+	PayerUserID        int64   `json:"payer_user_id" binding:"required"`
+	PurchaseSourceID   *int64  `json:"purchase_source_id"`
+	EntryType          string  `json:"entry_type" binding:"required"`
+	OriginalAmount     string  `json:"original_amount" binding:"required"`
+	Currency           string  `json:"currency" binding:"required"`
+	FXRate             string  `json:"fx_rate"`
+	ServiceStart       string  `json:"service_start" binding:"required"`
+	ServiceEnd         string  `json:"service_end" binding:"required"`
+	WarrantyEnd        *string `json:"warranty_end"`
+	PaidAt             *string `json:"paid_at"`
+	OrderNo            *string `json:"order_no"`
+	PurchaseURL        *string `json:"purchase_url"`
+	Note               *string `json:"notes"`
+	SupersedesID       *int64  `json:"supersedes_id"`
+	RelatedAccountID   *int64  `json:"related_account_id"`
+	ExpectedTokenCount *int64  `json:"expected_token_count"`
+}
+
+type batchPoolCostAccountRequest struct {
+	AccountID          int64   `json:"account_id" binding:"required"`
+	OriginalAmount     *string `json:"original_amount"`
+	ExpectedTokenCount *int64  `json:"expected_token_count"`
+}
+
+type batchPoolCostRequest struct {
+	AmountMode string                        `json:"amount_mode" binding:"required"`
+	Common     batchPoolCostCommonRequest    `json:"common" binding:"required"`
+	Accounts   []batchPoolCostAccountRequest `json:"accounts" binding:"required,min=1,max=500,dive"`
 }
 
 func (h *PoolHandler) CreateCost(c *gin.Context) {
@@ -468,16 +599,107 @@ func (h *PoolHandler) CreateCost(c *gin.Context) {
 		}
 		warrantyEnd = &parsed
 	}
+	costInput := service.CreateAccountCostInput{
+		AccountID: req.AccountID, PayerUserID: req.PayerUserID, PurchaseSourceID: req.PurchaseSourceID,
+		EntryType: req.EntryType, OriginalAmount: req.OriginalAmount, Currency: req.Currency,
+		FXRate: req.FXRate, CNYAmountMinor: req.CNYAmountMinor, ServiceStart: start, ServiceEnd: end, WarrantyEnd: warrantyEnd,
+		PaidAt: paidAt, OrderNo: req.OrderNo, PurchaseURL: req.PurchaseURL, Note: req.Note,
+		SupersedesID: req.SupersedesID, RelatedAccountID: req.RelatedAccountID, CreatedByUserID: actorID,
+		ExpectedTokenCount: req.ExpectedTokenCount,
+		OperationKey:       strings.TrimSpace(c.GetHeader("Idempotency-Key")),
+	}
+	if req.SupersedesID != nil {
+		poolUpdate := &service.UpdatePoolAccountInput{
+			ProviderIdentity: req.ProviderIdentity, ContributorUserID: req.ContributorUserID,
+			CreatedByUserID: req.UploaderUserID, CostSharingEnabled: req.CostSharingEnabled,
+		}
+		if req.ProviderIdentity == nil && req.ContributorUserID == nil && req.UploaderUserID == nil && req.CostSharingEnabled == nil {
+			poolUpdate = nil
+		}
+		reason := strings.TrimSpace(req.ApprovalReason)
+		if reason == "" {
+			reason = "update shared pool account cost record"
+		}
+		executeAdminIdempotentJSON(c, "admin.pool.cost.update", req, service.DefaultWriteIdempotencyTTL(), func(ctx context.Context) (any, error) {
+			approval, updateErr := h.poolService.RequestCostUpdate(ctx, *req.SupersedesID, req.AccountID, actorID, reason, costInput, poolUpdate)
+			if updateErr != nil {
+				return nil, updateErr
+			}
+			return gin.H{"approval_required": !approval.PrimaryBypass, "approval": approval}, nil
+		})
+		return
+	}
 	executeAdminIdempotentJSON(c, "admin.pool.cost.create", req, service.DefaultWriteIdempotencyTTL(), func(ctx context.Context) (any, error) {
-		return h.poolService.CreateCost(ctx, service.CreateAccountCostInput{
-			AccountID: req.AccountID, PayerUserID: req.PayerUserID, PurchaseSourceID: req.PurchaseSourceID,
-			EntryType: req.EntryType, OriginalAmount: req.OriginalAmount, Currency: req.Currency,
-			FXRate: req.FXRate, CNYAmountMinor: req.CNYAmountMinor, ServiceStart: start, ServiceEnd: end, WarrantyEnd: warrantyEnd,
-			PaidAt: paidAt, OrderNo: req.OrderNo, PurchaseURL: req.PurchaseURL, Note: req.Note,
-			SupersedesID: req.SupersedesID, RelatedAccountID: req.RelatedAccountID, CreatedByUserID: actorID,
+		return h.poolService.CreateCost(ctx, costInput)
+	})
+}
+
+func (h *PoolHandler) CreateCostsBatch(c *gin.Context) {
+	actorID, ok := poolActorID(c)
+	if !ok {
+		return
+	}
+	var req batchPoolCostRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+	common, err := parseBatchPoolCostCommon(req.Common)
+	if err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+	accounts := make([]service.BatchAccountCostItemInput, len(req.Accounts))
+	for i := range req.Accounts {
+		accounts[i] = service.BatchAccountCostItemInput{
+			AccountID: req.Accounts[i].AccountID, OriginalAmount: req.Accounts[i].OriginalAmount,
+			ExpectedTokenCount: req.Accounts[i].ExpectedTokenCount,
+		}
+	}
+	payload := req
+	executeAdminIdempotentJSON(c, "admin.pool.cost.batch_create", payload, service.DefaultWriteIdempotencyTTL(), func(ctx context.Context) (any, error) {
+		return h.poolService.CreateCostsBatch(ctx, service.BatchCreateAccountCostsInput{
+			AmountMode: req.AmountMode, Common: common, Accounts: accounts,
+			ExpectedTokenCount: req.Common.ExpectedTokenCount, CreatedByUserID: actorID,
 			OperationKey: strings.TrimSpace(c.GetHeader("Idempotency-Key")),
 		})
 	})
+}
+
+func parseBatchPoolCostCommon(req batchPoolCostCommonRequest) (service.CreateAccountCostInput, error) {
+	start, err := parsePoolDate(req.ServiceStart)
+	if err != nil {
+		return service.CreateAccountCostInput{}, fmt.Errorf("service_start must be YYYY-MM-DD")
+	}
+	end, err := parsePoolDate(req.ServiceEnd)
+	if err != nil {
+		return service.CreateAccountCostInput{}, fmt.Errorf("service_end must be YYYY-MM-DD")
+	}
+	paidAt := time.Now()
+	if req.PaidAt != nil && strings.TrimSpace(*req.PaidAt) != "" {
+		paidAt, err = time.Parse(time.RFC3339, strings.TrimSpace(*req.PaidAt))
+		if err != nil {
+			return service.CreateAccountCostInput{}, fmt.Errorf("paid_at must be RFC3339")
+		}
+	}
+	var warrantyEnd *time.Time
+	if req.WarrantyEnd != nil && strings.TrimSpace(*req.WarrantyEnd) != "" {
+		parsed, parseErr := parsePoolDate(*req.WarrantyEnd)
+		if parseErr != nil {
+			return service.CreateAccountCostInput{}, fmt.Errorf("warranty_end must be YYYY-MM-DD")
+		}
+		warrantyEnd = &parsed
+	}
+	if strings.TrimSpace(req.FXRate) == "" {
+		req.FXRate = "1"
+	}
+	return service.CreateAccountCostInput{
+		PayerUserID: req.PayerUserID, PurchaseSourceID: req.PurchaseSourceID, EntryType: req.EntryType,
+		OriginalAmount: req.OriginalAmount, Currency: req.Currency, FXRate: req.FXRate,
+		ServiceStart: start, ServiceEnd: end, WarrantyEnd: warrantyEnd, PaidAt: paidAt,
+		OrderNo: req.OrderNo, PurchaseURL: req.PurchaseURL, Note: req.Note,
+		SupersedesID: req.SupersedesID, RelatedAccountID: req.RelatedAccountID,
+	}, nil
 }
 
 func (h *PoolHandler) ListLifecycle(c *gin.Context) {
@@ -589,9 +811,13 @@ func (h *PoolHandler) CreateFXRate(c *gin.Context) {
 }
 
 type poolSettlementPeriodRequest struct {
-	PeriodType string `json:"period_type" binding:"required"`
-	StartDate  string `json:"start_date" binding:"required"`
-	EndDate    string `json:"end_date"`
+	PeriodType       string `json:"period_type" binding:"required"`
+	StartDate        string `json:"start_date" binding:"required"`
+	EndDate          string `json:"end_date"`
+	AccountID        *int64 `json:"account_id"`
+	UploaderUserID   *int64 `json:"uploader_user_id"`
+	PayerUserID      *int64 `json:"payer_user_id"`
+	PurchaseSourceID *int64 `json:"purchase_source_id"`
 }
 
 func (h *PoolHandler) CreateSettlementDraft(c *gin.Context) {
@@ -608,6 +834,10 @@ func (h *PoolHandler) CreateSettlementDraft(c *gin.Context) {
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
+	}
+	period.Filter = service.SettlementFilterSnapshot{
+		AccountID: req.AccountID, UploaderUserID: req.UploaderUserID,
+		PayerUserID: req.PayerUserID, PurchaseSourceID: req.PurchaseSourceID,
 	}
 	item, err := h.poolService.RecalculateSettlement(c.Request.Context(), period, actorID)
 	if err != nil {
@@ -631,7 +861,7 @@ func (h *PoolHandler) RecalculateSettlement(c *gin.Context) {
 		response.ErrorFrom(c, err)
 		return
 	}
-	period := service.SettlementPeriod{Type: existing.PeriodType, Start: existing.PeriodStart, End: existing.PeriodEnd, Timezone: existing.Timezone}
+	period := service.SettlementPeriod{Type: existing.PeriodType, Start: existing.PeriodStart, End: existing.PeriodEnd, Timezone: existing.Timezone, Filter: existing.FilterSnapshot}
 	item, err := h.poolService.RecalculateSettlement(c.Request.Context(), period, actorID)
 	if err != nil {
 		response.ErrorFrom(c, err)
@@ -673,6 +903,78 @@ func (h *PoolHandler) LockSettlement(c *gin.Context) {
 		return
 	}
 	item, err := h.poolService.LockSettlement(c.Request.Context(), id, actorID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, item)
+}
+
+func (h *PoolHandler) ConfirmSettlementLine(c *gin.Context) {
+	id, ok := poolPathID(c)
+	if !ok {
+		return
+	}
+	actorID, ok := poolActorID(c)
+	if !ok {
+		return
+	}
+	userID := actorID
+	if raw := strings.TrimSpace(c.Query("user_id")); raw != "" {
+		parsed, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil || parsed <= 0 {
+			response.BadRequest(c, "invalid settlement member")
+			return
+		}
+		userID = parsed
+	}
+	item, err := h.poolService.ConfirmSettlementLine(c.Request.Context(), id, userID, actorID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, item)
+}
+
+func (h *PoolHandler) ListOwnPendingSettlements(c *gin.Context) {
+	actorID, ok := poolActorID(c)
+	if !ok {
+		return
+	}
+	items, err := h.poolService.ListOwnPendingSettlements(c.Request.Context(), actorID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, items)
+}
+
+func (h *PoolHandler) ConfirmOwnSettlementLine(c *gin.Context) {
+	id, ok := poolPathID(c)
+	if !ok {
+		return
+	}
+	actorID, ok := poolActorID(c)
+	if !ok {
+		return
+	}
+	if err := h.poolService.ConfirmOwnSettlementLine(c.Request.Context(), id, actorID); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, gin.H{"confirmed": true})
+}
+
+func (h *PoolHandler) MarkSettlementPaid(c *gin.Context) {
+	id, ok := poolPathID(c)
+	if !ok {
+		return
+	}
+	actorID, ok := poolActorID(c)
+	if !ok {
+		return
+	}
+	item, err := h.poolService.MarkSettlementPaid(c.Request.Context(), id, actorID)
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return

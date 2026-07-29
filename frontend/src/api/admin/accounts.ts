@@ -46,6 +46,8 @@ export async function list(
     privacy_mode?: string
     lite?: string
     include_scheduler_score?: string
+    include_pool_metrics?: string
+    uploader_user_id?: number | string
     sort_by?: string
     sort_order?: 'asc' | 'desc'
   },
@@ -82,6 +84,8 @@ export async function listWithEtag(
     privacy_mode?: string
     lite?: string
     include_scheduler_score?: string
+    include_pool_metrics?: string
+    uploader_user_id?: number | string
     sort_by?: string
     sort_order?: 'asc' | 'desc'
   },
@@ -212,8 +216,28 @@ export async function checkMixedChannelRisk(
  * @param id - Account ID
  * @returns Success confirmation
  */
-export async function deleteAccount(id: number): Promise<{ message: string }> {
-  const { data } = await apiClient.delete<{ message: string }>(`/admin/accounts/${id}`)
+export interface DeleteAccountOptions {
+  cost_disposition?: 'write_off' | 'refund' | 'transfer'
+  replacement_account_id?: number
+	refund_amount_minor?: number
+  reason?: string
+}
+
+export interface DeleteAccountResult {
+  account_id: number
+  archived: boolean
+  already_deleted: boolean
+  remaining_cost_minor: number
+  cost_disposition: string
+	refund_amount_minor?: number
+	written_off_minor?: number
+  affected_account_ids: number[]
+}
+
+export async function deleteAccount(id: number, options?: DeleteAccountOptions): Promise<{ message: string; result?: DeleteAccountResult; approval?: { id: number } }> {
+	const { data } = await apiClient.delete<{ message: string; result?: DeleteAccountResult; approval?: { id: number } }>(`/admin/accounts/${id}`, {
+    data: options
+  })
   return data
 }
 

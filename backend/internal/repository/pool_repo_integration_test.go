@@ -48,22 +48,22 @@ func TestPoolRepository_GetRecoveryKeepsPhysicalAccountsSeparate(t *testing.T) {
 	loc, err := time.LoadLocation(service.PoolTimezone)
 	require.NoError(t, err)
 	date := func(day int) time.Time { return time.Date(2026, time.January, day, 0, 0, 0, 0, loc) }
+	originalExpected := int64(1000)
 	_, err = repo.CreateCost(ctx, service.CreateAccountCostInput{
 		AccountID: original.ID, PayerUserID: user.ID, PurchaseSourceID: &source.ID,
 		EntryType: "purchase", Currency: "CNY", OriginalAmount: "100.00", CNYAmountMinor: 10000, FXRate: "1",
-		ServiceStart: date(1), ServiceEnd: date(31), PaidAt: date(1), CreatedByUserID: user.ID,
+		ServiceStart: date(1), ServiceEnd: date(31), PaidAt: date(1), CreatedByUserID: user.ID, ExpectedTokenCount: &originalExpected,
 	})
 	require.NoError(t, err)
-	_, err = repo.CreateFXRate(ctx, service.CreateFXRateInput{
-		BaseCurrency: "USD", QuoteCurrency: "CNY", Rate: "7.2", EffectiveFrom: date(1), CreatedByUserID: user.ID,
-	})
-	require.NoError(t, err)
-	_, err = repo.CreateFXRate(ctx, service.CreateFXRateInput{
-		BaseCurrency: "USD", QuoteCurrency: "CNY", Rate: "8", EffectiveFrom: date(4), CreatedByUserID: user.ID,
+	replacementExpected := int64(600)
+	_, err = repo.CreateCost(ctx, service.CreateAccountCostInput{
+		AccountID: replacement.ID, PayerUserID: user.ID,
+		EntryType: "purchase", Currency: "CNY", OriginalAmount: "60.00", CNYAmountMinor: 6000, FXRate: "1",
+		ServiceStart: date(1), ServiceEnd: date(31), PaidAt: date(1), CreatedByUserID: user.ID, ExpectedTokenCount: &replacementExpected,
 	})
 	require.NoError(t, err)
 
-	addUsage := func(accountID int64, day int, totalCost float64) {
+	addUsage := func(accountID int64, day int, tokens int64) {
 		t.Helper()
 		_, createErr := integrationEntClient.UsageLog.Create().
 			SetUserID(user.ID).
@@ -71,12 +71,12 @@ func TestPoolRepository_GetRecoveryKeepsPhysicalAccountsSeparate(t *testing.T) {
 			SetAccountID(accountID).
 			SetRequestID(fmt.Sprintf("pool-%d-%d", stamp, day)).
 			SetModel("pool-test-model").
-			SetTotalCost(totalCost).
+			SetInputTokens(int(tokens)).
 			SetCreatedAt(date(day).Add(12 * time.Hour)).
 			Save(ctx)
 		require.NoError(t, createErr)
 	}
-	addUsage(original.ID, 2, 5) // CNY 36.00 at the historical 7.2 rate.
+	addUsage(original.ID, 2, 400)
 	_, err = repo.CreateLifecycle(ctx, service.CreateLifecycleEventInput{
 		AccountID: original.ID, EventType: "banned_confirmed", OccurredAt: date(2).Add(18 * time.Hour),
 		CreatedByUserID: user.ID,
@@ -88,15 +88,9 @@ func TestPoolRepository_GetRecoveryKeepsPhysicalAccountsSeparate(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	_, err = repo.CreateLifecycle(ctx, service.CreateLifecycleEventInput{
-		AccountID: original.ID, EventType: "replaced", OccurredAt: date(3),
-		ReplacementAccountID: &replacement.ID, TransferredCostMinor: 6000,
-		PayerUserID: &user.ID, CreatedByUserID: user.ID,
-	})
-	require.NoError(t, err)
-	addUsage(replacement.ID, 4, 3)
-	addUsage(replacement.ID, 5, 3)
-	addUsage(replacement.ID, 7, 3) // Three effective days across seven observed natural days.
+	addUsage(replacement.ID, 4, 240)
+	addUsage(replacement.ID, 5, 240)
+	addUsage(replacement.ID, 7, 240) // Three effective days across seven observed natural days.
 
 	items, err := repo.GetRecovery(ctx, date(1), date(10))
 	require.NoError(t, err)
@@ -112,22 +106,22 @@ func TestPoolRepository_GetRecoveryKeepsPhysicalAccountsSeparate(t *testing.T) {
 	require.NotNil(t, gotOriginal)
 	require.NotNil(t, gotReplacement)
 
-	require.Equal(t, int64(3900), gotOriginal.NetCostMinor)
-	require.Equal(t, int64(3600), gotOriginal.ValueMinor)
-	require.Equal(t, int64(-300), gotOriginal.NetProfitMinor)
-	require.Equal(t, int64(6400), gotOriginal.BannedLossMinor)
-	require.Equal(t, int64(300), gotOriginal.CurrentNetLossMinor)
+	require.Equal(t, int64(10000), gotOriginal.NetCostMinor)
+	require.Equal(t, int64(4100), gotOriginal.ValueMinor)
+	require.Equal(t, int64(-5900), gotOriginal.NetProfitMinor)
+	require.Equal(t, int64(5900), gotOriginal.BannedLossMinor)
+	require.Equal(t, int64(5900), gotOriginal.CurrentNetLossMinor)
 	require.True(t, gotOriginal.Refunded)
 	require.False(t, gotOriginal.CurrentlyRecovered)
 	require.Nil(t, gotOriginal.FirstRecoveryAt)
-	require.Equal(t, "replaced", gotOriginal.LifecycleStatus)
+	require.Equal(t, "banned_confirmed", gotOriginal.LifecycleStatus)
 	require.Equal(t, source.Name, *gotOriginal.PurchaseSource)
 
 	require.Equal(t, int64(6000), gotReplacement.NetCostMinor)
-	require.Equal(t, int64(7200), gotReplacement.ValueMinor)
-	require.Equal(t, int64(1200), gotReplacement.NetProfitMinor)
-	require.Equal(t, "1.2", gotReplacement.RecoveryRate)
-	require.Equal(t, int64(1029), gotReplacement.AverageDailyValueMinor)
+	require.Equal(t, int64(6000), gotReplacement.ValueMinor)
+	require.Zero(t, gotReplacement.NetProfitMinor)
+	require.Equal(t, "1", gotReplacement.RecoveryRate)
+	require.Equal(t, int64(103), gotReplacement.AverageDailyTokens)
 	require.Equal(t, int64(3), gotReplacement.EffectiveUsageDays)
 	require.Equal(t, int64(7), gotReplacement.ObservationDays)
 	require.True(t, gotReplacement.CurrentlyRecovered)

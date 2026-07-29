@@ -7,6 +7,7 @@
             v-model:searchQuery="params.search"
             :filters="params"
             :groups="groups"
+            :uploaders="uploaderOptions"
             @update:filters="(newFilters) => Object.assign(params, newFilters)"
             @change="debouncedReload"
             @update:searchQuery="debouncedReload"
@@ -219,6 +220,7 @@
           :estimate-row-height="156"
           :overscan="5"
           :virtualize-threshold="50"
+          :mobile-column-keys="['select', 'uploader', 'usage', 'pool_record', 'status']"
         >
           <template #header-select>
             <input
@@ -262,6 +264,16 @@
               >
                 {{ accountDisplayEmail(row) }}
               </span>
+            </div>
+          </template>
+          <template #cell-uploader="{ row }">
+            <div class="min-w-0">
+              <p class="max-w-52 truncate font-medium text-gray-900 dark:text-white" :title="row.uploader_email || ''">
+                {{ row.uploader_email || '-' }}
+              </p>
+              <p class="max-w-52 truncate text-xs text-gray-500 dark:text-gray-400 md:hidden" :title="row.name">
+                {{ row.name }} · #{{ row.id }}
+              </p>
             </div>
           </template>
           <template #cell-notes="{ value }">
@@ -339,12 +351,12 @@
               class="min-h-11 rounded-lg px-2 py-1 text-left transition-colors hover:bg-emerald-50 dark:hover:bg-emerald-900/20"
               @click="emit('pool-record', row)"
             >
-              <template v-if="poolRecordFor(row.id)">
+              <template v-if="hasPoolCost(row)">
                 <span class="block max-w-36 truncate text-xs font-medium text-emerald-700 dark:text-emerald-300">
                   {{ poolRecordFor(row.id)?.purchase_source_name || t('admin.sharedPool.actions.poolRecord') }}
                 </span>
                 <span class="block text-xs tabular-nums text-gray-500 dark:text-gray-400">
-                  ¥{{ poolRecordFor(row.id)?.purchase_cost.toFixed(2) }} · {{ formatPoolPercent(poolRecordFor(row.id)?.roi_rate || 0) }}
+                  {{ formatPoolCost(row.pool_net_cost_minor) }} · {{ poolRecoveryLabel(row) }}
                 </span>
               </template>
               <span v-else class="text-xs font-medium text-amber-600 dark:text-amber-300">
@@ -379,7 +391,7 @@
             </span>
           </template>
           <template #header-upstream_billing_rate="{ column }">
-            <div class="flex items-center gap-1">
+            <div class="flex flex-wrap items-center justify-end gap-1">
               <span>{{ column.label }}</span>
               <span @click.stop>
                 <HelpTooltip :content="t('admin.accounts.upstreamBilling.trustWarning')" width-class="w-80" />
@@ -496,7 +508,39 @@
       @updated="handleBulkUpdated"
     />
     <TempUnschedStatusModal :show="showTempUnsched" :account="tempUnschedAcc" @close="showTempUnsched = false" @reset="handleTempUnschedReset" />
-    <ConfirmDialog :show="showDeleteDialog" :title="t('admin.accounts.deleteAccount')" :message="t('admin.accounts.deleteConfirm', { name: deletingAcc?.name })" :confirm-text="t('common.delete')" :cancel-text="t('common.cancel')" :danger="true" @confirm="confirmDelete" @cancel="showDeleteDialog = false" />
+    <BaseDialog :show="showDeleteDialog" :title="t('admin.accounts.deleteAccount')" width="normal" @close="closeDeleteDialog">
+      <form id="account-delete-form" class="space-y-4" @submit.prevent="confirmDelete">
+        <p class="text-sm text-gray-600 dark:text-gray-400">{{ t('admin.accounts.deleteConfirm', { name: deletingAcc?.name }) }}</p>
+        <div>
+          <label for="account-delete-disposition" class="input-label">{{ t('admin.sharedPool.delete.costDisposition') }}</label>
+          <Select id="account-delete-disposition" v-model="deleteForm.cost_disposition" :options="deleteDispositionOptions" />
+          <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.delete.costDispositionHint') }}</p>
+        </div>
+        <div v-if="deleteForm.cost_disposition === 'transfer'">
+          <label for="account-delete-replacement" class="input-label">{{ t('admin.sharedPool.delete.replacementAccount') }}</label>
+          <Select id="account-delete-replacement" v-model="deleteForm.replacement_account_id" :options="deleteReplacementOptions" searchable />
+        </div>
+		<div v-if="deleteForm.cost_disposition === 'refund'">
+		  <label for="account-delete-refund" class="input-label">{{ t('admin.sharedPool.delete.refundAmount') }} *</label>
+		  <input id="account-delete-refund" v-model.number="deleteForm.refund_amount" class="input" type="number" inputmode="decimal" min="0.01" step="0.01" required />
+		  <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.delete.refundAmountHint') }}</p>
+		</div>
+        <div>
+          <label for="account-delete-reason" class="input-label">{{ t('admin.sharedPool.delete.reason') }}</label>
+          <textarea id="account-delete-reason" v-model.trim="deleteForm.reason" class="input min-h-24 w-full resize-y" maxlength="1000" :placeholder="t('admin.sharedPool.delete.reasonHint')"></textarea>
+        </div>
+        <p class="rounded-md bg-amber-50 p-3 text-sm text-amber-700 dark:bg-amber-900/20 dark:text-amber-300">{{ t('admin.sharedPool.delete.auditHint') }}</p>
+      </form>
+      <template #footer>
+        <div class="flex w-full flex-col-reverse gap-2 sm:flex-row sm:justify-end sm:gap-3">
+          <button type="button" class="btn btn-secondary" :disabled="deleteSubmitting" @click="closeDeleteDialog">{{ t('common.cancel') }}</button>
+          <button type="submit" form="account-delete-form" class="btn btn-danger" :disabled="deleteSubmitting || (!authStore.user?.is_primary_admin && !deleteForm.reason.trim()) || (deleteForm.cost_disposition === 'transfer' && !deleteForm.replacement_account_id) || (deleteForm.cost_disposition === 'refund' && !(Number(deleteForm.refund_amount) > 0))">
+            <LoadingSpinner v-if="deleteSubmitting" size="sm" />
+            {{ t('common.delete') }}
+          </button>
+        </div>
+      </template>
+    </BaseDialog>
     <ConfirmDialog :show="showCreateShadowDialog" :title="t('admin.accounts.createSparkShadow')" :message="t('admin.accounts.createSparkShadowConfirm', { name: creatingShadowAcc?.name })" @confirm="confirmCreateSparkShadow" @cancel="showCreateShadowDialog = false" />
     <ConfirmDialog :show="showExportDataDialog" :title="t('admin.accounts.dataExport')" :message="t('admin.accounts.dataExportConfirmMessage')" :confirm-text="t('admin.accounts.dataExportConfirm')" :cancel-text="t('common.cancel')" @confirm="handleExportData" @cancel="showExportDataDialog = false">
       <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
@@ -657,11 +701,12 @@
           <pre class="max-h-80 overflow-auto rounded-lg bg-gray-950 p-4 text-xs leading-5 text-gray-100">{{ credentialRevealJSON }}</pre>
         </template>
         <template v-else>
-          <p class="text-sm text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.approval.credentialHint') }}</p>
-          <label for="credential-purpose" class="block text-sm font-medium text-gray-700 dark:text-gray-300">
+          <p class="text-sm text-gray-500 dark:text-gray-400">{{ t(authStore.user?.is_primary_admin ? 'admin.sharedPool.approval.primaryDirectHint' : 'admin.sharedPool.approval.credentialHint') }}</p>
+          <label v-if="!authStore.user?.is_primary_admin" for="credential-purpose" class="block text-sm font-medium text-gray-700 dark:text-gray-300">
             {{ t('admin.sharedPool.approval.purpose') }}
           </label>
           <textarea
+            v-if="!authStore.user?.is_primary_admin"
             id="credential-purpose"
             v-model.trim="credentialPurpose"
             class="input min-h-24 w-full resize-y"
@@ -674,7 +719,7 @@
           v-if="!credentialReveal"
           form="credential-access-form"
           :submitting="credentialSubmitting"
-          :disabled="!credentialPurpose.trim()"
+          :disabled="!authStore.user?.is_primary_admin && !credentialPurpose.trim()"
           :submit-text="authStore.user?.is_primary_admin ? t('admin.sharedPool.approval.verifyAndReveal') : t('admin.sharedPool.approval.submit')"
           :cancel-text="t('common.close')"
           @cancel="closeCredentialDialog"
@@ -709,6 +754,7 @@ import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import StatusBadge from '@/components/common/StatusBadge.vue'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
 import FormDialogActions from '@/components/common/FormDialogActions.vue'
+import Select from '@/components/common/Select.vue'
 import { CreateAccountModal, EditAccountModal, BulkEditAccountModal, SyncFromCrsModal, TempUnschedStatusModal } from '@/components/account'
 import AccountTableActions from '@/components/admin/account/AccountTableActions.vue'
 import AccountTableFilters from '@/components/admin/account/AccountTableFilters.vue'
@@ -758,6 +804,7 @@ const authStore = useAuthStore()
 
 const proxies = ref<AccountProxy[]>([])
 const groups = ref<AdminGroup[]>([])
+const uploaderOptions = ref<Array<{ value: number; label: string }>>([])
 const accountTableRef = ref<HTMLElement | null>(null)
 const dataTableRef = ref<InstanceType<typeof DataTable> | null>(null)
 type AccountBulkEditTarget =
@@ -776,6 +823,7 @@ type AccountBulkEditTarget =
         group?: string
         search?: string
         privacy_mode?: string
+        uploader_user_id?: number
         sort_by?: string
         sort_order?: AccountSortOrder
       }
@@ -835,6 +883,14 @@ let credentialClearTimer: ReturnType<typeof setTimeout> | null = null
 const edAcc = ref<Account | null>(null)
 const tempUnschedAcc = ref<Account | null>(null)
 const deletingAcc = ref<Account | null>(null)
+const deleteSubmitting = ref(false)
+const deleteReplacementAccounts = ref<Account[]>([])
+const deleteForm = reactive({
+  cost_disposition: 'write_off' as 'write_off' | 'refund' | 'transfer',
+  replacement_account_id: 0,
+	refund_amount: '' as number | '',
+  reason: ''
+})
 const creatingShadowAcc = ref<Account | null>(null)
 const reAuthAcc = ref<Account | null>(null)
 const testingAcc = ref<Account | null>(null)
@@ -861,6 +917,12 @@ const approvalColumns = computed(() => [
 ])
 
 const credentialRevealJSON = computed(() => JSON.stringify(credentialReveal.value?.credentials ?? {}, null, 2))
+const deleteDispositionOptions = computed(() => [
+  { value: 'write_off', label: t('admin.sharedPool.delete.writeOff') },
+  { value: 'refund', label: t('admin.sharedPool.delete.refund') },
+  { value: 'transfer', label: t('admin.sharedPool.delete.transfer') }
+])
+const deleteReplacementOptions = computed(() => deleteReplacementAccounts.value.map(account => ({ value: account.id, label: `${account.name} (#${account.id})` })))
 
 const SENSITIVE_APPROVAL_FIELD = /(credential|token|secret|password|api[_-]?key|cookie|authorization)/i
 const formatApprovalValue = (value: unknown, field: string): string => {
@@ -1225,9 +1287,11 @@ const {
     type: '',
     status: '',
     privacy_mode: '',
+    uploader_user_id: '',
     group: '',
     search: '',
     include_scheduler_score: shouldIncludeSchedulerScore() ? '1' : '0',
+    include_pool_metrics: '1',
     sort_by: sortState.sort_by,
     sort_order: sortState.sort_order
   }
@@ -1476,9 +1540,10 @@ const refreshAccountsIncrementally = async () => {
         privacy_mode?: string
         group?: string
         search?: string
+        uploader_user_id?: number | string
+        include_pool_metrics?: string
         sort_by?: string
         sort_order?: AccountSortOrder
-
       },
       { etag: autoRefreshETag.value }
     )
@@ -1740,6 +1805,7 @@ function getAntigravityTierClass(row: any): string {
 const allColumns = computed(() => {
   const c = [
     { key: 'select', label: '', sortable: false },
+    { key: 'uploader', label: t('admin.sharedPool.columns.uploader'), sortable: false },
     { key: 'name', label: t('admin.accounts.columns.name'), sortable: true },
     { key: 'id', label: t('admin.accounts.columns.id'), sortable: true },
     { key: 'platform_type', label: t('admin.accounts.columns.platformType'), sortable: false },
@@ -1768,21 +1834,27 @@ const allColumns = computed(() => {
   return c
 })
 
-// Columns that can be toggled (exclude select, name, and actions)
+// Uploader is a core pool ownership field and remains visible on every layout.
 const toggleableColumns = computed(() =>
-  allColumns.value.filter(col => col.key !== 'select' && col.key !== 'name' && col.key !== 'actions')
+  allColumns.value.filter(col => !['select', 'name', 'uploader', 'actions'].includes(col.key))
 )
 
 // Filtered columns based on visibility
 const cols = computed(() =>
   allColumns.value.filter(col =>
-    col.key === 'select' || col.key === 'name' || col.key === 'actions' || !hiddenColumns.has(col.key)
+    ['select', 'name', 'uploader', 'actions'].includes(col.key) || !hiddenColumns.has(col.key)
   )
 )
 
 const handleEdit = (a: Account) => { edAcc.value = a; showEdit.value = true }
 const poolRecordFor = (accountID: number) => props.poolRecords[accountID]
-const formatPoolPercent = (value: number) => `${Number(value || 0).toFixed(1)}%`
+const hasPoolCost = (account: Account) => Number(account.pool_net_cost_minor || 0) > 0 || Boolean(poolRecordFor(account.id))
+const formatPoolCost = (minor?: number | null) => `¥${(Number(minor || 0) / 100).toFixed(2)}`
+const poolRecoveryLabel = (account: Account) => {
+  const progress = Number(account.pool_cost_progress || 0)
+  if (progress >= 1) return t('admin.sharedPool.status.recovered')
+  return `${t('admin.sharedPool.status.recovering')} ${(Math.max(0, progress) * 100).toFixed(1)}%`
+}
 
 const normalizeApprovalStatus = (status: string) => {
   const normalized = status.toLowerCase()
@@ -1792,7 +1864,9 @@ const normalizeApprovalStatus = (status: string) => {
 const approvalActionLabel = (action: PoolApproval['action_type']) => t(
   action === 'VIEW_CREDENTIAL'
     ? 'admin.sharedPool.approval.viewCredential'
-    : 'admin.sharedPool.approval.updateAccount'
+		: action === 'DELETE_ACCOUNT'
+		  ? 'admin.sharedPool.approval.deleteAccount'
+		  : 'admin.sharedPool.approval.updateAccount'
 )
 
 const approvalStatusLabel = (status: string) => {
@@ -1963,7 +2037,7 @@ const revealCredential = async (approval: PoolApproval) => {
 const submitCredentialRequest = async () => {
   const account = credentialAccount.value
   const purpose = credentialPurpose.value.trim()
-  if (!account || !purpose) return
+  if (!account || (!authStore.user?.is_primary_admin && !purpose)) return
 
   credentialSubmitting.value = true
   try {
@@ -2047,7 +2121,9 @@ const toggleSelectAllVisible = (event: Event) => {
   const target = event.target as HTMLInputElement
   toggleVisible(target.checked)
 }
-const handleBulkDelete = async () => { if(!confirm(t('common.confirm'))) return; try { await Promise.all(selIds.value.map(id => adminAPI.accounts.delete(id))); clearSelection(); reload() } catch (error) { console.error('Failed to bulk delete accounts:', error) } }
+const handleBulkDelete = () => {
+  appStore.showWarning(t('admin.sharedPool.delete.bulkRequiresIndividual', { count: selIds.value.length }))
+}
 const handleBulkResetStatus = async () => {
   if (!confirm(t('common.confirm'))) return
   try {
@@ -2226,6 +2302,7 @@ const buildBulkEditFilterSnapshot = () => {
     group: typeof rawParams.group === 'string' ? rawParams.group : '',
     search: typeof rawParams.search === 'string' ? rawParams.search : '',
     privacy_mode: typeof rawParams.privacy_mode === 'string' ? rawParams.privacy_mode : '',
+    uploader_user_id: Number(rawParams.uploader_user_id) || undefined,
     sort_by: typeof rawParams.sort_by === 'string' ? rawParams.sort_by : '',
     sort_order: sortOrder
   }
@@ -2280,6 +2357,7 @@ const buildAccountQueryFilters = () => ({
   status: params.status || '',
   group: params.group || '',
   privacy_mode: params.privacy_mode || '',
+  uploader_user_id: params.uploader_user_id || '',
   search: params.search || '',
   sort_by: sortState.sort_by,
   sort_order: sortState.sort_order
@@ -2323,6 +2401,7 @@ const accountMatchesCurrentFilters = (account: Account) => {
       return false
     }
   }
+  if (filters.uploader_user_id && account.created_by_user_id !== Number(filters.uploader_user_id)) return false
   const search = String(filters.search || '').trim().toLowerCase()
   if (search && !account.name.toLowerCase().includes(search)) return false
   return true
@@ -2331,7 +2410,14 @@ const mergeRuntimeFields = (oldAccount: Account, updatedAccount: Account): Accou
   ...updatedAccount,
   current_concurrency: updatedAccount.current_concurrency ?? oldAccount.current_concurrency,
   current_window_cost: updatedAccount.current_window_cost ?? oldAccount.current_window_cost,
-  active_sessions: updatedAccount.active_sessions ?? oldAccount.active_sessions
+  active_sessions: updatedAccount.active_sessions ?? oldAccount.active_sessions,
+  uploader_email: updatedAccount.uploader_email ?? oldAccount.uploader_email,
+  expected_token_count: updatedAccount.expected_token_count ?? oldAccount.expected_token_count,
+  pool_total_usage_tokens: updatedAccount.pool_total_usage_tokens ?? oldAccount.pool_total_usage_tokens,
+  pool_net_cost_minor: updatedAccount.pool_net_cost_minor ?? oldAccount.pool_net_cost_minor,
+  pool_remaining_cost_minor: updatedAccount.pool_remaining_cost_minor ?? oldAccount.pool_remaining_cost_minor,
+  pool_cost_progress: updatedAccount.pool_cost_progress ?? oldAccount.pool_cost_progress,
+  pool_lifecycle_status: updatedAccount.pool_lifecycle_status ?? oldAccount.pool_lifecycle_status
 })
 
 const syncPaginationAfterLocalRemoval = () => {
@@ -2582,8 +2668,45 @@ const confirmCreateSparkShadow = async () => {
     appStore.showError(error?.response?.data?.message || t('admin.accounts.createSparkShadowFailed'))
   }
 }
-const handleDelete = (a: Account) => { deletingAcc.value = a; showDeleteDialog.value = true }
-const confirmDelete = async () => { if(!deletingAcc.value) return; try { await adminAPI.accounts.delete(deletingAcc.value.id); showDeleteDialog.value = false; deletingAcc.value = null; reload() } catch (error) { console.error('Failed to delete account:', error) } }
+const closeDeleteDialog = () => {
+  if (deleteSubmitting.value) return
+  showDeleteDialog.value = false
+  deletingAcc.value = null
+}
+const handleDelete = async (account: Account) => {
+  deletingAcc.value = account
+	Object.assign(deleteForm, { cost_disposition: 'write_off', replacement_account_id: 0, refund_amount: '', reason: '' })
+  showDeleteDialog.value = true
+  try {
+    const response = await adminAPI.accounts.list(1, 200, { lite: 'true', status: 'active', sort_by: 'name', sort_order: 'asc' })
+    deleteReplacementAccounts.value = response.items.filter(item => item.id !== account.id)
+  } catch (error) {
+    deleteReplacementAccounts.value = []
+    appStore.showError(extractApiErrorMessage(error, t('admin.sharedPool.delete.loadAccountsFailed')))
+  }
+}
+const confirmDelete = async () => {
+  const account = deletingAcc.value
+	if (!account || (!authStore.user?.is_primary_admin && !deleteForm.reason.trim()) || (deleteForm.cost_disposition === 'transfer' && !deleteForm.replacement_account_id) || (deleteForm.cost_disposition === 'refund' && !(Number(deleteForm.refund_amount) > 0))) return
+  deleteSubmitting.value = true
+  try {
+		const result = await adminAPI.accounts.delete(account.id, {
+		  cost_disposition: deleteForm.cost_disposition,
+		  replacement_account_id: deleteForm.cost_disposition === 'transfer' ? deleteForm.replacement_account_id : undefined,
+		  refund_amount_minor: deleteForm.cost_disposition === 'refund' ? Math.round(Number(deleteForm.refund_amount) * 100) : undefined,
+		  reason: deleteForm.reason || undefined
+		})
+    showDeleteDialog.value = false
+    deletingAcc.value = null
+		appStore.showSuccess(t(result.approval ? 'admin.sharedPool.delete.approvalSubmitted' : 'admin.sharedPool.delete.success'))
+		if (result.approval) void loadPendingApprovalCount()
+		else reload()
+  } catch (error) {
+    appStore.showError(extractApiErrorMessage(error, t('admin.sharedPool.delete.failed')))
+  } finally {
+    deleteSubmitting.value = false
+  }
+}
 const handleToggleSchedulable = async (a: Account) => {
   const nextSchedulable = !a.schedulable
   togglingSchedulable.value = a.id
@@ -2657,11 +2780,20 @@ onMounted(async () => {
   loadUpstreamBillingProbeGlobalState()
   void loadPendingApprovalCount()
   try {
-    const [p, g] = await Promise.all([adminAPI.proxies.getAll(), adminAPI.groups.getAll()])
+    const [p, g] = await Promise.all([
+      adminAPI.proxies.getAll(),
+      adminAPI.groups.getAll()
+    ])
     proxies.value = p
     groups.value = g
   } catch (error) {
-    console.error('Failed to load proxies/groups:', error)
+    console.error('Failed to load account reference options:', error)
+  }
+  try {
+    const users = await adminAPI.users.list(1, 200, { sort_by: 'email', sort_order: 'asc' })
+    uploaderOptions.value = users.items.map(user => ({ value: user.id, label: user.username || user.email }))
+  } catch (error) {
+    console.error('Failed to load account uploader options:', error)
   }
   window.addEventListener('scroll', handleScroll, true)
   window.addEventListener('resize', handleViewportResize)

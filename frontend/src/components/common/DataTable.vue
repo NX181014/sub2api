@@ -471,6 +471,8 @@ interface Props {
   selectedKeys?: Array<string | number>
   /** Accessible label for a row selection checkbox. */
   selectionLabel?: string | ((row: any) => string)
+  /** Optional ordered subset used by the mobile card layout. */
+  mobileColumnKeys?: string[]
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -634,7 +636,12 @@ const resolveStableRowKey = (row: any): string | number | undefined => {
 
 const resolveRowKey = (row: any, index: number) => resolveStableRowKey(row) ?? index
 
-const dataColumns = computed(() => props.columns.filter((column) => column.key !== 'actions'))
+const dataColumns = computed(() => {
+  const columns = props.columns.filter((column) => column.key !== 'actions')
+  if (!props.mobileColumnKeys?.length) return columns
+  const byKey = new Map(columns.map((column) => [column.key, column]))
+  return props.mobileColumnKeys.map((key) => byKey.get(key)).filter((column): column is Column => Boolean(column))
+})
 const columnsSignature = computed(() =>
   props.columns.map((column) => `${column.key}:${column.sortable ? '1' : '0'}`).join('|')
 )

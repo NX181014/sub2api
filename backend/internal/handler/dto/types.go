@@ -205,6 +205,17 @@ type Account struct {
 	AutoPauseOnExpired      bool                           `json:"auto_pause_on_expired"`
 	CreatedAt               time.Time                      `json:"created_at"`
 	UpdatedAt               time.Time                      `json:"updated_at"`
+	ProviderIdentity        *string                        `json:"provider_identity,omitempty"`
+	ContributorUserID       *int64                         `json:"contributor_user_id,omitempty"`
+	CreatedByUserID         *int64                         `json:"created_by_user_id,omitempty"`
+	CostSharingEnabled      bool                           `json:"cost_sharing_enabled"`
+	UploaderEmail           *string                        `json:"uploader_email,omitempty"`
+	ExpectedTokenCount      *int64                         `json:"expected_token_count,omitempty"`
+	PoolTotalUsageTokens    int64                          `json:"pool_total_usage_tokens,omitempty"`
+	PoolNetCostMinor        int64                          `json:"pool_net_cost_minor,omitempty"`
+	PoolRemainingCostMinor  int64                          `json:"pool_remaining_cost_minor,omitempty"`
+	PoolCostProgress        *string                        `json:"pool_cost_progress,omitempty"`
+	PoolLifecycleStatus     string                         `json:"pool_lifecycle_status,omitempty"`
 
 	Schedulable bool `json:"schedulable"`
 

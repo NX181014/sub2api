@@ -12,12 +12,13 @@ func TestFinalizeAccountRecoveryUsesNaturalDayProjectionAndBanCutoff(t *testing.
 	purchasedAt := time.Date(2026, time.July, 1, 8, 0, 0, 0, time.UTC)
 	end := purchasedAt.Add(10 * 24 * time.Hour)
 	item := service.AccountRecovery{
-		NetCostMinor:           10000,
-		ValueMinor:             4000,
-		AverageDailyValueMinor: 1000,
-		PurchasedAt:            &purchasedAt,
-		EffectiveUsageDays:     3,
-		ObservationDays:        7,
+		NetCostMinor:       10000,
+		ValueMinor:         4000,
+		RemainingTokens:    6000,
+		AverageDailyTokens: 1000,
+		PurchasedAt:        &purchasedAt,
+		EffectiveUsageDays: 3,
+		ObservationDays:    7,
 	}
 
 	finalizeAccountRecovery(&item, end)

@@ -1073,6 +1073,17 @@ export interface Account {
   auto_pause_on_expired: boolean
   created_at: string
   updated_at: string
+  provider_identity?: string | null
+  contributor_user_id?: number | null
+  created_by_user_id?: number | null
+  cost_sharing_enabled: boolean
+  uploader_email?: string | null
+  expected_token_count?: number | null
+  pool_total_usage_tokens?: number
+  pool_net_cost_minor?: number
+  pool_remaining_cost_minor?: number
+  pool_cost_progress?: string | null
+  pool_lifecycle_status?: string
   proxy?: Proxy
   group_ids?: number[] // Groups this account belongs to
   groups?: Group[] // Preloaded group objects
@@ -1353,6 +1364,10 @@ export interface UpdateAccountRequest {
   expires_at?: number | null
   auto_pause_on_expired?: boolean
   confirm_mixed_channel_risk?: boolean
+  provider_identity?: string | null
+  contributor_user_id?: number | null
+  created_by_user_id?: number | null
+  cost_sharing_enabled?: boolean
 }
 
 export interface CheckMixedChannelRequest {

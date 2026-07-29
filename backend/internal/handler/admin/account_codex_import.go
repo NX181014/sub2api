@@ -141,6 +141,9 @@ func (h *AccountHandler) ImportCodexSession(c *gin.Context) {
 		response.BadRequest(c, "load_factor must be <= 10000")
 		return
 	}
+	if (req.UpdateExisting == nil || *req.UpdateExisting) && !h.requirePrimaryAdmin(c, "updating existing accounts through Codex import") {
+		return
+	}
 
 	entries, err := parseCodexSessionImportEntries(req)
 	if err != nil {

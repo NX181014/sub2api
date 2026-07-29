@@ -62,6 +62,29 @@ export async function changePassword(
   return data
 }
 
+export interface PendingPoolSettlementLine {
+  user_id: number
+  net_amount_minor: number
+  confirmation_status: 'pending' | 'confirmed'
+}
+
+export interface PendingPoolSettlement {
+  id: number
+  period_start: string
+  period_end: string
+  total_cost_minor: number
+  lines: PendingPoolSettlementLine[]
+}
+
+export async function listMyPendingPoolSettlements(): Promise<PendingPoolSettlement[]> {
+  const { data } = await apiClient.get<PendingPoolSettlement[]>('/user/pool/settlements/pending')
+  return data
+}
+
+export async function confirmMyPoolSettlement(id: number): Promise<void> {
+  await apiClient.post(`/user/pool/settlements/${id}/confirm`)
+}
+
 /**
  * Send verification code for adding a notify email
  * @param email - Email address to verify

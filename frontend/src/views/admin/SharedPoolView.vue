@@ -18,7 +18,7 @@
           </button>
         </div>
 
-        <div v-if="activeTab !== 'accounts'" class="flex flex-col gap-3 p-4 lg:flex-row lg:items-center">
+        <div v-if="activeTab !== 'accounts' && activeTab !== 'ledger'" class="flex flex-col gap-3 p-4 lg:flex-row lg:items-center">
           <div class="flex min-w-0 flex-1 flex-col gap-3 sm:flex-row sm:items-center">
             <label for="pool-period-type" class="shrink-0 text-sm font-medium text-gray-700 dark:text-gray-300">
               {{ t('admin.sharedPool.period.label') }}
@@ -237,56 +237,19 @@
           @pool-created="completeCreatedAccountIntake"
           @pool-imported="completeImportedAccountsIntake"
         />
-        <section class="card overflow-hidden">
-          <div class="flex flex-col gap-3 border-b border-gray-100 px-4 py-3 dark:border-dark-700 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <h2 class="text-sm font-semibold text-gray-900 dark:text-white">{{ t('admin.sharedPool.accounts.title') }}</h2>
-              <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.accounts.subtitle') }}</p>
-            </div>
-          </div>
-          <DataTable :columns="costColumns" :data="accountCosts" row-key="id" :loading="loading">
-            <template #cell-account_name="{ row }">
-              <div class="min-w-0">
-                <p class="max-w-56 truncate font-medium text-gray-900 dark:text-white" :title="row.account_name">{{ row.account_name }}</p>
-                <p class="max-w-56 truncate text-xs text-gray-500 dark:text-gray-400" :title="row.provider_identity">{{ row.provider_identity || '-' }}</p>
-              </div>
-            </template>
-            <template #cell-purchase_source_name="{ row }">
-              <div>
-                <p class="font-medium text-gray-800 dark:text-gray-200">{{ row.purchase_source_name || '-' }}</p>
-                <p v-if="row.order_no" class="text-xs text-gray-500 dark:text-gray-400">{{ row.order_no }}</p>
-              </div>
-            </template>
-            <template #cell-purchase_cost="{ row }">
-              <span class="font-medium tabular-nums">{{ formatMoney(row.purchase_cost, row.currency) }}</span>
-            </template>
-            <template #cell-entry_type="{ row }">
-              <span class="whitespace-nowrap">{{ t(`admin.sharedPool.entryTypes.${row.entry_type || 'purchase'}`) }}</span>
-            </template>
-            <template #cell-service_start="{ row }">
-              <span class="whitespace-nowrap tabular-nums">{{ row.service_start }} - {{ row.service_end }}</span>
-            </template>
-            <template #cell-status="{ row }">
-              <StatusBadge
-                :status="accountStatus(row.status).badge"
-                :label="t(`admin.sharedPool.status.${accountStatus(row.status).key}`)"
-              />
-            </template>
-            <template #cell-actions="{ row }">
-              <button
-                type="button"
-                class="btn btn-secondary min-h-9 whitespace-nowrap px-2 text-xs"
-                @click="openEventDialog(row)"
-              >
-                <Icon name="edit" size="xs" />
-                {{ t('admin.sharedPool.accounts.recordEvent') }}
-              </button>
-            </template>
-          </DataTable>
-        </section>
       </template>
 
       <template v-else-if="activeTab === 'settlement'">
+        <section class="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
+          <Select v-model="settlementFilters.account_id" :options="settlementAccountOptions" searchable :aria-label="t('admin.sharedPool.ledger.allAccounts')" />
+          <Select v-model="settlementFilters.uploader_user_id" :options="settlementUploaderOptions" searchable :aria-label="t('admin.sharedPool.ledger.allUploaders')" />
+          <Select v-model="settlementFilters.payer_user_id" :options="settlementPayerOptions" searchable :aria-label="t('admin.sharedPool.ledger.allPayers')" />
+          <Select v-model="settlementFilters.purchase_source_id" :options="settlementSourceOptions" searchable :aria-label="t('admin.sharedPool.ledger.allSources')" />
+          <button type="button" class="btn btn-secondary min-h-11" :disabled="loading" @click="loadActiveTab">
+            <Icon name="refresh" size="sm" />
+            {{ t('common.refresh') }}
+          </button>
+        </section>
         <template v-if="settlement">
           <div
             v-if="settlement.unpriced_usage_count > 0"
@@ -316,15 +279,31 @@
                   :label="t(`admin.sharedPool.status.${settlementStatus(settlement.status).key}`)"
                 />
               </div>
-              <button
-                type="button"
-                class="btn btn-primary min-h-11"
-                :disabled="settlement.status !== 'draft' || settlement.unpriced_usage_count > 0 || locking"
-                @click="showLockConfirm = true"
-              >
-                <Icon name="lock" size="sm" />
-                {{ t('admin.sharedPool.settlement.lock') }}
-              </button>
+              <div class="flex flex-wrap items-center justify-end gap-2">
+                <span v-if="settlement.status === 'locked' && !settlementAllConfirmed" class="text-xs text-amber-600 dark:text-amber-400">
+                  {{ t('admin.sharedPool.settlement.pendingConfirmations', { count: pendingSettlementConfirmations }) }}
+                </span>
+                <button
+                  v-if="settlement.status === 'draft'"
+                  type="button"
+                  class="btn btn-primary min-h-11"
+                  :disabled="settlement.unpriced_usage_count > 0 || locking"
+                  @click="showLockConfirm = true"
+                >
+                  <Icon name="lock" size="sm" />
+                  {{ t('admin.sharedPool.settlement.lock') }}
+                </button>
+                <button
+                  v-else-if="settlement.status === 'locked' && settlementAllConfirmed"
+                  type="button"
+                  class="btn btn-primary min-h-11"
+                  :disabled="markingSettlementPaid"
+                  @click="showPaidConfirm = true"
+                >
+                  <Icon name="check" size="sm" />
+                  {{ t('admin.sharedPool.settlement.markPaid') }}
+                </button>
+              </div>
             </div>
             <DataTable :columns="settlementColumns" :data="settlement.lines" row-key="user_id" :loading="loading">
               <template #cell-usage_weight="{ row }"><span class="tabular-nums">{{ formatMoney(row.usage_weight, settlement.currency) }}</span></template>
@@ -336,6 +315,24 @@
                   {{ row.net_amount > 0 ? t('admin.sharedPool.settlement.payable') : row.net_amount < 0 ? t('admin.sharedPool.settlement.receivable') : '' }}
                   {{ formatMoney(Math.abs(row.net_amount), settlement.currency) }}
                 </span>
+              </template>
+              <template #cell-confirmation_status="{ row }">
+                <StatusBadge
+                  :status="row.net_amount === 0 || row.confirmation_status === 'confirmed' ? 'success' : 'warning'"
+                  :label="row.net_amount === 0 ? t('admin.sharedPool.settlement.confirmationNotRequired') : t(`admin.sharedPool.settlement.${row.confirmation_status}`)"
+                />
+              </template>
+              <template #cell-actions="{ row }">
+                <button
+                  v-if="settlement.status === 'locked' && (row.user_id === authStore.user?.id || authStore.user?.is_primary_admin) && row.net_amount !== 0 && row.confirmation_status !== 'confirmed'"
+                  type="button"
+                  class="btn btn-secondary btn-sm"
+                  :disabled="confirmingSettlement"
+                  @click="confirmSettlementLine(row.user_id)"
+                >
+                  <Icon name="check" size="xs" />
+                  {{ row.user_id === authStore.user?.id ? t('admin.sharedPool.settlement.confirmMine') : t('admin.sharedPool.settlement.resolveMember') }}
+                </button>
               </template>
             </DataTable>
           </section>
@@ -358,7 +355,7 @@
               <h2 class="text-sm font-semibold text-gray-900 dark:text-white">{{ t('admin.sharedPool.sources.title') }}</h2>
               <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.sources.sampleHint') }}</p>
             </div>
-            <DataTable :columns="sourceColumns" :data="sources" row-key="name" :loading="loading">
+            <DataTable :columns="sourceColumns" :data="sources" row-key="name" :loading="loading" :mobile-column-keys="['name', 'uploaders', 'account_count', 'roi_rate', 'ban_rate_30d']">
               <template #cell-name="{ row }">
                 <div class="flex items-center gap-2">
                   <span class="font-medium text-gray-900 dark:text-white">{{ row.name }}</span>
@@ -370,6 +367,19 @@
               <template #cell-roi_rate="{ row }"><span class="font-medium tabular-nums">{{ formatPercent(row.roi_rate) }}</span></template>
               <template #cell-ban_rate_30d="{ row }"><span class="tabular-nums text-red-600 dark:text-red-400">{{ formatPercent(row.ban_rate_30d) }}</span></template>
               <template #cell-purchase_cost="{ row }"><span class="tabular-nums">{{ formatMoney(row.purchase_cost) }}</span></template>
+              <template #cell-uploaders="{ row }">
+                <span class="block max-w-52 truncate" :title="sourceUploaderLabel(row)">{{ sourceUploaderLabel(row) }}</span>
+              </template>
+              <template #cell-actions="{ row }">
+                <button
+                  type="button"
+                  class="btn btn-secondary min-h-9 whitespace-nowrap px-2 text-xs"
+                  :disabled="!sourceID(row)"
+                  @click="openSourceLedger(row)"
+                >
+                  {{ t('admin.sharedPool.sources.locateRecords') }}
+                </button>
+              </template>
             </DataTable>
           </section>
         </div>
@@ -412,70 +422,91 @@
         </div>
         <div v-if="!(preAccountDraft && pendingAccountAction === 'import')">
           <label for="pool-provider-identity" class="input-label">{{ t('admin.sharedPool.form.providerIdentity') }} *</label>
-          <input id="pool-provider-identity" v-model.trim="costForm.provider_identity" class="input" required :disabled="profileReadOnly || additionalCostMode" />
+          <input id="pool-provider-identity" v-model.trim="costForm.provider_identity" class="input" required :disabled="additionalCostMode" />
         </div>
         <p v-else class="rounded-lg bg-gray-50 px-3 py-2 text-xs text-gray-500 dark:bg-gray-800/60 dark:text-gray-400">
           {{ t('admin.sharedPool.intake.importIdentityAuto') }}
         </p>
         <div>
           <label for="pool-source" class="input-label">{{ t('admin.sharedPool.form.source') }} *</label>
-          <input id="pool-source" v-model.trim="costForm.purchase_source_name" class="input" required list="pool-source-list" :disabled="profileReadOnly || additionalCostMode" />
+          <input id="pool-source" v-model.trim="costForm.purchase_source_name" class="input" required list="pool-source-list" />
           <datalist id="pool-source-list">
-            <option v-for="source in sources" :key="source.name" :value="source.name"></option>
+            <option v-for="source in purchaseSources" :key="source.id" :value="source.name"></option>
           </datalist>
         </div>
         <div>
           <label for="pool-contributor" class="input-label">{{ t('admin.sharedPool.form.contributor') }} *</label>
-          <Select id="pool-contributor" v-model="costForm.contributor_user_id" :options="userOptions" searchable :disabled="profileReadOnly" :aria-label="t('admin.sharedPool.form.contributor')" />
+          <Select id="pool-contributor" v-model="costForm.contributor_user_id" :options="userOptions" searchable :aria-label="t('admin.sharedPool.form.contributor')" />
         </div>
         <div>
           <label for="pool-uploader" class="input-label">{{ t('admin.sharedPool.form.uploader') }} *</label>
-          <Select id="pool-uploader" v-model="costForm.uploader_user_id" :options="userOptions" searchable :disabled="profileReadOnly || additionalCostMode" :aria-label="t('admin.sharedPool.form.uploader')" />
+          <Select id="pool-uploader" v-model="costForm.uploader_user_id" :options="userOptions" searchable :disabled="additionalCostMode" :aria-label="t('admin.sharedPool.form.uploader')" />
+        </div>
+        <div v-if="profileReadOnly" class="flex items-center justify-between gap-4 md:col-span-2">
+          <div>
+            <label class="input-label mb-0">{{ t('admin.sharedPool.form.costSharingEnabled') }}</label>
+            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.form.costSharingEnabledHint') }}</p>
+          </div>
+          <Toggle v-model="costForm.cost_sharing_enabled" />
         </div>
         <div>
           <label for="pool-entry-type" class="input-label">{{ t('admin.sharedPool.form.entryType') }} *</label>
-          <Select id="pool-entry-type" v-model="costForm.entry_type" :options="costEntryTypeOptions" :disabled="profileReadOnly" :aria-label="t('admin.sharedPool.form.entryType')" />
+          <Select id="pool-entry-type" v-model="costForm.entry_type" :options="costEntryTypeOptions" :aria-label="t('admin.sharedPool.form.entryType')" />
         </div>
         <div>
-          <label for="pool-cost" class="input-label">{{ t('admin.sharedPool.form.cost') }} *</label>
-          <input id="pool-cost" v-model.number="costForm.purchase_cost" class="input" type="number" min="0.01" step="0.01" required :disabled="profileReadOnly" />
+          <label for="pool-cost" class="input-label">{{ preAccountDraft && pendingAccountAction === 'import' ? t('admin.sharedPool.form.costPerAccount') : t('admin.sharedPool.form.cost') }} *</label>
+          <input id="pool-cost" v-model.number="costForm.purchase_cost" class="input" type="number" min="0.01" step="0.01" required />
+          <p v-if="preAccountDraft && pendingAccountAction === 'import'" class="input-hint">{{ t('admin.sharedPool.form.costPerAccountHint') }}</p>
+        </div>
+        <div>
+          <label for="pool-expected-tokens" class="input-label">{{ t('admin.sharedPool.ledger.expectedTokens') }} *</label>
+          <input id="pool-expected-tokens" v-model.number="costForm.expected_token_count" class="input" type="number" inputmode="numeric" min="1" step="1" required />
         </div>
         <div>
           <label for="pool-currency" class="input-label">{{ t('admin.sharedPool.form.currency') }}</label>
-          <Select id="pool-currency" v-model="costForm.currency" :options="currencyOptions" :disabled="profileReadOnly" :aria-label="t('admin.sharedPool.form.currency')" />
+          <Select id="pool-currency" v-model="costForm.currency" :options="currencyOptions" :aria-label="t('admin.sharedPool.form.currency')" />
         </div>
         <div>
           <label for="pool-service-start" class="input-label">{{ t('admin.sharedPool.form.serviceStart') }} *</label>
-          <input id="pool-service-start" v-model="costForm.service_start" class="input" type="date" required :disabled="profileReadOnly" />
+          <input id="pool-service-start" v-model="costForm.service_start" class="input" type="date" required />
         </div>
         <div>
           <label for="pool-service-end" class="input-label">{{ t('admin.sharedPool.form.serviceEnd') }} *</label>
-          <input id="pool-service-end" v-model="costForm.service_end" class="input" type="date" :min="costForm.service_start" required :disabled="profileReadOnly" />
+          <input id="pool-service-end" v-model="costForm.service_end" class="input" type="date" :min="costForm.service_start" required />
         </div>
         <div>
           <label for="pool-warranty-end" class="input-label">{{ t('admin.sharedPool.form.warrantyEnd') }}</label>
-          <input id="pool-warranty-end" v-model="costForm.warranty_end" class="input" type="date" :disabled="profileReadOnly" />
+          <input id="pool-warranty-end" v-model="costForm.warranty_end" class="input" type="date" />
+        </div>
+        <div>
+          <label for="pool-paid-at" class="input-label">{{ t('admin.sharedPool.ledger.paidAt') }} *</label>
+          <input id="pool-paid-at" v-model="costForm.paid_at" class="input" type="date" required />
         </div>
         <div>
           <label for="pool-order" class="input-label">{{ t('admin.sharedPool.form.orderNo') }}</label>
-          <input id="pool-order" v-model.trim="costForm.order_no" class="input" :disabled="profileReadOnly" />
+          <input id="pool-order" v-model.trim="costForm.order_no" class="input" />
         </div>
         <div class="md:col-span-2">
           <label for="pool-purchase-url" class="input-label">{{ t('admin.sharedPool.form.purchaseUrl') }}</label>
-          <input id="pool-purchase-url" v-model.trim="costForm.purchase_url" class="input" type="url" :disabled="profileReadOnly" />
+          <input id="pool-purchase-url" v-model.trim="costForm.purchase_url" class="input" type="url" />
         </div>
         <div class="md:col-span-2">
           <label for="pool-notes" class="input-label">{{ t('admin.sharedPool.form.notes') }}</label>
-          <textarea id="pool-notes" v-model.trim="costForm.notes" class="input min-h-20" rows="3" :disabled="profileReadOnly"></textarea>
+          <textarea id="pool-notes" v-model.trim="costForm.notes" class="input min-h-20" rows="3"></textarea>
         </div>
       </form>
       <template #footer>
-        <div v-if="profileReadOnly" class="flex flex-wrap justify-end gap-2">
-          <button type="button" class="btn btn-primary" @click="beginAdditionalCost">
-            <Icon name="plus" size="sm" />
-            {{ t('admin.sharedPool.accounts.addCost') }}
-          </button>
-          <button type="button" class="btn btn-secondary" @click="closeCostDialog">{{ t('common.close') }}</button>
+        <div v-if="profileReadOnly" class="flex w-full flex-wrap items-center justify-between gap-2">
+          <div v-if="recoveryRecord && !editingLedgerEntry" class="flex flex-wrap gap-2">
+            <button type="button" class="btn btn-secondary" @click="openEventDialog(recoveryRecord)">
+              {{ t('admin.sharedPool.accounts.recordEvent') }}
+            </button>
+            <button type="button" class="btn btn-primary" @click="beginAdditionalCost">
+              <Icon name="plus" size="sm" />
+              {{ t('admin.sharedPool.accounts.addCost') }}
+            </button>
+          </div>
+          <FormDialogActions form="pool-cost-form" :submitting="savingCost" @cancel="closeCostDialog" />
         </div>
         <FormDialogActions v-else form="pool-cost-form" :submitting="savingCost" @cancel="closeCostDialog" />
       </template>
@@ -495,22 +526,6 @@
           <label for="pool-event-date" class="input-label">{{ t('admin.sharedPool.event.date') }} *</label>
           <input id="pool-event-date" v-model="eventForm.date" class="input" type="date" required />
         </div>
-        <template v-if="eventForm.event_type === 'refund'">
-          <div>
-            <label for="pool-refund-amount" class="input-label">{{ t('admin.sharedPool.event.refundAmount') }}</label>
-            <input id="pool-refund-amount" v-model.number="eventForm.amount" class="input" type="number" min="0" step="0.01" />
-          </div>
-        </template>
-        <template v-if="eventForm.event_type === 'replaced'">
-          <div>
-            <label for="pool-replacement-account" class="input-label">{{ t('admin.sharedPool.event.replacementAccount') }} *</label>
-            <Select id="pool-replacement-account" v-model="eventForm.replacement_account_id" :options="replacementAccountOptions" searchable />
-          </div>
-          <div>
-            <label for="pool-transfer-amount" class="input-label">{{ t('admin.sharedPool.event.transferAmount') }}</label>
-            <input id="pool-transfer-amount" v-model.number="eventForm.amount" class="input" type="number" min="0" step="0.01" />
-          </div>
-        </template>
         <div>
           <label for="pool-event-reason" class="input-label">{{ t('admin.sharedPool.event.reason') }}</label>
           <textarea id="pool-event-reason" v-model.trim="eventForm.reason" class="input min-h-20" rows="3"></textarea>
@@ -529,12 +544,21 @@
       @confirm="confirmLockSettlement"
       @cancel="showLockConfirm = false"
     />
+    <ConfirmDialog
+      :show="showPaidConfirm"
+      :title="t('admin.sharedPool.settlement.markPaidTitle')"
+      :message="t('admin.sharedPool.settlement.markPaidMessage')"
+      :confirm-text="t('admin.sharedPool.settlement.markPaid')"
+      @confirm="confirmMarkSettlementPaid"
+      @cancel="showPaidConfirm = false"
+    />
   </AppLayout>
 </template>
 
 <script setup lang="ts">
 import { computed, h, onMounted, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRoute, useRouter } from 'vue-router'
 import { Bar } from 'vue-chartjs'
 import {
   BarElement,
@@ -560,6 +584,7 @@ import {
 import DateRangePicker from '@/components/common/DateRangePicker.vue'
 import Select from '@/components/common/Select.vue'
 import StatusBadge from '@/components/common/StatusBadge.vue'
+import Toggle from '@/components/common/Toggle.vue'
 import Icon from '@/components/icons/Icon.vue'
 import type { Column } from '@/components/common/types'
 import { adminAPI } from '@/api/admin'
@@ -573,7 +598,9 @@ import type {
   SharedPoolAccountCost,
   SharedPoolOverview,
   SharedPoolSettlementPreview,
-  SharedPoolSourceStat
+  SharedPoolSourceStat,
+  SharedPoolPurchaseSource,
+  SharedPoolLedgerEntry
 } from '@/api/admin/sharedPool'
 import { useAppStore } from '@/stores'
 import { useAuthStore } from '@/stores/auth'
@@ -590,7 +617,7 @@ import {
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, Tooltip, Legend)
 
-type TabKey = 'overview' | 'accounts' | 'settlement' | 'sources'
+type TabKey = 'overview' | 'accounts' | 'ledger' | 'settlement' | 'sources'
 type PendingAccountAction = 'create' | 'import'
 type CreatedAccount = { id: number; name: string }
 type AccountsViewExpose = {
@@ -599,10 +626,13 @@ type AccountsViewExpose = {
 }
 
 const { t, locale } = useI18n()
+const route = useRoute()
+const router = useRouter()
 const appStore = useAppStore()
 const authStore = useAuthStore()
 const initialPeriod = resolvePoolPeriod('month')
-const activeTab = ref<TabKey>('accounts')
+const requestedTab = Array.isArray(route.query.tab) ? route.query.tab[0] : route.query.tab
+const activeTab = ref<TabKey>(['overview', 'accounts', 'settlement', 'sources'].includes(String(requestedTab)) ? requestedTab as TabKey : 'accounts')
 const periodType = ref<PoolPeriodType>('month')
 const startDate = ref(initialPeriod.start)
 const endDate = ref(initialPeriod.end)
@@ -611,18 +641,23 @@ const savingCost = ref(false)
 const savingEvent = ref(false)
 const savingFXRate = ref(false)
 const locking = ref(false)
+const confirmingSettlement = ref(false)
+const markingSettlementPaid = ref(false)
 const showCostDialog = ref(false)
 const intakeMode = ref(false)
 const additionalCostMode = ref(false)
 const preAccountDraft = ref(false)
 const showEventDialog = ref(false)
 const showLockConfirm = ref(false)
+const showPaidConfirm = ref(false)
 const overview = ref<SharedPoolOverview | null>(null)
 const accountCosts = ref<SharedPoolAccountCost[]>([])
 const settlement = ref<SharedPoolSettlementPreview | null>(null)
 const sources = ref<SharedPoolSourceStat[]>([])
+const purchaseSources = ref<SharedPoolPurchaseSource[]>([])
 const accountOptions = ref<Array<{ value: number; label: string }>>([])
 const userOptions = ref<Array<{ value: number; label: string }>>([])
+const settlementFilters = reactive({ account_id: '', uploader_user_id: '', payer_user_id: '', purchase_source_id: '' })
 const fxRate = ref(1)
 const eventAccount = ref<SharedPoolAccountCost | null>(null)
 const accountsViewRef = ref<AccountsViewExpose | null>(null)
@@ -631,10 +666,12 @@ const pendingIntakeDraft = ref<CreateSharedPoolCostRequest | null>(null)
 const retryAccounts = ref<CreatedAccount[]>([])
 const autoAccountIdentity = ref(false)
 const recoveryRecord = ref<SharedPoolAccountCost | null>(null)
+const editingLedgerEntry = ref<SharedPoolLedgerEntry | null>(null)
 
 const tabs = computed(() => [
   { key: 'overview' as const, label: t('admin.sharedPool.tabs.overview'), icon: 'chart' as const },
   { key: 'accounts' as const, label: t('admin.sharedPool.tabs.accounts'), icon: 'server' as const },
+  { key: 'ledger' as const, label: t('admin.sharedPool.tabs.ledger'), icon: 'book' as const },
   { key: 'settlement' as const, label: t('admin.sharedPool.tabs.settlement'), icon: 'calculator' as const },
   { key: 'sources' as const, label: t('admin.sharedPool.tabs.sources'), icon: 'link' as const }
 ])
@@ -649,8 +686,6 @@ const periodOptions = computed(() => [
 const eventOptions = computed(() => [
   { value: 'banned_confirmed', label: t('admin.sharedPool.event.banned') },
   { value: 'recovered', label: t('admin.sharedPool.event.recovered') },
-  { value: 'refund', label: t('admin.sharedPool.event.refund') },
-  { value: 'replaced', label: t('admin.sharedPool.event.replaced') },
   { value: 'retired', label: t('admin.sharedPool.event.retired') }
 ])
 
@@ -662,12 +697,8 @@ const costEntryTypeOptions = computed(() => [
   { value: 'adjustment', label: t('admin.sharedPool.entryTypes.adjustment') }
 ])
 
-const replacementAccountOptions = computed(() =>
-  accountOptions.value.filter((account) => account.value !== eventAccount.value?.account_id)
-)
-
 const poolRecordsByAccountID = computed(() => latestPoolRecords(accountCosts.value))
-const profileReadOnly = computed(() => recoveryRecord.value !== null && !additionalCostMode.value && retryAccounts.value.length === 0)
+const profileReadOnly = computed(() => (recoveryRecord.value !== null || editingLedgerEntry.value !== null) && !additionalCostMode.value && retryAccounts.value.length === 0)
 const costDialogTitle = computed(() => {
   if (profileReadOnly.value) return t('admin.sharedPool.actions.poolRecord')
   if (preAccountDraft.value) {
@@ -697,40 +728,57 @@ const overviewColumns = computed<Column[]>(() => [
   { key: 'recovered_at', label: t('admin.sharedPool.columns.recoveredAt'), sortable: true }
 ])
 
-const costColumns = computed<Column[]>(() => [
-  { key: 'account_name', label: t('admin.sharedPool.columns.account'), sortable: true },
-  { key: 'contributor_name', label: t('admin.sharedPool.columns.contributor'), sortable: true },
-  { key: 'uploader_name', label: t('admin.sharedPool.columns.uploader'), sortable: true },
-  { key: 'purchase_source_name', label: t('admin.sharedPool.columns.source'), sortable: true },
-  { key: 'entry_type', label: t('admin.sharedPool.columns.costType'), sortable: true },
-  { key: 'purchase_cost', label: t('admin.sharedPool.columns.cost'), sortable: true },
-  { key: 'service_start', label: t('admin.sharedPool.columns.servicePeriod'), sortable: true },
-  { key: 'warranty_end', label: t('admin.sharedPool.columns.warranty'), sortable: true },
-  { key: 'status', label: t('admin.sharedPool.columns.status'), sortable: true },
-  { key: 'actions', label: t('admin.sharedPool.columns.actions') }
-])
-
 const settlementColumns = computed<Column[]>(() => [
   { key: 'user_name', label: t('admin.sharedPool.columns.member'), sortable: true },
   { key: 'usage_weight', label: t('admin.sharedPool.columns.usageWeight'), sortable: true },
   { key: 'usage_share', label: t('admin.sharedPool.columns.share'), sortable: true },
   { key: 'allocated_cost', label: t('admin.sharedPool.columns.allocated'), sortable: true },
   { key: 'contribution_credit', label: t('admin.sharedPool.columns.credit'), sortable: true },
-  { key: 'net_amount', label: t('admin.sharedPool.columns.net'), sortable: true }
+  { key: 'net_amount', label: t('admin.sharedPool.columns.net'), sortable: true },
+  { key: 'confirmation_status', label: t('admin.sharedPool.columns.confirmation'), sortable: true },
+  { key: 'actions', label: t('admin.sharedPool.columns.actions') }
+])
+
+const pendingSettlementConfirmations = computed(() => settlement.value?.lines.filter(
+  (line) => line.net_amount !== 0 && line.confirmation_status !== 'confirmed'
+).length || 0)
+const settlementAllConfirmed = computed(() => pendingSettlementConfirmations.value === 0)
+const settlementAccountOptions = computed(() => [{ value: '', label: t('admin.sharedPool.ledger.allAccounts') }, ...accountOptions.value])
+const settlementUploaderOptions = computed(() => [{ value: '', label: t('admin.sharedPool.ledger.allUploaders') }, ...userOptions.value])
+const settlementPayerOptions = computed(() => [{ value: '', label: t('admin.sharedPool.ledger.allPayers') }, ...userOptions.value])
+const settlementSourceOptions = computed(() => [
+  { value: '', label: t('admin.sharedPool.ledger.allSources') },
+  ...purchaseSources.value.map(source => ({ value: source.id, label: source.name }))
 ])
 
 const sourceColumns = computed<Column[]>(() => [
   { key: 'name', label: t('admin.sharedPool.columns.source'), sortable: true },
+  { key: 'uploaders', label: t('admin.sharedPool.columns.uploader') },
   { key: 'account_count', label: t('admin.sharedPool.columns.accounts'), sortable: true },
   { key: 'purchase_cost', label: t('admin.sharedPool.columns.cost'), sortable: true },
   { key: 'roi_rate', label: t('admin.sharedPool.columns.roi'), sortable: true },
   { key: 'ban_rate_30d', label: t('admin.sharedPool.columns.ban30'), sortable: true },
-  { key: 'average_survival_days', label: t('admin.sharedPool.columns.survival'), sortable: true }
+  { key: 'average_survival_days', label: t('admin.sharedPool.columns.survival'), sortable: true },
+  { key: 'actions', label: t('admin.sharedPool.columns.actions') }
 ])
+
+const sourceAccountMetadata = computed(() => {
+  const metadata = new Map<string, { accountIDs: Set<number>; uploaderNames: Set<string> }>()
+  for (const record of accountCosts.value) {
+    const key = record.purchase_source_name.trim().toLocaleLowerCase()
+    if (!key) continue
+    const item = metadata.get(key) || { accountIDs: new Set<number>(), uploaderNames: new Set<string>() }
+    item.accountIDs.add(record.account_id)
+    if (record.uploader_name) item.uploaderNames.add(record.uploader_name)
+    metadata.set(key, item)
+  }
+  return metadata
+})
 
 const hasActiveData = computed(() => {
   if (activeTab.value === 'overview') return !!overview.value
   if (activeTab.value === 'accounts') return true
+  if (activeTab.value === 'ledger') return true
   if (activeTab.value === 'settlement') return !!settlement.value
   return sources.value.length > 0
 })
@@ -767,6 +815,7 @@ const sourceChartOptions = computed<ChartOptions<'bar'>>(() => ({
   }
 }))
 
+const shanghaiToday = () => new Date(Date.now() + 8 * 60 * 60 * 1000).toISOString().slice(0, 10)
 const emptyCostForm = (): CreateSharedPoolCostRequest => ({
   account_id: 0,
   provider_identity: '',
@@ -776,25 +825,32 @@ const emptyCostForm = (): CreateSharedPoolCostRequest => ({
   purchase_url: '',
   order_no: '',
   purchase_cost: 0,
+  expected_token_count: 0,
+  cost_sharing_enabled: true,
   entry_type: 'purchase',
   currency: 'CNY',
   service_start: startDate.value,
   service_end: endDate.value,
   warranty_end: '',
+	paid_at: shanghaiToday(),
   notes: ''
 })
 
 const costForm = reactive<CreateSharedPoolCostRequest>(emptyCostForm())
-const shanghaiToday = () => new Date(Date.now() + 8 * 60 * 60 * 1000).toISOString().slice(0, 10)
 const emptyEventForm = () => ({
   event_type: 'banned_confirmed' as PoolLifecycleEventType,
   date: shanghaiToday(),
-  amount: 0,
-  replacement_account_id: 0,
   reason: ''
 })
 const eventForm = reactive(emptyEventForm())
 const periodParams = () => buildPoolPeriodParams(periodType.value, startDate.value, endDate.value)
+const settlementParams = () => ({
+  ...periodParams(),
+  account_id: Number(settlementFilters.account_id) || undefined,
+  uploader_user_id: Number(settlementFilters.uploader_user_id) || undefined,
+  payer_user_id: Number(settlementFilters.payer_user_id) || undefined,
+  purchase_source_id: Number(settlementFilters.purchase_source_id) || undefined
+})
 
 const formatMoney = (amount: number, currency = overview.value?.currency || 'CNY') =>
   formatPoolMoney(amount, currency, locale.value)
@@ -809,6 +865,7 @@ function resetPendingIntake() {
   autoAccountIdentity.value = false
   preAccountDraft.value = false
   additionalCostMode.value = false
+	editingLedgerEntry.value = null
 }
 
 function intakePayload(form: CreateSharedPoolCostRequest): CreateSharedPoolIntakeRequest {
@@ -819,12 +876,14 @@ function intakePayload(form: CreateSharedPoolCostRequest): CreateSharedPoolIntak
     purchase_source_name: form.purchase_source_name,
     entry_type: form.entry_type,
     original_amount: form.purchase_cost.toFixed(2),
+    expected_token_count: form.expected_token_count,
     currency: form.currency,
     fx_rate: form.currency === 'CNY' ? '1' : String(fxRate.value),
     cny_amount_minor: Math.round(form.purchase_cost * (form.currency === 'CNY' ? 1 : fxRate.value) * 100),
     service_start: form.service_start,
     service_end: form.service_end,
     warranty_end: form.warranty_end || undefined,
+	paid_at: form.paid_at ? new Date(`${form.paid_at}T12:00:00+08:00`).toISOString() : undefined,
     order_no: form.order_no || undefined,
     purchase_url: form.purchase_url || undefined,
     notes: form.notes || undefined
@@ -848,8 +907,25 @@ function handleDateRangeChange(range: { startDate: string; endDate: string }) {
 }
 
 function switchTab(tab: TabKey) {
+  if (tab === 'ledger') {
+    void router.push({ name: 'AdminSharedPoolLedger' })
+    return
+  }
   activeTab.value = tab
+  void router.replace({ query: { tab } })
   void loadActiveTab()
+}
+
+const sourceID = (source: SharedPoolSourceStat) => purchaseSources.value.find(
+  (item) => item.name.trim().toLocaleLowerCase() === source.name.trim().toLocaleLowerCase()
+)?.id
+const sourceUploaderLabel = (source: SharedPoolSourceStat) => {
+  const names = [...(sourceAccountMetadata.value.get(source.name.trim().toLocaleLowerCase())?.uploaderNames || [])]
+  return names.length ? names.join(', ') : '-'
+}
+const openSourceLedger = (source: SharedPoolSourceStat) => {
+  const id = sourceID(source)
+  if (id) void router.push({ name: 'AdminSharedPoolLedger', query: { purchase_source_id: String(id) } })
 }
 
 async function loadActiveTab() {
@@ -861,10 +937,17 @@ async function loadActiveTab() {
       const response = await adminAPI.sharedPool.listAccountCosts(periodParams())
       accountCosts.value = response.items || []
     } else if (activeTab.value === 'settlement') {
-      settlement.value = await adminAPI.sharedPool.previewSettlement(periodParams())
+      if (!accountOptions.value.length || !userOptions.value.length) await loadReferenceOptions()
+      settlement.value = await adminAPI.sharedPool.previewSettlement(settlementParams())
     } else {
-      const response = await adminAPI.sharedPool.listSources(periodParams())
-      sources.value = response.items || []
+      const [sourceResponse, costResponse, sourceOptions] = await Promise.all([
+        adminAPI.sharedPool.listSources(periodParams()),
+        adminAPI.sharedPool.listAccountCosts(periodParams()),
+        adminAPI.sharedPool.listPurchaseSources()
+      ])
+      sources.value = sourceResponse.items || []
+      accountCosts.value = costResponse.items || []
+      purchaseSources.value = sourceOptions
     }
   } catch (error: any) {
     appStore.showError(error?.message || t('admin.sharedPool.errors.load'))
@@ -877,17 +960,28 @@ async function loadReferenceOptions() {
   const [accounts, users, sourceResponse] = await Promise.all([
     adminAPI.accounts.list(1, 200, { sort_by: 'name', sort_order: 'asc' }),
     adminAPI.users.list(1, 200, { status: 'active', sort_by: 'email', sort_order: 'asc' }),
-    adminAPI.sharedPool.listSources(periodParams())
+    adminAPI.sharedPool.listPurchaseSources()
   ])
   accountOptions.value = accounts.items.map((account) => ({ value: account.id, label: account.name }))
   userOptions.value = users.items.map((user) => ({ value: user.id, label: user.username || user.email }))
-  sources.value = sourceResponse.items || []
+  purchaseSources.value = sourceResponse
+}
+
+async function resolvePurchaseSourceID(name: string): Promise<number | undefined> {
+  const normalized = name.trim().toLocaleLowerCase()
+  if (!normalized) return undefined
+  const existing = purchaseSources.value.find((source) => source.name.trim().toLocaleLowerCase() === normalized)
+  if (existing) return existing.id
+  const created = await adminAPI.sharedPool.createPurchaseSource(name.trim())
+  purchaseSources.value.push(created)
+  return created.id
 }
 
 async function openAccountPoolRecord(account: Pick<Account, 'id' | 'name'>, record?: SharedPoolAccountCost) {
   intakeMode.value = true
   additionalCostMode.value = false
   const existing = record || poolRecordsByAccountID.value[account.id]
+	editingLedgerEntry.value = null
   recoveryRecord.value = existing || null
   Object.assign(costForm, emptyCostForm(), {
     account_id: account.id,
@@ -898,11 +992,14 @@ async function openAccountPoolRecord(account: Pick<Account, 'id' | 'name'>, reco
     purchase_url: existing?.purchase_url || '',
     order_no: existing?.order_no || '',
     purchase_cost: existing?.purchase_cost || 0,
+    expected_token_count: existing?.expected_token_count || 0,
+    cost_sharing_enabled: existing?.cost_sharing_enabled ?? true,
     entry_type: existing?.entry_type || 'purchase',
     currency: existing?.currency || 'CNY',
     service_start: existing?.service_start || startDate.value,
     service_end: existing?.service_end || endDate.value,
     warranty_end: existing?.warranty_end || '',
+	paid_at: existing?.paid_at?.slice(0, 10) || shanghaiToday(),
     notes: existing?.notes || ''
   })
   showCostDialog.value = true
@@ -911,6 +1008,39 @@ async function openAccountPoolRecord(account: Pick<Account, 'id' | 'name'>, reco
   } catch (error: any) {
     appStore.showError(error?.message || t('admin.sharedPool.errors.options'))
   }
+}
+
+async function openLedgerEntry(entry: SharedPoolLedgerEntry) {
+	try {
+		const account = await adminAPI.accounts.getById(entry.account_id)
+		await loadReferenceOptions()
+		editingLedgerEntry.value = entry
+		recoveryRecord.value = null
+		intakeMode.value = true
+		additionalCostMode.value = false
+		Object.assign(costForm, emptyCostForm(), {
+			account_id: entry.account_id,
+			provider_identity: account.provider_identity || account.name,
+			contributor_user_id: account.contributor_user_id || entry.payer_user_id,
+			uploader_user_id: account.created_by_user_id || authStore.user?.id || 0,
+			purchase_source_name: entry.purchase_source || '',
+			purchase_url: entry.purchase_url || '',
+			order_no: entry.order_no || '',
+			purchase_cost: Number(entry.original_amount),
+			expected_token_count: entry.expected_token_count || 0,
+			cost_sharing_enabled: account.cost_sharing_enabled ?? true,
+			entry_type: entry.entry_type,
+			currency: entry.currency,
+			service_start: entry.service_start.slice(0, 10),
+			service_end: entry.service_end.slice(0, 10),
+			warranty_end: entry.warranty_end?.slice(0, 10) || '',
+			paid_at: entry.paid_at.slice(0, 10),
+			notes: entry.note || ''
+		})
+		showCostDialog.value = true
+	} catch (error: any) {
+		appStore.showError(error?.message || t('admin.sharedPool.errors.load'))
+	}
 }
 
 function beginAdditionalCost() {
@@ -940,6 +1070,28 @@ async function openOverviewAccountPoolRecord(row: SharedPoolAccountCost) {
   } catch (error: any) {
     appStore.showError(error?.message || t('admin.sharedPool.errors.load'))
   }
+}
+
+const routeQueryID = (key: 'account_id' | 'ledger_entry_id') => {
+  const raw = route.query[key]
+  const id = Number(Array.isArray(raw) ? raw[0] : raw)
+  return Number.isSafeInteger(id) && id > 0 ? id : 0
+}
+
+async function openRouteTarget() {
+  const accountID = routeQueryID('account_id')
+  if (!accountID) return
+  const ledgerEntryID = routeQueryID('ledger_entry_id')
+  await router.replace({ query: { tab: 'accounts' } })
+  if (ledgerEntryID) {
+    const response = await adminAPI.sharedPool.listLedgerEntries({ page: 1, page_size: 100, account_id: accountID })
+    const entry = response.items.find((item) => item.id === ledgerEntryID)
+    if (entry) await openLedgerEntry(entry)
+    return
+  }
+  const record = poolRecordsByAccountID.value[accountID]
+  const accountName = accountOptions.value.find((item) => item.value === accountID)?.label || record?.account_name || `#${accountID}`
+  await openAccountPoolRecord({ id: accountID, name: accountName }, record)
 }
 
 async function prepareAccountAction(action: PendingAccountAction) {
@@ -987,6 +1139,7 @@ function closeCostDialog() {
   if (savingCost.value) return
   showCostDialog.value = false
   additionalCostMode.value = false
+	editingLedgerEntry.value = null
   if (preAccountDraft.value) resetPendingIntake()
 }
 
@@ -1009,21 +1162,13 @@ function closeEventDialog() {
 
 async function saveLifecycleEvent() {
   if (!eventAccount.value || !eventForm.date) return
-  if (eventForm.event_type === 'replaced' && !eventForm.replacement_account_id) {
-    appStore.showError(t('admin.sharedPool.errors.replacementRequired'))
-    return
-  }
   savingEvent.value = true
   try {
     await adminAPI.sharedPool.recordLifecycleEvent({
       account_id: eventAccount.value.account_id,
       event_type: eventForm.event_type,
       occurred_at: new Date(`${eventForm.date}T12:00:00+08:00`).toISOString(),
-      reason: eventForm.reason || undefined,
-      payer_user_id: eventAccount.value.contributor_user_id || undefined,
-      refund_amount: eventForm.event_type === 'refund' ? eventForm.amount : undefined,
-      replacement_account_id: eventForm.event_type === 'replaced' ? eventForm.replacement_account_id : undefined,
-      transferred_cost: eventForm.event_type === 'replaced' ? eventForm.amount : undefined
+      reason: eventForm.reason || undefined
     })
     appStore.showSuccess(t('admin.sharedPool.event.saved'))
     showEventDialog.value = false
@@ -1135,6 +1280,10 @@ async function saveAccountCost() {
     appStore.showError(t('admin.sharedPool.errors.invalidCostPeriod'))
     return
   }
+  if (!Number.isSafeInteger(costForm.expected_token_count) || costForm.expected_token_count <= 0) {
+    appStore.showError(t('admin.sharedPool.errors.invalidExpectedTokens'))
+    return
+  }
 
   if (preAccountDraft.value) {
     pendingIntakeDraft.value = { ...costForm }
@@ -1154,18 +1303,47 @@ async function saveAccountCost() {
   savingCost.value = true
   try {
     const payload = intakePayload(costForm)
-    if (additionalCostMode.value && recoveryRecord.value) {
-      await adminAPI.sharedPool.createCost({
+    const editedCost = editingLedgerEntry.value || recoveryRecord.value
+    if (profileReadOnly.value && editedCost) {
+      const purchaseSourceID = await resolvePurchaseSourceID(costForm.purchase_source_name)
+      const result = await adminAPI.sharedPool.createCost({
         account_id: costForm.account_id,
         payer_user_id: costForm.contributor_user_id,
-        purchase_source_id: recoveryRecord.value.purchase_source_id || undefined,
+        purchase_source_id: purchaseSourceID,
         entry_type: payload.entry_type,
         original_amount: payload.original_amount,
+        expected_token_count: payload.expected_token_count,
         currency: payload.currency,
         fx_rate: payload.fx_rate,
         service_start: payload.service_start,
         service_end: payload.service_end,
         warranty_end: payload.warranty_end,
+		paid_at: costForm.paid_at ? new Date(`${costForm.paid_at}T12:00:00+08:00`).toISOString() : undefined,
+        order_no: payload.order_no,
+        purchase_url: payload.purchase_url,
+        notes: payload.notes,
+		supersedes_id: editedCost.id,
+        provider_identity: costForm.provider_identity,
+        contributor_user_id: costForm.contributor_user_id,
+        uploader_user_id: costForm.uploader_user_id,
+		cost_sharing_enabled: costForm.cost_sharing_enabled
+      })
+      appStore.showSuccess(t(result.approval_required ? 'admin.accounts.approval.updateSubmitted' : 'admin.sharedPool.form.saved'))
+    } else if (additionalCostMode.value && recoveryRecord.value) {
+      const purchaseSourceID = await resolvePurchaseSourceID(costForm.purchase_source_name)
+      await adminAPI.sharedPool.createCost({
+        account_id: costForm.account_id,
+        payer_user_id: costForm.contributor_user_id,
+        purchase_source_id: purchaseSourceID,
+        entry_type: payload.entry_type,
+        original_amount: payload.original_amount,
+        expected_token_count: payload.expected_token_count,
+        currency: payload.currency,
+        fx_rate: payload.fx_rate,
+        service_start: payload.service_start,
+        service_end: payload.service_end,
+        warranty_end: payload.warranty_end,
+		paid_at: payload.paid_at,
         order_no: payload.order_no,
         purchase_url: payload.purchase_url,
         notes: payload.notes
@@ -1173,7 +1351,7 @@ async function saveAccountCost() {
     } else {
       await adminAPI.sharedPool.createAccountIntake(costForm.account_id, payload)
     }
-    appStore.showSuccess(t('admin.sharedPool.form.saved'))
+    if (!profileReadOnly.value) appStore.showSuccess(t('admin.sharedPool.form.saved'))
     showCostDialog.value = false
     resetPendingIntake()
     await loadActiveTab()
@@ -1201,8 +1379,40 @@ async function confirmLockSettlement() {
   }
 }
 
-onMounted(() => {
-  void loadActiveTab()
+async function confirmSettlementLine(userId: number) {
+  if (!settlement.value?.id || confirmingSettlement.value) return
+  confirmingSettlement.value = true
+  try {
+    settlement.value = await adminAPI.sharedPool.confirmSettlement(settlement.value.id, userId)
+    appStore.showSuccess(t('admin.sharedPool.settlement.confirmedSuccess'))
+  } catch (error: any) {
+    appStore.showError(error?.message || t('admin.sharedPool.errors.confirmSettlement'))
+  } finally {
+    confirmingSettlement.value = false
+  }
+}
+
+async function confirmMarkSettlementPaid() {
+  if (!settlement.value?.id || markingSettlementPaid.value) return
+  showPaidConfirm.value = false
+  markingSettlementPaid.value = true
+  try {
+    settlement.value = await adminAPI.sharedPool.markSettlementPaid(settlement.value.id)
+    appStore.showSuccess(t('admin.sharedPool.settlement.markedPaidSuccess'))
+  } catch (error: any) {
+    appStore.showError(error?.message || t('admin.sharedPool.errors.markPaid'))
+  } finally {
+    markingSettlementPaid.value = false
+  }
+}
+
+onMounted(async () => {
+  await loadActiveTab()
+  try {
+    await openRouteTarget()
+  } catch (error: any) {
+    appStore.showError(error?.message || t('admin.sharedPool.errors.load'))
+  }
   void adminAPI.sharedPool.getLatestFXRate()
     .then((rate) => { fxRate.value = rate })
     .catch((error: any) => appStore.showError(error?.message || t('admin.sharedPool.errors.fxRate')))

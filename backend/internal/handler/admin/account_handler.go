@@ -175,6 +175,21 @@ type UpdateAccountRequest struct {
 	AutoPauseOnExpired      *bool          `json:"auto_pause_on_expired"`
 	ConfirmMixedChannelRisk *bool          `json:"confirm_mixed_channel_risk"` // 用户确认混合渠道风险
 	ApprovalReason          string         `json:"approval_reason"`
+	ProviderIdentity        *string        `json:"provider_identity"`
+	ContributorUserID       *int64         `json:"contributor_user_id"`
+	CreatedByUserID         *int64         `json:"created_by_user_id"`
+	CostSharingEnabled      *bool          `json:"cost_sharing_enabled"`
+}
+
+type DeleteAccountRequest struct {
+	CostDisposition      string `json:"cost_disposition"`
+	ReplacementAccountID *int64 `json:"replacement_account_id"`
+	RefundAmountMinor    *int64 `json:"refund_amount_minor"`
+	Reason               string `json:"reason"`
+}
+
+type accountLifecycleDeletionService interface {
+	DeleteAccountWithOptions(context.Context, int64, service.AccountDeleteOptions) (*service.AccountDeleteResult, error)
 }
 
 // BulkUpdateAccountsRequest represents the payload for bulk editing accounts
@@ -197,12 +212,13 @@ type BulkUpdateAccountsRequest struct {
 }
 
 type BulkUpdateAccountFilters struct {
-	Platform    string `json:"platform"`
-	Type        string `json:"type"`
-	Status      string `json:"status"`
-	Group       string `json:"group"`
-	Search      string `json:"search"`
-	PrivacyMode string `json:"privacy_mode"`
+	Platform       string `json:"platform"`
+	Type           string `json:"type"`
+	Status         string `json:"status"`
+	Group          string `json:"group"`
+	Search         string `json:"search"`
+	PrivacyMode    string `json:"privacy_mode"`
+	UploaderUserID int64  `json:"uploader_user_id"`
 }
 
 // CheckMixedChannelRequest represents check mixed channel risk request
@@ -222,6 +238,14 @@ type AccountWithConcurrency struct {
 	CurrentWindowCost *float64 `json:"current_window_cost,omitempty"` // 当前窗口费用
 	ActiveSessions    *int     `json:"active_sessions,omitempty"`     // 当前活跃会话数
 	CurrentRPM        *int     `json:"current_rpm,omitempty"`         // 当前分钟 RPM 计数
+}
+
+type accountUploaderListService interface {
+	ListAccountsByUploader(ctx context.Context, page, pageSize int, platform, accountType, status, search string, groupID int64, privacyMode string, uploaderUserID int64, includePoolMetrics bool, sortBy, sortOrder string) ([]service.Account, int64, error)
+}
+
+type accountPoolMetricsListService interface {
+	ListAccountsWithPoolMetrics(ctx context.Context, page, pageSize int, platform, accountType, status, search string, groupID int64, privacyMode string, sortBy, sortOrder string) ([]service.Account, int64, error)
 }
 
 // accountApprovalAcceptedResponse remains Account-shaped for legacy ReAuth
@@ -547,6 +571,16 @@ func (h *AccountHandler) List(c *gin.Context) {
 	lite := parseBoolQueryWithDefault(c.Query("lite"), false)
 	// 调度分需要跨候选池批量打分并读取负载，默认列表不计算；只有前端列可见时才显式开启。
 	includeSchedulerScore := parseBoolQueryWithDefault(c.Query("include_scheduler_score"), false)
+	includePoolMetrics := parseBoolQueryWithDefault(c.Query("include_pool_metrics"), false)
+	var uploaderUserID int64
+	if raw := strings.TrimSpace(c.Query("uploader_user_id")); raw != "" {
+		parsed, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil || parsed <= 0 {
+			response.ErrorFrom(c, infraerrors.BadRequest("INVALID_UPLOADER_FILTER", "invalid uploader filter"))
+			return
+		}
+		uploaderUserID = parsed
+	}
 
 	var groupID int64
 	if groupIDStr := c.Query("group"); groupIDStr != "" {
@@ -566,7 +600,28 @@ func (h *AccountHandler) List(c *gin.Context) {
 		}
 	}
 
-	accounts, total, err := h.adminService.ListAccounts(c.Request.Context(), page, pageSize, platform, accountType, status, search, groupID, privacyMode, sortBy, sortOrder)
+	var (
+		accounts []service.Account
+		total    int64
+		err      error
+	)
+	if uploaderUserID > 0 {
+		filteredService, ok := h.adminService.(accountUploaderListService)
+		if !ok {
+			response.ErrorFrom(c, infraerrors.InternalServer("ACCOUNT_UPLOADER_FILTER_UNAVAILABLE", "account uploader filter is unavailable"))
+			return
+		}
+		accounts, total, err = filteredService.ListAccountsByUploader(c.Request.Context(), page, pageSize, platform, accountType, status, search, groupID, privacyMode, uploaderUserID, includePoolMetrics, sortBy, sortOrder)
+	} else if includePoolMetrics {
+		metricsService, ok := h.adminService.(accountPoolMetricsListService)
+		if !ok {
+			response.ErrorFrom(c, infraerrors.InternalServer("ACCOUNT_POOL_METRICS_UNAVAILABLE", "account pool metrics are unavailable"))
+			return
+		}
+		accounts, total, err = metricsService.ListAccountsWithPoolMetrics(c.Request.Context(), page, pageSize, platform, accountType, status, search, groupID, privacyMode, sortBy, sortOrder)
+	} else {
+		accounts, total, err = h.adminService.ListAccounts(c.Request.Context(), page, pageSize, platform, accountType, status, search, groupID, privacyMode, sortBy, sortOrder)
+	}
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
@@ -604,6 +659,15 @@ func (h *AccountHandler) List(c *gin.Context) {
 	}
 	if includeSchedulerScore && pageHasOpenAIAccounts {
 		schedulerFilterPool := h.listAccountSchedulerScoreFilterPool(c.Request.Context(), platform, accountType, status, search, groupID, privacyMode)
+		if uploaderUserID > 0 {
+			filteredPool := schedulerFilterPool[:0]
+			for i := range schedulerFilterPool {
+				if schedulerFilterPool[i].CreatedByUserID != nil && *schedulerFilterPool[i].CreatedByUserID == uploaderUserID {
+					filteredPool = append(filteredPool, schedulerFilterPool[i])
+				}
+			}
+			schedulerFilterPool = filteredPool
+		}
 		schedulerScores, schedulerGroupScores = h.buildOpenAIAccountSchedulerScores(c.Request.Context(), accounts, schedulerFilterPool)
 	}
 
@@ -1029,25 +1093,39 @@ func (h *AccountHandler) Update(c *gin.Context) {
 		if !ok {
 			return
 		}
-		if !h.poolService.IsPrimaryAdmin(c.Request.Context(), actorID) {
-			reason := strings.TrimSpace(req.ApprovalReason)
-			if reason == "" {
-				reason = "update account information"
-			}
-			approval, approvalErr := h.poolService.CreateApproval(c.Request.Context(), service.CreatePoolApprovalInput{
-				ActionType:  service.PoolApprovalUpdateAccount,
-				AccountID:   accountID,
-				Reason:      reason,
-				RequesterID: actorID,
-				Payload:     service.PoolApprovalPayload{AccountUpdate: updateInput},
-			})
-			if approvalErr != nil {
-				response.ErrorFrom(c, approvalErr)
-				return
-			}
+		reason := strings.TrimSpace(req.ApprovalReason)
+		if reason == "" {
+			reason = "update account information"
+		}
+		poolUpdate := &service.UpdatePoolAccountInput{
+			ProviderIdentity: req.ProviderIdentity, ContributorUserID: req.ContributorUserID,
+			CreatedByUserID: req.CreatedByUserID, CostSharingEnabled: req.CostSharingEnabled,
+		}
+		if req.ProviderIdentity == nil && req.ContributorUserID == nil && req.CreatedByUserID == nil && req.CostSharingEnabled == nil {
+			poolUpdate = nil
+		}
+		approval, approvalErr := h.poolService.CreateApproval(c.Request.Context(), service.CreatePoolApprovalInput{
+			ActionType: service.PoolApprovalUpdateAccount, AccountID: accountID, Reason: reason,
+			RequesterID: actorID, Payload: service.PoolApprovalPayload{AccountUpdate: updateInput, PoolUpdate: poolUpdate},
+		})
+		if approvalErr != nil {
+			response.ErrorFrom(c, approvalErr)
+			return
+		}
+		if !approval.PrimaryBypass {
 			response.Accepted(c, gin.H{"approval_required": true, "approval": approval})
 			return
 		}
+		account, getErr := h.adminService.GetAccount(c.Request.Context(), accountID)
+		if getErr != nil {
+			response.ErrorFrom(c, getErr)
+			return
+		}
+		if len(req.Credentials) > 0 {
+			h.scheduleOpenAIResponsesProbe(account)
+		}
+		response.Success(c, h.buildAccountResponseWithRuntime(c.Request.Context(), account))
+		return
 	}
 
 	account, err := h.adminService.UpdateAccount(c.Request.Context(), accountID, updateInput)
@@ -1106,6 +1184,49 @@ func (h *AccountHandler) Delete(c *gin.Context) {
 	accountID, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
 		response.BadRequest(c, "Invalid account ID")
+		return
+	}
+
+	if lifecycleService, ok := h.adminService.(accountLifecycleDeletionService); ok {
+		actorID, actorOK := poolActorID(c)
+		if !actorOK {
+			return
+		}
+		var req DeleteAccountRequest
+		if c.Request.ContentLength > 0 {
+			if bindErr := c.ShouldBindJSON(&req); bindErr != nil {
+				response.BadRequest(c, "Invalid request: "+bindErr.Error())
+				return
+			}
+		}
+		options := service.AccountDeleteOptions{
+			ActorUserID:          actorID,
+			CostDisposition:      req.CostDisposition,
+			ReplacementAccountID: req.ReplacementAccountID,
+			RefundAmountMinor:    req.RefundAmountMinor,
+			Reason:               req.Reason,
+		}
+		if h.poolService != nil && !h.poolService.IsPrimaryAdmin(c.Request.Context(), actorID) {
+			approval, approvalErr := h.poolService.CreateApproval(c.Request.Context(), service.CreatePoolApprovalInput{
+				ActionType:  service.PoolApprovalDeleteAccount,
+				AccountID:   accountID,
+				Reason:      req.Reason,
+				RequesterID: actorID,
+				Payload:     service.PoolApprovalPayload{DeleteOptions: &options},
+			})
+			if approvalErr != nil {
+				response.ErrorFrom(c, approvalErr)
+				return
+			}
+			response.Accepted(c, gin.H{"message": "Account deletion approval submitted", "approval": approval})
+			return
+		}
+		result, deleteErr := lifecycleService.DeleteAccountWithOptions(c.Request.Context(), accountID, options)
+		if deleteErr != nil {
+			response.ErrorFrom(c, deleteErr)
+			return
+		}
+		response.Success(c, gin.H{"message": "Account deleted successfully", "result": result})
 		return
 	}
 
@@ -1198,6 +1319,9 @@ func (h *AccountHandler) RecoverState(c *gin.Context) {
 // SyncFromCRS handles syncing accounts from claude-relay-service (CRS)
 // POST /api/v1/admin/accounts/sync/crs
 func (h *AccountHandler) SyncFromCRS(c *gin.Context) {
+	if !h.requirePrimaryAdmin(c, "synchronizing existing accounts from CRS") {
+		return
+	}
 	var req SyncFromCRSRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.BadRequest(c, "Invalid request: "+err.Error())
@@ -2093,12 +2217,13 @@ func toServiceBulkUpdateAccountFilters(filters *BulkUpdateAccountFilters) *servi
 		return nil
 	}
 	return &service.BulkUpdateAccountFilters{
-		Platform:    filters.Platform,
-		Type:        filters.Type,
-		Status:      filters.Status,
-		Group:       filters.Group,
-		Search:      filters.Search,
-		PrivacyMode: filters.PrivacyMode,
+		Platform:       filters.Platform,
+		Type:           filters.Type,
+		Status:         filters.Status,
+		Group:          filters.Group,
+		Search:         filters.Search,
+		PrivacyMode:    filters.PrivacyMode,
+		UploaderUserID: filters.UploaderUserID,
 	}
 }
 

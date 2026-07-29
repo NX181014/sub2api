@@ -50,7 +50,7 @@ RETURNING id,name,website_url,notes,active,created_at,updated_at`, input.Purchas
 		}
 	}
 
-	result, err := tx.ExecContext(ctx, accountIntakeUpdateSQL, input.AccountID, input.ProviderIdentity, input.ContributorUserID, input.UploaderUserID)
+	result, err := tx.ExecContext(ctx, accountIntakeUpdateSQL, input.AccountID, input.ProviderIdentity, input.ContributorUserID, input.UploaderUserID, input.Cost.ExpectedTokenCount)
 	if err != nil {
 		return nil, fmt.Errorf("update intake account: %w", err)
 	}
@@ -89,13 +89,13 @@ LIMIT 1`, input.AccountID, input.Cost.ServiceStart, input.Cost.ServiceEnd).Scan(
 INSERT INTO account_cost_entries(
     account_id,payer_user_id,purchase_source_id,entry_type,currency,original_amount,
     cny_amount_minor,fx_rate,service_start,service_end,warranty_end,paid_at,
-    order_no,purchase_url,note,supersedes_id,related_account_id,created_by_user_id)
-VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
+	    order_no,purchase_url,note,supersedes_id,related_account_id,expected_token_count,created_by_user_id)
+	VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
 RETURNING id`, input.AccountID, input.ContributorUserID, source.ID, input.Cost.EntryType,
 		input.Cost.Currency, input.Cost.OriginalAmount, input.Cost.CNYAmountMinor, input.Cost.FXRate,
 		input.Cost.ServiceStart, input.Cost.ServiceEnd, input.Cost.WarrantyEnd, input.Cost.PaidAt,
 		input.Cost.OrderNo, input.Cost.PurchaseURL, input.Cost.Note, input.Cost.SupersedesID,
-		input.Cost.RelatedAccountID, input.ActorUserID).Scan(&costID)
+		input.Cost.RelatedAccountID, input.Cost.ExpectedTokenCount, input.ActorUserID).Scan(&costID)
 	if err != nil {
 		return nil, fmt.Errorf("create intake cost: %w", err)
 	}
@@ -116,9 +116,10 @@ RETURNING id`, input.AccountID, input.ContributorUserID, source.ID, input.Cost.E
 const accountIntakeUpdateSQL = `
 UPDATE accounts SET
     provider_identity=$2,
-    contributor_user_id=$3,
-    created_by_user_id=$4,
-    cost_sharing_enabled=TRUE,updated_at=NOW()
+	    contributor_user_id=$3,
+	    created_by_user_id=$4,
+	    expected_token_count=$5,
+	    cost_sharing_enabled=TRUE,updated_at=NOW()
 WHERE id=$1 AND deleted_at IS NULL
   AND COALESCE(BTRIM(provider_identity), '') = ''
   AND contributor_user_id IS NULL

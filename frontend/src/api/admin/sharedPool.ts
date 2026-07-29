@@ -4,8 +4,8 @@ export type PoolPeriodType = 'day' | 'week' | 'month' | 'custom'
 export type PoolAccountStatus = 'active' | 'warning' | 'banned' | 'inactive'
 export type PoolSettlementStatus = 'draft' | 'locked' | 'paid'
 export type PoolLifecycleEventType = 'banned_confirmed' | 'recovered' | 'refund' | 'replaced' | 'retired'
-export type PoolCostEntryType = 'purchase' | 'renewal' | 'topup' | 'price_version' | 'adjustment'
-export type PoolApprovalAction = 'UPDATE_ACCOUNT' | 'VIEW_CREDENTIAL'
+export type PoolCostEntryType = 'purchase' | 'renewal' | 'topup' | 'price_version' | 'refund' | 'adjustment' | 'replacement_in' | 'replacement_out' | 'write_off'
+export type PoolApprovalAction = 'UPDATE_ACCOUNT' | 'VIEW_CREDENTIAL' | 'DELETE_ACCOUNT'
 export type PoolApprovalStatus = 'pending' | 'approved' | 'rejected' | 'expired' | 'consumed'
 
 export interface PoolApproval {
@@ -58,6 +58,10 @@ export interface PoolPeriodParams {
   start: string
   end: string
   period_type?: PoolPeriodType
+  account_id?: number
+  uploader_user_id?: number
+  payer_user_id?: number
+  purchase_source_id?: number
 }
 
 export interface SharedPoolSummary {
@@ -86,6 +90,8 @@ export interface SharedPoolAccountCost {
   purchase_url?: string | null
   order_no?: string | null
   purchase_cost: number
+  expected_token_count?: number | null
+  cost_sharing_enabled?: boolean
   entry_type?: PoolCostEntryType
   currency: string
   settled_cost?: number
@@ -93,6 +99,7 @@ export interface SharedPoolAccountCost {
   service_end: string
   warranty_end?: string | null
   notes?: string | null
+  paid_at?: string | null
   status: PoolAccountStatus
   usage_value: number
   roi_rate: number
@@ -120,6 +127,136 @@ export interface SharedPoolCostList {
   total: number
 }
 
+export interface SharedPoolCostSummary {
+  account_id: number
+  account_name: string
+  provider_identity?: string | null
+  account_status?: string | null
+  uploader_user_id?: number | null
+  uploader_email?: string | null
+  contributor_user_id?: number | null
+  contributor_email?: string | null
+  expected_token_count?: number | null
+  priced_expected_token_count?: number
+  remaining_expected_token_count?: number
+  latest_payer_user_id?: number | null
+  latest_payer_email?: string | null
+  latest_purchase_source_id?: number | null
+  latest_purchase_source?: string | null
+  latest_order_no?: string | null
+  purchased_at?: string | null
+  latest_service_start?: string | null
+  latest_service_end?: string | null
+  latest_lifecycle_status: string
+  latest_lifecycle_at?: string | null
+  entry_count: number
+  purchase_cost_minor?: number
+  refund_minor?: number
+  written_off_minor?: number
+  net_cost_minor: number
+  total_usage_tokens: number
+  recognized_cost_minor: number
+  remaining_cost_minor: number
+  cost_progress?: string | null
+}
+
+export interface SharedPoolCostSummaryQuery {
+  page?: number
+  page_size?: number
+  search?: string
+  uploader_user_id?: number
+  payer_user_id?: number
+  purchase_source_id?: number
+  lifecycle_status?: string
+  has_cost?: boolean
+}
+
+export interface SharedPoolLedgerEntry {
+  id: number
+  account_id: number
+  account_name: string
+  payer_user_id: number
+  payer_email: string
+  purchase_source_id?: number | null
+  purchase_source?: string | null
+  entry_type: PoolCostEntryType
+  currency: string
+  original_amount: string
+  cny_amount_minor: number
+  fx_rate: string
+  service_start: string
+  service_end: string
+  warranty_end?: string | null
+  paid_at: string
+  order_no?: string | null
+  purchase_url?: string | null
+  note?: string | null
+  expected_token_count?: number | null
+  created_at?: string
+}
+
+export interface SharedPoolLedgerEntryQuery {
+  page?: number
+  page_size?: number
+  search?: string
+  account_id?: number
+  uploader_user_id?: number
+  payer_user_id?: number
+  purchase_source_id?: number
+  entry_type?: PoolCostEntryType
+  start_date?: string
+  end_date?: string
+}
+
+export interface SharedPoolPaginated<T> {
+  items: T[]
+  total: number
+  page: number
+  page_size: number
+  pages: number
+}
+
+export interface SharedPoolPurchaseSource {
+  id: number
+  name: string
+  active: boolean
+}
+
+export type SharedPoolBatchAmountMode = 'per_account' | 'order_total'
+
+export interface BatchSharedPoolCostRequest {
+  amount_mode: SharedPoolBatchAmountMode
+  common: {
+    payer_user_id: number
+    purchase_source_id?: number
+    entry_type: PoolCostEntryType
+    original_amount: string
+    currency: string
+    fx_rate?: string
+    service_start: string
+    service_end: string
+    warranty_end?: string
+    paid_at?: string
+    order_no?: string
+    purchase_url?: string
+    notes?: string
+    expected_token_count?: number
+  }
+  accounts: Array<{
+    account_id: number
+    original_amount?: string
+    expected_token_count?: number
+  }>
+}
+
+export interface BatchSharedPoolCostResult {
+  amount_mode: SharedPoolBatchAmountMode
+  account_count: number
+  total_original_amount: string
+  total_cny_amount_minor: number
+  entries: SharedPoolLedgerEntry[]
+}
+
 export interface CreateSharedPoolCostRequest {
   account_id: number
   provider_identity: string
@@ -129,11 +266,14 @@ export interface CreateSharedPoolCostRequest {
   purchase_url?: string
   order_no?: string
   purchase_cost: number
+  expected_token_count: number
+  cost_sharing_enabled: boolean
   entry_type: PoolCostEntryType
   currency: string
   service_start: string
   service_end: string
   warranty_end?: string
+	paid_at?: string
   notes?: string
 }
 
@@ -144,6 +284,7 @@ export interface CreateSharedPoolIntakeRequest {
   purchase_source_name: string
   entry_type: PoolCostEntryType
   original_amount: string
+  expected_token_count: number
   currency: string
   fx_rate: string
   cny_amount_minor: number
@@ -162,6 +303,7 @@ export interface CreateSharedPoolCostEntryRequest {
   purchase_source_id?: number
   entry_type: PoolCostEntryType
   original_amount: string
+  expected_token_count: number
   currency: string
   fx_rate: string
   service_start: string
@@ -170,6 +312,18 @@ export interface CreateSharedPoolCostEntryRequest {
   order_no?: string
   purchase_url?: string
   notes?: string
+  paid_at?: string
+  supersedes_id?: number
+  provider_identity?: string
+  contributor_user_id?: number
+  uploader_user_id?: number
+  cost_sharing_enabled?: boolean
+  approval_reason?: string
+}
+
+export interface SharedPoolCostWriteResult {
+  approval_required?: boolean
+  approval?: PoolApproval
 }
 
 export interface RecordSharedPoolLifecycleRequest {
@@ -193,6 +347,9 @@ export interface SharedPoolSettlementLine {
   adjustment: number
   net_amount: number
   payment_status?: 'pending' | 'paid'
+  confirmation_status: 'pending' | 'confirmed'
+  confirmed_by_user_id?: number
+  confirmed_at?: string
 }
 
 export interface SharedPoolSettlementPreview {
@@ -261,6 +418,9 @@ interface RawPoolCost {
   order_no?: string | null
   purchase_url?: string | null
   note?: string | null
+  expected_token_count?: number | null
+  paid_at?: string
+  created_at?: string
 }
 
 interface RawRecoveryAccount {
@@ -322,6 +482,9 @@ interface RawSettlementLine {
   adjustment_minor: number
   net_amount_minor: number
   payment_status: 'unpaid' | 'paid'
+  confirmation_status: 'pending' | 'confirmed'
+  confirmed_by_user_id?: number
+  confirmed_at?: string
 }
 
 interface RawSettlement {
@@ -329,7 +492,7 @@ interface RawSettlement {
   period_type: PoolPeriodType
   period_start: string
   period_end: string
-  status: 'draft' | 'locked'
+  status: PoolSettlementStatus
   total_cost_minor: number
   carry_out_minor: number
   total_usage_weight: string
@@ -441,7 +604,10 @@ export async function listAccountCosts(params?: PoolPeriodParams): Promise<Share
       purchase_url: cost.purchase_url,
       order_no: cost.order_no,
       notes: cost.note,
+      paid_at: cost.paid_at,
       purchase_cost: minorToAmount(cost.cny_amount_minor),
+      expected_token_count: cost.expected_token_count,
+      cost_sharing_enabled: account?.cost_sharing_enabled ?? true,
       entry_type: cost.entry_type as PoolCostEntryType,
       currency: 'CNY',
       service_start: cost.service_start.slice(0, 10),
@@ -457,10 +623,34 @@ export async function listAccountCosts(params?: PoolPeriodParams): Promise<Share
   return { items, total: items.length }
 }
 
+export async function listCostSummaries(
+  params: SharedPoolCostSummaryQuery = {}
+): Promise<SharedPoolPaginated<SharedPoolCostSummary>> {
+  const { data } = await apiClient.get<SharedPoolPaginated<SharedPoolCostSummary>>('/admin/pool/cost-summaries', { params })
+  return data
+}
+
+export async function listLedgerEntries(
+  params: SharedPoolLedgerEntryQuery = {}
+): Promise<SharedPoolPaginated<SharedPoolLedgerEntry>> {
+  const { data } = await apiClient.get<SharedPoolPaginated<SharedPoolLedgerEntry>>('/admin/pool/cost-entries', { params })
+  return data
+}
+
+export async function listPurchaseSources(): Promise<SharedPoolPurchaseSource[]> {
+  const { data } = await apiClient.get<SharedPoolPurchaseSource[]>('/admin/pool/sources')
+  return data
+}
+
+export async function createPurchaseSource(name: string): Promise<SharedPoolPurchaseSource> {
+  const { data } = await apiClient.post<SharedPoolPurchaseSource>('/admin/pool/sources', { name })
+  return data
+}
+
 type PoolWriteOperation = { fingerprint: string; key: string }
 const poolWriteOperations = new Map<string, PoolWriteOperation>()
 
-async function postPoolWrite(operationID: string, keyPrefix: string, url: string, payload: unknown): Promise<void> {
+async function postPoolWrite<T = void>(operationID: string, keyPrefix: string, url: string, payload: unknown): Promise<T> {
   const storageKey = `sub2api:admin:${operationID}`
   const fingerprint = JSON.stringify(payload)
   let operation = poolWriteOperations.get(operationID)
@@ -478,9 +668,10 @@ async function postPoolWrite(operationID: string, keyPrefix: string, url: string
   }
   poolWriteOperations.set(operationID, operation)
   try { globalThis.sessionStorage?.setItem(storageKey, JSON.stringify(operation)) } catch { /* memory fallback */ }
-  await apiClient.post(url, payload, { headers: { 'Idempotency-Key': operation.key } })
+  const { data } = await apiClient.post<T>(url, payload, { headers: { 'Idempotency-Key': operation.key } })
   poolWriteOperations.delete(operationID)
   try { globalThis.sessionStorage?.removeItem(storageKey) } catch { /* memory fallback */ }
+  return data
 }
 
 export async function createAccountIntake(
@@ -490,8 +681,12 @@ export async function createAccountIntake(
   await postPoolWrite(`pool-intake:${accountId}`, `pool-intake-${accountId}`, `/admin/pool/accounts/${accountId}/intake`, payload)
 }
 
-export async function createCost(payload: CreateSharedPoolCostEntryRequest): Promise<void> {
-  await postPoolWrite(`pool-cost:${payload.account_id}`, `pool-cost-${payload.account_id}`, '/admin/pool/costs', payload)
+export async function createCost(payload: CreateSharedPoolCostEntryRequest): Promise<SharedPoolCostWriteResult> {
+  return postPoolWrite<SharedPoolCostWriteResult>(`pool-cost:${payload.account_id}`, `pool-cost-${payload.account_id}`, '/admin/pool/costs', payload)
+}
+
+export async function createBatchCosts(payload: BatchSharedPoolCostRequest): Promise<BatchSharedPoolCostResult> {
+  return postPoolWrite<BatchSharedPoolCostResult>('pool-cost:batch', 'pool-cost-batch', '/admin/pool/costs/batch', payload)
 }
 
 export async function recordLifecycleEvent(payload: RecordSharedPoolLifecycleRequest): Promise<void> {
@@ -546,7 +741,10 @@ const mapSettlement = (raw: RawSettlement): SharedPoolSettlementPreview => {
       contribution_credit: minorToAmount(line.contribution_credit_minor),
       adjustment: minorToAmount(line.adjustment_minor),
       net_amount: minorToAmount(line.net_amount_minor),
-      payment_status: line.payment_status === 'paid' ? 'paid' : 'pending'
+      payment_status: line.payment_status === 'paid' ? 'paid' : 'pending',
+      confirmation_status: line.confirmation_status === 'confirmed' ? 'confirmed' : 'pending',
+      confirmed_by_user_id: line.confirmed_by_user_id,
+      confirmed_at: line.confirmed_at
     }))
   }
 }
@@ -555,7 +753,11 @@ export async function previewSettlement(params: PoolPeriodParams): Promise<Share
   const { data } = await apiClient.post<RawSettlement>('/admin/pool/settlements/draft', {
     period_type: params.period_type || 'custom',
     start_date: params.start,
-    end_date: params.end
+    end_date: params.end,
+    account_id: params.account_id,
+    uploader_user_id: params.uploader_user_id,
+    payer_user_id: params.payer_user_id,
+    purchase_source_id: params.purchase_source_id
   })
   return mapSettlement(data)
 }
@@ -563,6 +765,19 @@ export async function previewSettlement(params: PoolPeriodParams): Promise<Share
 export async function lockSettlement(payload: PoolPeriodParams & { settlement_id?: number }): Promise<SharedPoolSettlementPreview> {
   if (!payload.settlement_id) throw new Error('settlement_id is required')
   const { data } = await apiClient.post<RawSettlement>(`/admin/pool/settlements/${payload.settlement_id}/lock`)
+  return mapSettlement(data)
+}
+
+export async function confirmSettlement(id: number, userId?: number): Promise<SharedPoolSettlementPreview> {
+	const url = `/admin/pool/settlements/${id}/confirm`
+	const { data } = userId
+		? await apiClient.post<RawSettlement>(url, undefined, { params: { user_id: userId } })
+		: await apiClient.post<RawSettlement>(url)
+  return mapSettlement(data)
+}
+
+export async function markSettlementPaid(id: number): Promise<SharedPoolSettlementPreview> {
+  const { data } = await apiClient.post<RawSettlement>(`/admin/pool/settlements/${id}/paid`)
   return mapSettlement(data)
 }
 
@@ -625,13 +840,20 @@ export async function revealApproval(id: number): Promise<PoolCredentialReveal> 
 export default {
   getOverview,
   listAccountCosts,
+  listCostSummaries,
+  listLedgerEntries,
+  listPurchaseSources,
+  createPurchaseSource,
   createAccountIntake,
   createCost,
+  createBatchCosts,
   recordLifecycleEvent,
   getLatestFXRate,
   saveFXRate,
   previewSettlement,
   lockSettlement,
+  confirmSettlement,
+  markSettlementPaid,
   listSources,
   createApproval,
   listApprovals,

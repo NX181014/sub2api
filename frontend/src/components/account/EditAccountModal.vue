@@ -28,6 +28,48 @@
         <p class="input-hint">{{ t('admin.accounts.notesHint') }}</p>
       </div>
 
+      <section class="border-y border-gray-200 py-4 dark:border-dark-600">
+        <div class="mb-3">
+          <h3 class="text-sm font-medium text-gray-900 dark:text-gray-100">
+            {{ t('admin.sharedPool.intake.title') }}
+          </h3>
+          <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+            {{ t('admin.sharedPool.approval.subtitle') }}
+          </p>
+        </div>
+        <div class="grid gap-4 sm:grid-cols-2">
+          <div class="sm:col-span-2">
+            <label class="input-label">{{ t('admin.sharedPool.form.providerIdentity') }}</label>
+            <input v-model="form.provider_identity" type="text" class="input" />
+          </div>
+          <div>
+            <label class="input-label">{{ t('admin.sharedPool.form.contributor') }} *</label>
+            <Select
+              v-model="form.contributor_user_id"
+              :options="poolUserOptions"
+              :searchable="true"
+            />
+          </div>
+          <div>
+            <label class="input-label">{{ t('admin.sharedPool.form.uploader') }} *</label>
+            <Select
+              v-model="form.created_by_user_id"
+              :options="poolUserOptions"
+              :searchable="true"
+            />
+          </div>
+          <div class="flex items-center justify-between gap-4 sm:col-span-2">
+            <div>
+              <label class="input-label mb-0">{{ t('admin.sharedPool.form.costSharingEnabled') }}</label>
+              <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                {{ t('admin.sharedPool.form.costSharingEnabledHint') }}
+              </p>
+            </div>
+            <Toggle v-model="form.cost_sharing_enabled" />
+          </div>
+        </div>
+      </section>
+
       <!-- API Key fields (only for apikey type) -->
       <div v-if="account.type === 'apikey'" class="space-y-4">
         <div>
@@ -2576,6 +2618,7 @@ import { adminAPI } from '@/api/admin'
 import { useQuotaNotifyState } from '@/composables/useQuotaNotifyState'
 import type {
   Account,
+  AdminUser,
   Proxy,
   AdminGroup,
   CheckMixedChannelResponse,
@@ -2686,6 +2729,12 @@ interface TempUnschedRuleForm {
 
 // State
 const submitting = ref(false)
+const poolUsers = ref<AdminUser[]>([])
+const poolUsersLoaded = ref(false)
+const poolUserOptions = computed(() => poolUsers.value.map((user) => ({
+  value: user.id,
+  label: user.username || user.email
+})))
 const editBaseUrl = ref('https://api.anthropic.com')
 const editApiKey = ref('')
 // Bedrock credentials
@@ -3126,6 +3175,10 @@ const mixedChannelWarningMessageText = computed(() => {
 const form = reactive({
   name: '',
   notes: '',
+  provider_identity: '',
+  contributor_user_id: null as number | null,
+  created_by_user_id: null as number | null,
+  cost_sharing_enabled: false,
   proxy_id: null as number | null,
   concurrency: 1,
   load_factor: null as number | null,
@@ -3215,6 +3268,10 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   mixedChannelWarningAction.value = null
   form.name = newAccount.name
   form.notes = newAccount.notes || ''
+  form.provider_identity = newAccount.provider_identity || ''
+  form.contributor_user_id = newAccount.contributor_user_id ?? null
+  form.created_by_user_id = newAccount.created_by_user_id ?? null
+  form.cost_sharing_enabled = newAccount.cost_sharing_enabled === true
   form.proxy_id = newAccount.proxy_id
   form.concurrency = newAccount.concurrency
   form.load_factor = newAccount.load_factor ?? null
@@ -3543,6 +3600,29 @@ async function loadTLSProfiles() {
   }
 }
 
+async function loadPoolUsers() {
+  if (!poolUsersLoaded.value) {
+    try {
+      const response = await adminAPI.users.list(1, 200, {
+        status: 'active',
+        sort_by: 'email',
+        sort_order: 'asc'
+      })
+      poolUsers.value = response.items
+      poolUsersLoaded.value = true
+    } catch {
+      poolUsers.value = []
+    }
+  }
+
+  const currentIDs = [...new Set([form.contributor_user_id, form.created_by_user_id]
+    .filter((id): id is number => !!id && !poolUsers.value.some((user) => user.id === id)))]
+  const currentUsers = await Promise.allSettled(currentIDs.map((id) => adminAPI.users.getById(id, true)))
+  for (const result of currentUsers) {
+    if (result.status === 'fulfilled') poolUsers.value.push(result.value)
+  }
+}
+
 watch(
   [() => props.show, () => props.account],
   ([show, newAccount], [wasShow, previousAccount]) => {
@@ -3552,6 +3632,7 @@ watch(
     if (!wasShow || newAccount !== previousAccount) {
       syncFormFromAccount(newAccount)
       loadTLSProfiles()
+      loadPoolUsers()
     }
   },
   { immediate: true }
@@ -3986,11 +4067,22 @@ const submitUpdateAccount = async (accountID: number, updatePayload: Record<stri
   try {
     const accountUpdate = withAntigravityConfirmFlag(updatePayload)
     if (!authStore.user?.is_primary_admin) {
+      const poolUpdate = {
+        provider_identity: accountUpdate.provider_identity,
+        contributor_user_id: accountUpdate.contributor_user_id,
+        created_by_user_id: accountUpdate.created_by_user_id,
+        cost_sharing_enabled: accountUpdate.cost_sharing_enabled
+      }
+      const approvalAccountUpdate = { ...accountUpdate }
+      delete approvalAccountUpdate.provider_identity
+      delete approvalAccountUpdate.contributor_user_id
+      delete approvalAccountUpdate.created_by_user_id
+      delete approvalAccountUpdate.cost_sharing_enabled
       await adminAPI.sharedPool.createApproval({
         action_type: 'UPDATE_ACCOUNT',
         account_id: accountID,
         reason: t('admin.accounts.approval.updateReason', { name: props.account?.name || `#${accountID}` }),
-        payload: { account_update: accountUpdate }
+        payload: { account_update: approvalAccountUpdate, pool_update: poolUpdate }
       })
       appStore.showSuccess(t('admin.accounts.approval.updateSubmitted'))
       emit('submitted')
@@ -4027,6 +4119,10 @@ const handleSubmit = async () => {
 
   if (form.status !== 'active' && form.status !== 'inactive' && form.status !== 'error') {
     appStore.showError(t('admin.accounts.pleaseSelectStatus'))
+    return
+  }
+  if (!form.contributor_user_id || !form.created_by_user_id) {
+    appStore.showError(t('admin.sharedPool.errors.required'))
     return
   }
 

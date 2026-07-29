@@ -10,6 +10,7 @@ import (
 	"time"
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
+	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/lib/pq"
 )
@@ -61,7 +62,7 @@ func (r *poolApprovalRepository) ExpireStale(ctx context.Context, now time.Time)
 UPDATE pool_approval_requests
 SET status='expired',
     decision_reason=COALESCE(decision_reason, 'approval window expired'),
-    decided_at=COALESCE(decided_at, $1), updated_at=$1
+    decided_at=COALESCE(decided_at, $1), payload='{}'::jsonb, updated_at=$1
 WHERE (status='pending' AND expires_at <= $1)
    OR (action_type='VIEW_CREDENTIAL' AND status='approved'
        AND revealed_at IS NULL AND reveal_expires_at <= $1)`, now.UTC())
@@ -253,11 +254,148 @@ WHERE id=$1 AND deleted_at IS NULL`, id,
 	return nil
 }
 
+func (r *poolApprovalRepository) UpdateCostApproved(ctx context.Context, update service.PoolCostUpdate) error {
+	exec := r.executor(ctx)
+	rows, err := exec.QueryContext(ctx, `
+SELECT account_id,COALESCE(expected_token_count,0)
+FROM account_cost_entries WHERE id=$1 FOR UPDATE`, update.CostID)
+	if err != nil {
+		return err
+	}
+	var accountID, oldExpected int64
+	if !rows.Next() {
+		_ = rows.Close()
+		return service.ErrPoolAccountNotFound
+	}
+	if err = rows.Scan(&accountID, &oldExpected); err != nil {
+		_ = rows.Close()
+		return err
+	}
+	if err = rows.Close(); err != nil {
+		return err
+	}
+	if accountID != update.Cost.AccountID {
+		return service.ErrPoolAccountNotFound
+	}
+
+	rows, err = exec.QueryContext(ctx, `
+SELECT EXISTS(
+  SELECT 1 FROM pool_settlements settlement
+  CROSS JOIN LATERAL jsonb_array_elements(COALESCE(settlement.cost_snapshot,'[]'::jsonb)) snapshot
+  WHERE settlement.status IN ('locked','paid') AND snapshot->>'entry_id'=$1::text
+)`, update.CostID)
+	if err != nil {
+		return err
+	}
+	var settled bool
+	if !rows.Next() || rows.Scan(&settled) != nil {
+		_ = rows.Close()
+		return fmt.Errorf("check cost settlement state")
+	}
+	if err = rows.Close(); err != nil {
+		return err
+	}
+	if settled {
+		return infraerrors.Conflict("POOL_COST_ALREADY_SETTLED", "locked or paid cost entries are immutable")
+	}
+
+	if update.Cost.OrderAccountKey != "" {
+		rows, err = exec.QueryContext(ctx, `SELECT EXISTS(
+  SELECT 1 FROM account_cost_entries
+  WHERE id<>$1 AND (order_account_key=$2 OR (
+    account_id=$3 AND COALESCE(purchase_source_id,0)=COALESCE($4::bigint,0)
+    AND LOWER(BTRIM(order_no))=LOWER(BTRIM($5::text))
+  )))`, update.CostID, update.Cost.OrderAccountKey, update.Cost.AccountID, update.Cost.PurchaseSourceID, update.Cost.OrderNo)
+		if err != nil {
+			return err
+		}
+		var duplicate bool
+		if !rows.Next() || rows.Scan(&duplicate) != nil {
+			_ = rows.Close()
+			return fmt.Errorf("check duplicate cost order")
+		}
+		_ = rows.Close()
+		if duplicate {
+			return service.ErrPoolApprovalConflict
+		}
+	}
+	if update.Cost.EntryType == "purchase" || update.Cost.EntryType == "renewal" || update.Cost.EntryType == "price_version" {
+		rows, err = exec.QueryContext(ctx, `SELECT EXISTS(
+  SELECT 1 FROM account_cost_entries
+  WHERE id<>$1 AND account_id=$2 AND entry_type IN ('purchase','renewal','price_version')
+    AND service_start<$4::date AND service_end>$3::date
+)`, update.CostID, update.Cost.AccountID, update.Cost.ServiceStart, update.Cost.ServiceEnd)
+		if err != nil {
+			return err
+		}
+		var overlap bool
+		if !rows.Next() || rows.Scan(&overlap) != nil {
+			_ = rows.Close()
+			return fmt.Errorf("check cost period overlap")
+		}
+		_ = rows.Close()
+		if overlap {
+			return service.ErrPoolApprovalConflict
+		}
+	}
+
+	result, err := exec.ExecContext(ctx, `
+UPDATE account_cost_entries SET
+  payer_user_id=$2,purchase_source_id=$3,entry_type=$4,currency=$5,original_amount=$6,
+  cny_amount_minor=$7,fx_rate=$8,service_start=$9,service_end=$10,warranty_end=$11,
+  paid_at=$12,order_no=$13,purchase_url=$14,note=$15,related_account_id=$16,
+  expected_token_count=$17,order_account_key=NULLIF(BTRIM($18),'')
+WHERE id=$1`, update.CostID, update.Cost.PayerUserID, update.Cost.PurchaseSourceID, update.Cost.EntryType,
+		update.Cost.Currency, update.Cost.OriginalAmount, update.Cost.CNYAmountMinor, update.Cost.FXRate,
+		update.Cost.ServiceStart, update.Cost.ServiceEnd, update.Cost.WarrantyEnd, update.Cost.PaidAt,
+		update.Cost.OrderNo, update.Cost.PurchaseURL, update.Cost.Note, update.Cost.RelatedAccountID,
+		update.Cost.ExpectedTokenCount, update.Cost.OrderAccountKey)
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return service.ErrPoolAccountNotFound
+	}
+	newExpected := int64(0)
+	if update.Cost.ExpectedTokenCount != nil {
+		newExpected = *update.Cost.ExpectedTokenCount
+	}
+	result, err = exec.ExecContext(ctx, `
+UPDATE accounts SET
+  expected_token_count=CASE WHEN COALESCE(expected_token_count,0)+$2>0 THEN COALESCE(expected_token_count,0)+$2 ELSE NULL END,
+  updated_at=NOW()
+WHERE id=$1 AND deleted_at IS NULL`, accountID, newExpected-oldExpected)
+	if err != nil {
+		return err
+	}
+	affected, err = result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return service.ErrPoolAccountNotFound
+	}
+	return nil
+}
+
+func (r *poolApprovalRepository) InvalidateCredentialApprovals(ctx context.Context, accountID int64, reason string) error {
+	_, err := r.executor(ctx).ExecContext(ctx, `
+UPDATE pool_approval_requests
+SET status='expired', decision_reason=$2, decided_at=COALESCE(decided_at,NOW()),
+    reveal_expires_at=NULL, payload='{}'::jsonb, updated_at=NOW()
+WHERE account_id=$1 AND action_type='VIEW_CREDENTIAL' AND status IN ('pending','approved')`, accountID, reason)
+	return err
+}
+
 func (r *poolApprovalRepository) SetDecision(ctx context.Context, id int64, status string, actorID int64, reason *string, revealExpiresAt *time.Time) error {
 	result, err := r.executor(ctx).ExecContext(ctx, `
 UPDATE pool_approval_requests
 SET status=$2,decided_by_user_id=$3,decision_reason=$4,decided_at=NOW(),
-    reveal_expires_at=$5,updated_at=NOW()
+    reveal_expires_at=$5,payload='{}'::jsonb,updated_at=NOW()
 WHERE id=$1 AND status='pending'`, id, status, actorID, reason, revealExpiresAt)
 	if err != nil {
 		return err
@@ -275,7 +413,7 @@ WHERE id=$1 AND status='pending'`, id, status, actorID, reason, revealExpiresAt)
 func (r *poolApprovalRepository) MarkExpired(ctx context.Context, id int64, reason string) error {
 	result, err := r.executor(ctx).ExecContext(ctx, `
 UPDATE pool_approval_requests
-SET status='expired',decision_reason=$2,decided_at=COALESCE(decided_at,NOW()),updated_at=NOW()
+SET status='expired',decision_reason=$2,decided_at=COALESCE(decided_at,NOW()),payload='{}'::jsonb,updated_at=NOW()
 WHERE id=$1 AND status='pending'`, id, reason)
 	if err != nil {
 		return err

@@ -38,6 +38,9 @@ func (s *PoolService) CreateAccountIntake(ctx context.Context, input CreateAccou
 	if input.PurchaseSourceName == "" || len(input.PurchaseSourceName) > 100 {
 		return nil, infraerrors.BadRequest("INVALID_SOURCE_NAME", "source name is required and must not exceed 100 characters")
 	}
+	if input.Cost.ExpectedTokenCount == nil || *input.Cost.ExpectedTokenCount <= 0 {
+		return nil, infraerrors.BadRequest("INVALID_EXPECTED_TOKEN_COUNT", "expected_token_count must be positive")
+	}
 	input.Cost.AccountID = input.AccountID
 	input.Cost.PayerUserID = input.ContributorUserID
 	input.Cost.CreatedByUserID = input.ActorUserID

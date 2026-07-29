@@ -13,16 +13,33 @@ import (
 type accountRepoStubForAdminList struct {
 	accountRepoStub
 
-	listWithFiltersCalls    int
-	listWithFiltersParams   pagination.PaginationParams
-	listWithFiltersPlatform string
-	listWithFiltersType     string
-	listWithFiltersStatus   string
-	listWithFiltersSearch   string
-	listWithFiltersPrivacy  string
-	listWithFiltersAccounts []Account
-	listWithFiltersResult   *pagination.PaginationResult
-	listWithFiltersErr      error
+	listWithFiltersCalls     int
+	listWithFiltersParams    pagination.PaginationParams
+	listWithFiltersPlatform  string
+	listWithFiltersType      string
+	listWithFiltersStatus    string
+	listWithFiltersSearch    string
+	listWithFiltersPrivacy   string
+	listWithFiltersAccounts  []Account
+	listWithFiltersResult    *pagination.PaginationResult
+	listWithFiltersErr       error
+	listWithFiltersUploader  int64
+	listWithPoolMetricsCalls int
+}
+
+func (s *accountRepoStubForAdminList) ListWithFiltersByUploader(_ context.Context, params pagination.PaginationParams, platform, accountType, status, search string, groupID int64, privacyMode string, uploaderUserID int64) ([]Account, *pagination.PaginationResult, error) {
+	s.listWithFiltersUploader = uploaderUserID
+	return s.ListWithFilters(context.Background(), params, platform, accountType, status, search, groupID, privacyMode)
+}
+
+func (s *accountRepoStubForAdminList) ListWithFiltersByUploaderAndPoolMetrics(ctx context.Context, params pagination.PaginationParams, platform, accountType, status, search string, groupID int64, privacyMode string, uploaderUserID int64) ([]Account, *pagination.PaginationResult, error) {
+	s.listWithPoolMetricsCalls++
+	return s.ListWithFiltersByUploader(ctx, params, platform, accountType, status, search, groupID, privacyMode, uploaderUserID)
+}
+
+func (s *accountRepoStubForAdminList) ListWithFiltersAndPoolMetrics(_ context.Context, params pagination.PaginationParams, platform, accountType, status, search string, groupID int64, privacyMode string) ([]Account, *pagination.PaginationResult, error) {
+	s.listWithPoolMetricsCalls++
+	return s.ListWithFilters(context.Background(), params, platform, accountType, status, search, groupID, privacyMode)
 }
 
 func (s *accountRepoStubForAdminList) ListAllWithFilters(context.Context, string, string, string, string, int64, string) ([]Account, error) {
@@ -202,6 +219,22 @@ func TestAdminService_ListAccounts_WithPrivacyMode(t *testing.T) {
 		require.Equal(t, []Account{{ID: 2, Name: "acc2"}}, accounts)
 		require.Equal(t, PrivacyModeCFBlocked, repo.listWithFiltersPrivacy)
 	})
+}
+
+func TestAdminService_ListAccountsByUploader_ForwardsDatabaseFilter(t *testing.T) {
+	repo := &accountRepoStubForAdminList{
+		listWithFiltersAccounts: []Account{{ID: 3, Name: "shared"}},
+		listWithFiltersResult:   &pagination.PaginationResult{Total: 41},
+	}
+	svc := &adminServiceImpl{accountRepo: repo}
+
+	accounts, total, err := svc.ListAccountsByUploader(context.Background(), 2, 20, PlatformOpenAI, AccountTypeOAuth, StatusActive, "shared", 0, "", 77, true, "name", "asc")
+	require.NoError(t, err)
+	require.Equal(t, int64(41), total)
+	require.Equal(t, int64(77), repo.listWithFiltersUploader)
+	require.Equal(t, 1, repo.listWithPoolMetricsCalls)
+	require.Equal(t, 2, repo.listWithFiltersParams.Page)
+	require.Equal(t, []Account{{ID: 3, Name: "shared"}}, accounts)
 }
 
 func TestAdminService_ListProxies_WithSearch(t *testing.T) {

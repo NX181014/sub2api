@@ -401,12 +401,13 @@ type BulkUpdateAccountsInput struct {
 }
 
 type BulkUpdateAccountFilters struct {
-	Platform    string
-	Type        string
-	Status      string
-	Group       string
-	Search      string
-	PrivacyMode string
+	Platform       string
+	Type           string
+	Status         string
+	Group          string
+	Search         string
+	PrivacyMode    string
+	UploaderUserID int64
 }
 
 // BulkUpdateAccountResult captures the result for a single account update.

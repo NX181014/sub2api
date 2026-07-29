@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -59,51 +60,154 @@ type CreatePurchaseSourceInput struct {
 }
 
 type AccountCostEntry struct {
-	ID               int64      `json:"id"`
-	AccountID        int64      `json:"account_id"`
-	AccountName      string     `json:"account_name"`
-	PayerUserID      int64      `json:"payer_user_id"`
-	PayerEmail       string     `json:"payer_email"`
-	PurchaseSourceID *int64     `json:"purchase_source_id"`
-	PurchaseSource   *string    `json:"purchase_source"`
-	EntryType        string     `json:"entry_type"`
-	Currency         string     `json:"currency"`
-	OriginalAmount   string     `json:"original_amount"`
-	CNYAmountMinor   int64      `json:"cny_amount_minor"`
-	FXRate           string     `json:"fx_rate"`
-	ServiceStart     time.Time  `json:"service_start"`
-	ServiceEnd       time.Time  `json:"service_end"`
-	WarrantyEnd      *time.Time `json:"warranty_end"`
-	PaidAt           time.Time  `json:"paid_at"`
-	OrderNo          *string    `json:"order_no,omitempty"`
-	PurchaseURL      *string    `json:"purchase_url,omitempty"`
-	Note             *string    `json:"note"`
-	SupersedesID     *int64     `json:"supersedes_id"`
-	RelatedAccountID *int64     `json:"related_account_id"`
-	CreatedByUserID  int64      `json:"created_by_user_id"`
-	CreatedAt        time.Time  `json:"created_at"`
+	ID                 int64      `json:"id"`
+	AccountID          int64      `json:"account_id"`
+	AccountName        string     `json:"account_name"`
+	PayerUserID        int64      `json:"payer_user_id"`
+	PayerEmail         string     `json:"payer_email"`
+	PurchaseSourceID   *int64     `json:"purchase_source_id"`
+	PurchaseSource     *string    `json:"purchase_source"`
+	EntryType          string     `json:"entry_type"`
+	Currency           string     `json:"currency"`
+	OriginalAmount     string     `json:"original_amount"`
+	CNYAmountMinor     int64      `json:"cny_amount_minor"`
+	FXRate             string     `json:"fx_rate"`
+	ServiceStart       time.Time  `json:"service_start"`
+	ServiceEnd         time.Time  `json:"service_end"`
+	WarrantyEnd        *time.Time `json:"warranty_end"`
+	PaidAt             time.Time  `json:"paid_at"`
+	OrderNo            *string    `json:"order_no,omitempty"`
+	PurchaseURL        *string    `json:"purchase_url,omitempty"`
+	Note               *string    `json:"note"`
+	SupersedesID       *int64     `json:"supersedes_id"`
+	RelatedAccountID   *int64     `json:"related_account_id"`
+	ExpectedTokenCount *int64     `json:"expected_token_count"`
+	CreatedByUserID    int64      `json:"created_by_user_id"`
+	CreatedAt          time.Time  `json:"created_at"`
 }
 
 type CreateAccountCostInput struct {
-	AccountID        int64
-	PayerUserID      int64
+	AccountID          int64
+	PayerUserID        int64
+	PurchaseSourceID   *int64
+	EntryType          string
+	Currency           string
+	OriginalAmount     string
+	CNYAmountMinor     int64
+	FXRate             string
+	ServiceStart       time.Time
+	ServiceEnd         time.Time
+	WarrantyEnd        *time.Time
+	PaidAt             time.Time
+	OrderNo            *string
+	PurchaseURL        *string
+	Note               *string
+	SupersedesID       *int64
+	RelatedAccountID   *int64
+	CreatedByUserID    int64
+	OperationKey       string
+	OrderAccountKey    string
+	ExpectedTokenCount *int64
+}
+
+type AccountCostSummary struct {
+	AccountID               int64                `json:"account_id"`
+	AccountName             string               `json:"account_name"`
+	ProviderIdentity        *string              `json:"provider_identity"`
+	AccountStatus           string               `json:"account_status"`
+	UploaderUserID          *int64               `json:"uploader_user_id"`
+	UploaderEmail           *string              `json:"uploader_email"`
+	ContributorUserID       *int64               `json:"contributor_user_id"`
+	ContributorEmail        *string              `json:"contributor_email"`
+	ExpectedTokenCount      *int64               `json:"expected_token_count"`
+	PricedExpectedTokens    int64                `json:"priced_expected_token_count"`
+	RemainingExpectedTokens int64                `json:"remaining_expected_token_count"`
+	TotalUsageTokens        int64                `json:"total_usage_tokens"`
+	PurchaseCostMinor       int64                `json:"purchase_cost_minor"`
+	RefundMinor             int64                `json:"refund_minor"`
+	TransferredOutMinor     int64                `json:"transferred_out_minor"`
+	WrittenOffMinor         int64                `json:"written_off_minor"`
+	CostBasisMinor          int64                `json:"cost_basis_minor"`
+	NetCostMinor            int64                `json:"net_cost_minor"`
+	RecognizedCostMinor     int64                `json:"recognized_cost_minor"`
+	RemainingCostMinor      int64                `json:"remaining_cost_minor"`
+	CostProgress            *string              `json:"cost_progress"`
+	EntryCount              int64                `json:"entry_count"`
+	LatestLifecycleStatus   string               `json:"latest_lifecycle_status"`
+	LatestLifecycleAt       *time.Time           `json:"latest_lifecycle_at"`
+	LatestPayerUserID       *int64               `json:"latest_payer_user_id"`
+	LatestPayerEmail        *string              `json:"latest_payer_email"`
+	LatestPurchaseSourceID  *int64               `json:"latest_purchase_source_id"`
+	LatestPurchaseSource    *string              `json:"latest_purchase_source"`
+	LatestOrderNo           *string              `json:"latest_order_no"`
+	LatestServiceStart      *time.Time           `json:"latest_service_start"`
+	LatestServiceEnd        *time.Time           `json:"latest_service_end"`
+	PurchasedAt             *time.Time           `json:"purchased_at"`
+	CostTranches            []AccountCostTranche `json:"-"`
+}
+
+type AccountCostTranche struct {
+	ID               int64     `json:"id"`
+	CostMinor        int64     `json:"cost_minor"`
+	ExpectedTokens   int64     `json:"expected_tokens"`
+	PaidAt           time.Time `json:"paid_at"`
+	UsageTokens      int64     `json:"usage_tokens"`
+	PayerUserID      int64     `json:"payer_user_id"`
+	PurchaseSourceID *int64    `json:"purchase_source_id"`
+	ServiceStart     time.Time `json:"service_start"`
+	ServiceEnd       time.Time `json:"service_end"`
+}
+
+type AccountCostTrancheRecognition struct {
+	Tranche             AccountCostTranche
+	ConsumedTokens      int64
+	RemainingTokens     int64
+	RecognizedCostMinor int64
+	RemainingCostMinor  int64
+}
+
+type AccountCostSummaryFilter struct {
+	Search           string
+	UploaderUserID   *int64
+	PayerUserID      *int64
+	PurchaseSourceID *int64
+	LifecycleStatus  string
+	EntryType        string
+	HasCost          *bool
+}
+
+type AccountCostEntryFilter struct {
+	Search           string
+	AccountID        *int64
+	UploaderUserID   *int64
+	PayerUserID      *int64
 	PurchaseSourceID *int64
 	EntryType        string
-	Currency         string
-	OriginalAmount   string
-	CNYAmountMinor   int64
-	FXRate           string
-	ServiceStart     time.Time
-	ServiceEnd       time.Time
-	WarrantyEnd      *time.Time
-	PaidAt           time.Time
-	OrderNo          *string
-	PurchaseURL      *string
-	Note             *string
-	SupersedesID     *int64
-	RelatedAccountID *int64
-	CreatedByUserID  int64
-	OperationKey     string
+	PaidFrom         *time.Time
+	PaidTo           *time.Time
+}
+
+type BatchAccountCostItemInput struct {
+	AccountID          int64
+	OriginalAmount     *string
+	ExpectedTokenCount *int64
+}
+
+type BatchCreateAccountCostsInput struct {
+	AmountMode         string
+	Common             CreateAccountCostInput
+	Accounts           []BatchAccountCostItemInput
+	ExpectedTokenCount *int64
+	CreatedByUserID    int64
+	OperationKey       string
+}
+
+type BatchCreateAccountCostsResult struct {
+	AmountMode          string             `json:"amount_mode"`
+	AccountCount        int                `json:"account_count"`
+	TotalOriginalAmount string             `json:"total_original_amount"`
+	TotalCNYAmountMinor int64              `json:"total_cny_amount_minor"`
+	Entries             []AccountCostEntry `json:"entries"`
 }
 
 type AccountLifecycleEvent struct {
@@ -157,6 +261,14 @@ type SettlementPeriod struct {
 	Start    time.Time
 	End      time.Time
 	Timezone string
+	Filter   SettlementFilterSnapshot
+}
+
+type SettlementFilterSnapshot struct {
+	AccountID        *int64 `json:"account_id,omitempty"`
+	UploaderUserID   *int64 `json:"uploader_user_id,omitempty"`
+	PayerUserID      *int64 `json:"payer_user_id,omitempty"`
+	PurchaseSourceID *int64 `json:"purchase_source_id,omitempty"`
 }
 
 type PoolUsageWeight struct {
@@ -167,8 +279,10 @@ type PoolUsageWeight struct {
 }
 
 type PoolUsageCoverage struct {
-	CandidateCount int64
-	UnpricedCount  int64
+	CandidateCount    int64
+	UnpricedCount     int64
+	CandidateMaterial int64
+	UnpricedMaterial  int64
 }
 
 type PoolCostSlice struct {
@@ -190,18 +304,21 @@ type SettlementCostSnapshot struct {
 }
 
 type PoolSettlementLine struct {
-	ID                      int64  `json:"id"`
-	SettlementID            int64  `json:"settlement_id"`
-	UserID                  int64  `json:"user_id"`
-	UserEmail               string `json:"user_email"`
-	Username                string `json:"username"`
-	UsageWeight             string `json:"usage_weight"`
-	UsageShare              string `json:"usage_share"`
-	AllocatedCostMinor      int64  `json:"allocated_cost_minor"`
-	ContributionCreditMinor int64  `json:"contribution_credit_minor"`
-	AdjustmentMinor         int64  `json:"adjustment_minor"`
-	NetAmountMinor          int64  `json:"net_amount_minor"`
-	PaymentStatus           string `json:"payment_status"`
+	ID                      int64      `json:"id"`
+	SettlementID            int64      `json:"settlement_id"`
+	UserID                  int64      `json:"user_id"`
+	UserEmail               string     `json:"user_email"`
+	Username                string     `json:"username"`
+	UsageWeight             string     `json:"usage_weight"`
+	UsageShare              string     `json:"usage_share"`
+	AllocatedCostMinor      int64      `json:"allocated_cost_minor"`
+	ContributionCreditMinor int64      `json:"contribution_credit_minor"`
+	AdjustmentMinor         int64      `json:"adjustment_minor"`
+	NetAmountMinor          int64      `json:"net_amount_minor"`
+	PaymentStatus           string     `json:"payment_status"`
+	ConfirmationStatus      string     `json:"confirmation_status"`
+	ConfirmedByUserID       *int64     `json:"confirmed_by_user_id"`
+	ConfirmedAt             *time.Time `json:"confirmed_at"`
 }
 
 type PoolSettlement struct {
@@ -221,9 +338,12 @@ type PoolSettlement struct {
 	FXRate           string                   `json:"fx_rate"`
 	FormulaVersion   string                   `json:"formula_version"`
 	CostSnapshot     []SettlementCostSnapshot `json:"cost_snapshot"`
+	FilterSnapshot   SettlementFilterSnapshot `json:"filter_snapshot"`
 	GeneratedBy      int64                    `json:"generated_by_user_id"`
 	LockedBy         *int64                   `json:"locked_by_user_id"`
 	LockedAt         *time.Time               `json:"locked_at"`
+	PaidBy           *int64                   `json:"paid_by_user_id"`
+	PaidAt           *time.Time               `json:"paid_at"`
 	CreatedAt        time.Time                `json:"created_at"`
 	UpdatedAt        time.Time                `json:"updated_at"`
 	Lines            []PoolSettlementLine     `json:"lines"`
@@ -243,6 +363,7 @@ type AccountRecovery struct {
 	CurrentNetLossMinor    int64      `json:"current_net_loss_minor"`
 	RecoveryRate           string     `json:"recovery_rate"`
 	AverageDailyValueMinor int64      `json:"average_daily_value_minor"`
+	AverageDailyTokens     int64      `json:"average_daily_tokens"`
 	EstimatedRecoveryDays  *int64     `json:"estimated_recovery_days"`
 	FirstRecoveryAt        *time.Time `json:"first_recovery_at"`
 	LatestRecoveryAt       *time.Time `json:"latest_recovery_at"`
@@ -253,6 +374,9 @@ type AccountRecovery struct {
 	SurvivalDays           int64      `json:"survival_days"`
 	EffectiveUsageDays     int64      `json:"effective_usage_days"`
 	ObservationDays        int64      `json:"observation_days"`
+	ExpectedTokens         int64      `json:"expected_tokens"`
+	UsedTokens             int64      `json:"used_tokens"`
+	RemainingTokens        int64      `json:"remaining_tokens"`
 }
 
 type PurchaseSourceRecovery struct {
@@ -291,16 +415,21 @@ type PoolRepository interface {
 	CreateSource(ctx context.Context, input CreatePurchaseSourceInput) (*PurchaseSource, error)
 	ListCosts(ctx context.Context, accountID *int64) ([]AccountCostEntry, error)
 	CreateCost(ctx context.Context, input CreateAccountCostInput) (*AccountCostEntry, error)
+	ListCostEntries(ctx context.Context, filter AccountCostEntryFilter, limit, offset int) ([]AccountCostEntry, int64, error)
+	ListCostSummaries(ctx context.Context, filter AccountCostSummaryFilter, limit, offset int) ([]AccountCostSummary, int64, error)
+	CreateCostsBatch(ctx context.Context, inputs []CreateAccountCostInput) ([]AccountCostEntry, error)
 	CreateAccountIntake(ctx context.Context, input CreateAccountIntakeInput) (*AccountIntakeResult, error)
 	ListLifecycle(ctx context.Context, accountID *int64) ([]AccountLifecycleEvent, error)
 	CreateLifecycle(ctx context.Context, input CreateLifecycleEventInput) (*AccountLifecycleEvent, error)
 	ListFXRates(ctx context.Context) ([]ValuationFXRate, error)
 	CreateFXRate(ctx context.Context, input CreateFXRateInput) (*ValuationFXRate, error)
 	LatestFXRate(ctx context.Context, at time.Time) (decimal.Decimal, error)
-	SettlementInputs(ctx context.Context, start, end time.Time) ([]PoolCostSlice, []PoolUsageWeight, PoolUsageCoverage, []SettlementCostSnapshot, error)
+	SettlementInputs(ctx context.Context, start, end time.Time, filter SettlementFilterSnapshot) ([]PoolCostSlice, []PoolUsageWeight, PoolUsageCoverage, []SettlementCostSnapshot, error)
 	LockedAllocatedByCostEntry(ctx context.Context, ids []int64) (map[int64]int64, error)
 	SaveDraftSettlement(ctx context.Context, settlement *PoolSettlement) (*PoolSettlement, error)
 	LockSettlement(ctx context.Context, id, actorID int64) (*PoolSettlement, error)
+	ConfirmSettlementLine(ctx context.Context, id, userID, actorID int64) error
+	MarkSettlementPaid(ctx context.Context, id, actorID int64) error
 	ListSettlements(ctx context.Context, limit, offset int) ([]PoolSettlement, int64, error)
 	GetSettlement(ctx context.Context, id int64) (*PoolSettlement, error)
 	GetRecovery(ctx context.Context, start, end time.Time) ([]AccountRecovery, error)
@@ -365,16 +494,326 @@ func (s *PoolService) CreateCost(ctx context.Context, input CreateAccountCostInp
 	if err != nil {
 		return nil, err
 	}
+	input.OrderAccountKey = poolCostOrderAccountKey(input)
 	return s.repo.CreateCost(ctx, input)
+}
+
+func (s *PoolService) ListCostEntries(ctx context.Context, filter AccountCostEntryFilter, page, pageSize int) ([]AccountCostEntry, int64, error) {
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 || pageSize > 1000 {
+		pageSize = 20
+	}
+	filter.Search = strings.TrimSpace(filter.Search)
+	filter.EntryType = strings.TrimSpace(filter.EntryType)
+	return s.repo.ListCostEntries(ctx, filter, pageSize, (page-1)*pageSize)
+}
+
+func (s *PoolService) ListCostSummaries(ctx context.Context, filter AccountCostSummaryFilter, page, pageSize int) ([]AccountCostSummary, int64, error) {
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 || pageSize > 1000 {
+		pageSize = 20
+	}
+	filter.Search = strings.TrimSpace(filter.Search)
+	filter.LifecycleStatus = strings.TrimSpace(filter.LifecycleStatus)
+	filter.EntryType = strings.TrimSpace(filter.EntryType)
+	items, total, err := s.repo.ListCostSummaries(ctx, filter, pageSize, (page-1)*pageSize)
+	if err != nil {
+		return nil, 0, err
+	}
+	for i := range items {
+		applyCostRecognition(&items[i])
+	}
+	return items, total, nil
+}
+
+func (s *PoolService) CreateCostsBatch(ctx context.Context, input BatchCreateAccountCostsInput) (*BatchCreateAccountCostsResult, error) {
+	input.AmountMode = strings.TrimSpace(input.AmountMode)
+	items, totalOriginal, totalCNY, err := prepareBatchCostInputs(input)
+	if err != nil {
+		return nil, err
+	}
+	entries, err := s.repo.CreateCostsBatch(ctx, items)
+	if err != nil {
+		return nil, err
+	}
+	return &BatchCreateAccountCostsResult{
+		AmountMode: input.AmountMode, AccountCount: len(entries), TotalOriginalAmount: totalOriginal,
+		TotalCNYAmountMinor: totalCNY, Entries: entries,
+	}, nil
+}
+
+func prepareBatchCostInputs(input BatchCreateAccountCostsInput) ([]CreateAccountCostInput, string, int64, error) {
+	input.AmountMode = strings.TrimSpace(input.AmountMode)
+	if input.AmountMode != "per_account" && input.AmountMode != "order_total" {
+		return nil, "", 0, infraerrors.BadRequest("INVALID_AMOUNT_MODE", "amount_mode must be per_account or order_total")
+	}
+	if len(input.Accounts) == 0 || len(input.Accounts) > 500 {
+		return nil, "", 0, infraerrors.BadRequest("INVALID_BATCH_ACCOUNTS", "accounts must contain between 1 and 500 items")
+	}
+	operationKey, err := NormalizeIdempotencyKey(input.OperationKey)
+	if err != nil {
+		return nil, "", 0, err
+	}
+	if operationKey == "" {
+		return nil, "", 0, ErrIdempotencyKeyRequired
+	}
+	if input.CreatedByUserID <= 0 {
+		return nil, "", 0, infraerrors.BadRequest("INVALID_COST_PARTY", "cost creator is required")
+	}
+	if input.ExpectedTokenCount != nil && *input.ExpectedTokenCount <= 0 {
+		return nil, "", 0, infraerrors.BadRequest("INVALID_EXPECTED_TOKEN_COUNT", "expected_token_count must be positive")
+	}
+
+	seen := make(map[int64]struct{}, len(input.Accounts))
+	items := make([]CreateAccountCostInput, len(input.Accounts))
+	for i, account := range input.Accounts {
+		if account.AccountID <= 0 {
+			return nil, "", 0, infraerrors.BadRequest("INVALID_ACCOUNT_ID", "invalid account id")
+		}
+		if _, exists := seen[account.AccountID]; exists {
+			return nil, "", 0, infraerrors.BadRequest("DUPLICATE_BATCH_ACCOUNT", "an account may appear only once in a cost batch")
+		}
+		seen[account.AccountID] = struct{}{}
+		if account.ExpectedTokenCount != nil && *account.ExpectedTokenCount <= 0 {
+			return nil, "", 0, infraerrors.BadRequest("INVALID_EXPECTED_TOKEN_COUNT", "expected_token_count must be positive")
+		}
+		items[i] = input.Common
+		items[i].AccountID = account.AccountID
+		items[i].CreatedByUserID = input.CreatedByUserID
+		items[i].OperationKey = operationKey
+		if i > 0 {
+			items[i].OperationKey += ":" + strconv.FormatInt(account.AccountID, 10)
+		}
+		items[i].ExpectedTokenCount = input.ExpectedTokenCount
+		if account.ExpectedTokenCount != nil {
+			items[i].ExpectedTokenCount = account.ExpectedTokenCount
+		}
+		if account.OriginalAmount != nil {
+			items[i].OriginalAmount = strings.TrimSpace(*account.OriginalAmount)
+		}
+	}
+
+	if input.AmountMode == "per_account" {
+		totalOriginal := decimal.Zero
+		var totalCNY int64
+		for i := range items {
+			items[i], err = normalizePoolCostInput(items[i])
+			if err != nil {
+				return nil, "", 0, err
+			}
+			amount, _ := decimal.NewFromString(items[i].OriginalAmount)
+			totalOriginal = totalOriginal.Add(amount)
+			totalCNY += items[i].CNYAmountMinor
+			items[i].OrderAccountKey = poolCostOrderAccountKey(items[i])
+		}
+		return items, totalOriginal.String(), totalCNY, nil
+	}
+
+	total := input.Common
+	total.AccountID = input.Accounts[0].AccountID
+	total.CreatedByUserID = input.CreatedByUserID
+	total.ExpectedTokenCount = items[0].ExpectedTokenCount
+	total, err = normalizePoolCostInput(total)
+	if err != nil {
+		return nil, "", 0, err
+	}
+	fixedCNY := int64(0)
+	unassigned := make(map[int64]decimal.Decimal)
+	for i, account := range input.Accounts {
+		if account.OriginalAmount == nil {
+			unassigned[account.AccountID] = decimal.NewFromInt(1)
+			continue
+		}
+		items[i], err = normalizePoolCostInput(items[i])
+		if err != nil {
+			return nil, "", 0, err
+		}
+		fixedCNY += items[i].CNYAmountMinor
+	}
+	remaining := total.CNYAmountMinor - fixedCNY
+	if len(unassigned) == 0 && remaining != 0 {
+		return nil, "", 0, infraerrors.BadRequest("ORDER_TOTAL_MISMATCH", "per-account amounts must equal order total")
+	}
+	if (total.CNYAmountMinor > 0 && remaining < 0) || (total.CNYAmountMinor < 0 && remaining > 0) {
+		return nil, "", 0, infraerrors.BadRequest("ORDER_TOTAL_EXCEEDED", "per-account overrides exceed order total")
+	}
+	allocated, _ := AllocateLargestRemainder(remaining, unassigned)
+	rate, _ := decimal.NewFromString(total.FXRate)
+	for i := range items {
+		if _, ok := unassigned[items[i].AccountID]; ok {
+			amount := decimal.NewFromInt(allocated[items[i].AccountID]).Div(decimal.NewFromInt(100)).Div(rate)
+			items[i].OriginalAmount = amount.String()
+			items[i], err = normalizePoolCostInput(items[i])
+			if err != nil {
+				return nil, "", 0, err
+			}
+			if items[i].CNYAmountMinor != allocated[items[i].AccountID] {
+				return nil, "", 0, infraerrors.BadRequest("ORDER_TOTAL_ALLOCATION_FAILED", "order total cannot be allocated exactly with the selected fx rate")
+			}
+		}
+		items[i].OrderAccountKey = poolCostOrderAccountKey(items[i])
+	}
+	return items, total.OriginalAmount, total.CNYAmountMinor, nil
+}
+
+func poolCostOrderAccountKey(input CreateAccountCostInput) string {
+	orderNo := ""
+	if input.OrderNo != nil {
+		orderNo = strings.ToLower(strings.TrimSpace(*input.OrderNo))
+	}
+	if orderNo == "" || (input.EntryType != "purchase" && input.EntryType != "renewal" && input.EntryType != "topup" && input.EntryType != "price_version") {
+		return ""
+	}
+	sourceID := int64(0)
+	if input.PurchaseSourceID != nil {
+		sourceID = *input.PurchaseSourceID
+	}
+	return fmt.Sprintf("%d:%d:%s", input.AccountID, sourceID, orderNo)
+}
+
+func applyCostRecognition(item *AccountCostSummary) {
+	if item == nil {
+		return
+	}
+	_, _, item.PricedExpectedTokens, item.RemainingExpectedTokens = RecognizeAccountCostTranches(item.TotalUsageTokens, item.CostTranches)
+	item.RecognizedCostMinor, item.RemainingCostMinor, item.CostProgress = CalculateAccountCostRecognitionByTranches(
+		item.CostBasisMinor, item.RefundMinor+item.TransferredOutMinor+item.WrittenOffMinor, item.TotalUsageTokens, item.CostTranches,
+	)
+}
+
+// CalculateAccountCostRecognitionByTranches recognizes historical usage against
+// each priced token tranche in purchase order, so later top-ups do not absorb old usage.
+func CalculateAccountCostRecognitionByTranches(costBasisMinor, disposedMinor, usedTokens int64, tranches []AccountCostTranche) (int64, int64, *string) {
+	available := costBasisMinor - disposedMinor
+	if available < 0 {
+		available = 0
+	}
+	states, consumed, totalExpected, _ := RecognizeAccountCostTranches(usedTokens, tranches)
+	var recognized int64
+	for _, state := range states {
+		recognized += state.RecognizedCostMinor
+	}
+	if totalExpected == 0 {
+		return 0, available, nil
+	}
+	if recognized > available {
+		recognized = available
+	}
+	progress := decimal.NewFromInt(consumed).Div(decimal.NewFromInt(totalExpected)).String()
+	return recognized, available - recognized, &progress
+}
+
+// RecognizeAccountCostTranches consumes only usage that happened after a priced
+// tranche existed. Excess usage before a renewal is discarded instead of charging
+// a future purchase.
+func RecognizeAccountCostTranches(usedTokens int64, tranches []AccountCostTranche) ([]AccountCostTrancheRecognition, int64, int64, int64) {
+	priced := make([]AccountCostTranche, 0, len(tranches))
+	timeline := false
+	for _, tranche := range tranches {
+		if tranche.CostMinor <= 0 || tranche.ExpectedTokens <= 0 {
+			continue
+		}
+		priced = append(priced, tranche)
+		timeline = timeline || !tranche.PaidAt.IsZero()
+	}
+	sort.SliceStable(priced, func(i, j int) bool {
+		if priced[i].PaidAt.Equal(priced[j].PaidAt) {
+			return priced[i].ID < priced[j].ID
+		}
+		return priced[i].PaidAt.Before(priced[j].PaidAt)
+	})
+	states := make([]AccountCostTrancheRecognition, 0, len(priced))
+	consume := func(tokens int64) {
+		if tokens <= 0 {
+			return
+		}
+		for i := range states {
+			if tokens == 0 {
+				break
+			}
+			take := states[i].RemainingTokens
+			if take > tokens {
+				take = tokens
+			}
+			states[i].ConsumedTokens += take
+			states[i].RemainingTokens -= take
+			tokens -= take
+		}
+	}
+	for _, tranche := range priced {
+		states = append(states, AccountCostTrancheRecognition{Tranche: tranche, RemainingTokens: tranche.ExpectedTokens})
+		if timeline {
+			consume(tranche.UsageTokens)
+		}
+	}
+	if !timeline {
+		consume(usedTokens)
+	}
+	var consumed, totalExpected, remainingTokens int64
+	for i := range states {
+		state := &states[i]
+		state.RecognizedCostMinor = decimal.NewFromInt(state.Tranche.CostMinor).Mul(decimal.NewFromInt(state.ConsumedTokens)).Div(decimal.NewFromInt(state.Tranche.ExpectedTokens)).Round(0).IntPart()
+		state.RemainingCostMinor = state.Tranche.CostMinor - state.RecognizedCostMinor
+		consumed += state.ConsumedTokens
+		totalExpected += state.Tranche.ExpectedTokens
+		remainingTokens += state.RemainingTokens
+	}
+	return states, consumed, totalExpected, remainingTokens
+}
+
+// CalculateAccountCostRecognition applies the same per-account cost model to
+// ledger summaries and lifecycle disposal.
+func CalculateAccountCostRecognition(costBasisMinor, disposedMinor, usedTokens int64, expectedTokens *int64) (int64, int64, *string) {
+	basis := costBasisMinor
+	if basis < 0 {
+		basis = 0
+	}
+	if disposedMinor < 0 {
+		disposedMinor = 0
+	}
+	available := basis - disposedMinor
+	if available < 0 {
+		available = 0
+	}
+	if expectedTokens == nil || *expectedTokens <= 0 || basis == 0 {
+		return 0, available, nil
+	}
+	used := usedTokens
+	if used < 0 {
+		used = 0
+	}
+	if used > *expectedTokens {
+		used = *expectedTokens
+	}
+	progress := decimal.NewFromInt(used).Div(decimal.NewFromInt(*expectedTokens))
+	progressString := progress.String()
+	recognized := decimal.NewFromInt(basis).Mul(progress).Round(0).IntPart()
+	if recognized > available {
+		recognized = available
+	}
+	return recognized, available - recognized, &progressString
 }
 
 func normalizePoolCostInput(input CreateAccountCostInput) (CreateAccountCostInput, error) {
 	if input.AccountID <= 0 || input.PayerUserID <= 0 || input.CreatedByUserID <= 0 {
 		return input, infraerrors.BadRequest("INVALID_COST_PARTY", "account, payer and creator are required")
 	}
+	if input.SupersedesID != nil {
+		return input, infraerrors.BadRequest("COST_UPDATE_APPROVAL_REQUIRED", "cost corrections must use the approval update flow")
+	}
+	if input.ExpectedTokenCount != nil && *input.ExpectedTokenCount <= 0 {
+		return input, infraerrors.BadRequest("INVALID_EXPECTED_TOKEN_COUNT", "expected_token_count must be positive")
+	}
 	validType := map[string]bool{"purchase": true, "renewal": true, "topup": true, "price_version": true, "refund": true, "adjustment": true}
 	if !validType[input.EntryType] {
 		return input, infraerrors.BadRequest("INVALID_COST_TYPE", "invalid cost entry type")
+	}
+	if input.EntryType != "refund" && input.EntryType != "adjustment" && input.ExpectedTokenCount == nil {
+		return input, infraerrors.BadRequest("EXPECTED_TOKEN_COUNT_REQUIRED", "expected_token_count is required for cost entries")
 	}
 	if !input.ServiceEnd.After(input.ServiceStart) {
 		return input, infraerrors.BadRequest("INVALID_SERVICE_PERIOD", "service_end must be after service_start")
@@ -396,6 +835,9 @@ func normalizePoolCostInput(input CreateAccountCostInput) (CreateAccountCostInpu
 	}
 	// The server owns the accounting amount; callers cannot provide a conflicting CNY value.
 	input.CNYAmountMinor = amount.Mul(rate).Mul(decimal.NewFromInt(100)).Round(0).IntPart()
+	if input.CNYAmountMinor > 0 && input.ExpectedTokenCount == nil {
+		return input, infraerrors.BadRequest("EXPECTED_TOKEN_COUNT_REQUIRED", "expected_token_count is required for positive cost entries")
+	}
 	if input.EntryType == "refund" {
 		if !amount.IsNegative() || input.CNYAmountMinor >= 0 {
 			return input, infraerrors.BadRequest("INVALID_REFUND_AMOUNT", "refund amounts must be negative")
@@ -413,31 +855,14 @@ func (s *PoolService) ListLifecycle(ctx context.Context, accountID *int64) ([]Ac
 }
 
 func (s *PoolService) CreateLifecycle(ctx context.Context, input CreateLifecycleEventInput) (*AccountLifecycleEvent, error) {
-	valid := map[string]bool{"banned_confirmed": true, "recovered": true, "refund": true, "replaced": true, "retired": true}
+	valid := map[string]bool{"banned_confirmed": true, "recovered": true, "retired": true}
 	if input.AccountID <= 0 || input.CreatedByUserID <= 0 || !valid[input.EventType] {
 		return nil, infraerrors.BadRequest("INVALID_LIFECYCLE_EVENT", "invalid lifecycle event")
 	}
-	if input.EventType == "replaced" {
-		if input.ReplacementAccountID == nil || *input.ReplacementAccountID <= 0 || input.TransferredCostMinor < 0 || (input.TransferredCostMinor > 0 && input.PayerUserID == nil) {
-			return nil, infraerrors.BadRequest("INVALID_REPLACEMENT", "replacement account and transfer payer are required")
-		}
-		if *input.ReplacementAccountID == input.AccountID {
-			return nil, infraerrors.BadRequest("INVALID_REPLACEMENT", "replacement account must be different")
-		}
-	} else {
-		input.ReplacementAccountID = nil
-		input.TransferredCostMinor = 0
-	}
-	if input.EventType == "refund" {
-		if input.RefundAmountMinor < 0 || (input.RefundAmountMinor > 0 && input.PayerUserID == nil) {
-			return nil, infraerrors.BadRequest("INVALID_REFUND", "refund amount and payer are invalid")
-		}
-	} else {
-		input.RefundAmountMinor = 0
-	}
-	if input.TransferredCostMinor == 0 && input.RefundAmountMinor == 0 {
-		input.PayerUserID = nil
-	}
+	input.ReplacementAccountID = nil
+	input.TransferredCostMinor = 0
+	input.RefundAmountMinor = 0
+	input.PayerUserID = nil
 	return s.repo.CreateLifecycle(ctx, input)
 }
 
@@ -488,7 +913,10 @@ func ResolveSettlementPeriod(periodType, startDate, endDate string) (SettlementP
 }
 
 func (s *PoolService) RecalculateSettlement(ctx context.Context, period SettlementPeriod, actorID int64) (*PoolSettlement, error) {
-	costs, weights, coverage, carrySnapshot, err := s.repo.SettlementInputs(ctx, period.Start, period.End)
+	if err := validateSettlementFilter(period.Filter); err != nil {
+		return nil, err
+	}
+	costs, weights, coverage, carrySnapshot, err := s.repo.SettlementInputs(ctx, period.Start, period.End, period.Filter)
 	if err != nil {
 		return nil, err
 	}
@@ -566,18 +994,27 @@ func (s *PoolService) RecalculateSettlement(ctx context.Context, period Settleme
 		return nil, err
 	}
 	pricingCoverage := decimal.NewFromInt(1)
-	if coverage.CandidateCount > 0 {
-		pricingCoverage = decimal.NewFromInt(coverage.CandidateCount - coverage.UnpricedCount).
-			Div(decimal.NewFromInt(coverage.CandidateCount))
+	if coverage.CandidateMaterial > 0 {
+		pricingCoverage = decimal.NewFromInt(coverage.CandidateMaterial - coverage.UnpricedMaterial).
+			Div(decimal.NewFromInt(coverage.CandidateMaterial))
 	}
 	settlement := &PoolSettlement{
 		PeriodType: period.Type, PeriodStart: period.Start, PeriodEnd: period.End, Timezone: period.Timezone,
 		Status: "draft", PeriodCostMinor: periodCost, CarryInMinor: carryIn, CarryOutMinor: carryOut,
 		TotalCostMinor: totalCost, TotalUsageWeight: totalWeight.String(), PricingCoverage: pricingCoverage.String(),
 		UnpricedCount: coverage.UnpricedCount, FXRate: fxRate.String(),
-		FormulaVersion: "v1", CostSnapshot: snapshot, GeneratedBy: actorID, Lines: lines,
+		FormulaVersion: "v1", CostSnapshot: snapshot, FilterSnapshot: period.Filter, GeneratedBy: actorID, Lines: lines,
 	}
 	return s.repo.SaveDraftSettlement(ctx, settlement)
+}
+
+func validateSettlementFilter(filter SettlementFilterSnapshot) error {
+	for _, id := range []*int64{filter.AccountID, filter.UploaderUserID, filter.PayerUserID, filter.PurchaseSourceID} {
+		if id != nil && *id <= 0 {
+			return infraerrors.BadRequest("INVALID_SETTLEMENT_FILTER", "settlement filter ids must be positive")
+		}
+	}
+	return nil
 }
 
 func proratedCostMinor(item PoolCostSlice, start, end time.Time, previouslyAllocated int64) int64 {
@@ -683,13 +1120,13 @@ func (s *PoolService) LockSettlement(ctx context.Context, id, actorID int64) (*P
 	if err != nil || coverage.LessThan(decimal.RequireFromString("0.99")) {
 		return nil, infraerrors.Conflict("SETTLEMENT_PRICING_INCOMPLETE", "pricing coverage must reach 99% before locking")
 	}
-	if item.Status == "locked" {
+	if item.Status != "draft" {
 		return item, nil
 	}
 	// Lock only a freshly rebuilt draft; repository locking verifies the live cost,
 	// usage and FX inputs again under PostgreSQL table locks.
 	fresh, err := s.RecalculateSettlement(ctx, SettlementPeriod{
-		Type: item.PeriodType, Start: item.PeriodStart, End: item.PeriodEnd, Timezone: item.Timezone,
+		Type: item.PeriodType, Start: item.PeriodStart, End: item.PeriodEnd, Timezone: item.Timezone, Filter: item.FilterSnapshot,
 	}, actorID)
 	if err != nil {
 		return nil, err
@@ -711,12 +1148,71 @@ func (s *PoolService) GetSettlement(ctx context.Context, id int64) (*PoolSettlem
 	return s.repo.GetSettlement(ctx, id)
 }
 
+func (s *PoolService) ListOwnPendingSettlements(ctx context.Context, userID int64) ([]PoolSettlement, error) {
+	if userID <= 0 {
+		return nil, infraerrors.BadRequest("SETTLEMENT_CONFIRMATION_ACTOR_REQUIRED", "a signed-in member is required")
+	}
+	items, _, err := s.repo.ListSettlements(ctx, 1000, 0)
+	if err != nil {
+		return nil, err
+	}
+	pending := make([]PoolSettlement, 0)
+	for _, item := range items {
+		if item.Status != "locked" {
+			continue
+		}
+		for _, line := range item.Lines {
+			if line.UserID == userID && line.NetAmountMinor != 0 && line.ConfirmationStatus != "confirmed" {
+				item.Lines = []PoolSettlementLine{line}
+				item.CostSnapshot = nil
+				item.FilterSnapshot = SettlementFilterSnapshot{}
+				pending = append(pending, item)
+				break
+			}
+		}
+	}
+	return pending, nil
+}
+
+func (s *PoolService) ConfirmSettlementLine(ctx context.Context, id, userID, actorID int64) (*PoolSettlement, error) {
+	if id <= 0 || userID <= 0 || actorID <= 0 {
+		return nil, infraerrors.BadRequest("SETTLEMENT_CONFIRMATION_ACTOR_REQUIRED", "a settlement member and signed-in actor are required")
+	}
+	if userID != actorID && !s.IsPrimaryAdmin(ctx, actorID) {
+		return nil, infraerrors.Forbidden("SETTLEMENT_CONFIRMATION_FORBIDDEN", "only the primary administrator can resolve another member's line")
+	}
+	if err := s.repo.ConfirmSettlementLine(ctx, id, userID, actorID); err != nil {
+		return nil, err
+	}
+	return s.repo.GetSettlement(ctx, id)
+}
+
+func (s *PoolService) ConfirmOwnSettlementLine(ctx context.Context, id, actorID int64) error {
+	if id <= 0 {
+		return ErrPoolSettlementNotFound
+	}
+	if actorID <= 0 {
+		return infraerrors.BadRequest("SETTLEMENT_CONFIRMATION_ACTOR_REQUIRED", "a signed-in member is required")
+	}
+	return s.repo.ConfirmSettlementLine(ctx, id, actorID, actorID)
+}
+
+func (s *PoolService) MarkSettlementPaid(ctx context.Context, id, actorID int64) (*PoolSettlement, error) {
+	if id <= 0 {
+		return nil, ErrPoolSettlementNotFound
+	}
+	if actorID <= 0 {
+		return nil, infraerrors.BadRequest("SETTLEMENT_PAID_ACTOR_REQUIRED", "a signed-in administrator is required")
+	}
+	if err := s.repo.MarkSettlementPaid(ctx, id, actorID); err != nil {
+		return nil, err
+	}
+	return s.repo.GetSettlement(ctx, id)
+}
+
 func (s *PoolService) GetRecovery(ctx context.Context, start, end time.Time) (*PoolRecoveryOverview, error) {
 	if !end.After(start) {
 		return nil, infraerrors.BadRequest("INVALID_RECOVERY_PERIOD", "end_at must be after start_at")
-	}
-	if _, err := s.repo.LatestFXRate(ctx, end); err != nil {
-		return nil, err
 	}
 	accounts, err := s.repo.GetRecovery(ctx, start, end)
 	if err != nil {

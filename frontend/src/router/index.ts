@@ -515,6 +515,18 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/admin/accounts/cost-ledger',
+    name: 'AdminSharedPoolLedger',
+    component: () => import('@/views/admin/SharedPoolLedgerView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      title: 'Account Cost Ledger',
+      titleKey: 'admin.sharedPool.ledger.title',
+      descriptionKey: 'admin.sharedPool.ledger.subtitle'
+    }
+  },
+  {
     path: '/admin/shared-pool',
     name: 'AdminSharedPool',
     redirect: (to) => ({ path: '/admin/accounts', query: to.query })

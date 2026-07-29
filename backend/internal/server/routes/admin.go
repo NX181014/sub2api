@@ -142,6 +142,9 @@ func registerPoolRoutes(admin *gin.RouterGroup, h *handler.Handlers, stepUpAuth 
 		pool.POST("/sources", h.Admin.Pool.CreateSource)
 		pool.GET("/costs", h.Admin.Pool.ListCosts)
 		pool.POST("/costs", h.Admin.Pool.CreateCost)
+		pool.GET("/cost-entries", h.Admin.Pool.ListCostEntries)
+		pool.GET("/cost-summaries", h.Admin.Pool.ListCostSummaries)
+		pool.POST("/costs/batch", h.Admin.Pool.CreateCostsBatch)
 		pool.GET("/lifecycle", h.Admin.Pool.ListLifecycle)
 		pool.POST("/lifecycle", h.Admin.Pool.CreateLifecycle)
 		pool.GET("/fx-rates", h.Admin.Pool.ListFXRates)
@@ -151,6 +154,8 @@ func registerPoolRoutes(admin *gin.RouterGroup, h *handler.Handlers, stepUpAuth 
 		pool.GET("/settlements/:id", h.Admin.Pool.GetSettlement)
 		pool.POST("/settlements/:id/recalculate", h.Admin.Pool.RecalculateSettlement)
 		pool.POST("/settlements/:id/lock", h.Admin.Pool.LockSettlement)
+		pool.POST("/settlements/:id/confirm", h.Admin.Pool.ConfirmSettlementLine)
+		pool.POST("/settlements/:id/paid", h.Admin.Pool.MarkSettlementPaid)
 	}
 }
 

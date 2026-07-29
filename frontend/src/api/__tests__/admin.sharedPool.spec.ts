@@ -6,11 +6,17 @@ vi.mock('@/api/client', () => ({ apiClient: { get, post } }))
 
 import {
   approveApproval,
+  createBatchCosts,
   createAccountIntake,
   createApproval,
   createCost,
+  confirmSettlement,
   getOverview,
   listAccountCosts,
+  listCostSummaries,
+  listLedgerEntries,
+  markSettlementPaid,
+  previewSettlement,
   listApprovals,
   revealApproval
 } from '@/api/admin/sharedPool'
@@ -32,6 +38,7 @@ describe('admin shared-pool API', () => {
       purchase_source_name: 'Source',
       entry_type: 'purchase' as const,
       original_amount: '20',
+      expected_token_count: 1_000_000,
       currency: 'CNY',
       fx_rate: '1',
       cny_amount_minor: 2000,
@@ -57,6 +64,7 @@ describe('admin shared-pool API', () => {
     const payload = {
       provider_identity: 'provider@example.com', contributor_user_id: 7, uploader_user_id: 8,
       purchase_source_name: 'Source', entry_type: 'purchase' as const, original_amount: '20',
+      expected_token_count: 1_000_000,
       currency: 'CNY', fx_rate: '1', cny_amount_minor: 2000,
       service_start: '2026-07-01', service_end: '2026-08-01'
     }
@@ -76,6 +84,7 @@ describe('admin shared-pool API', () => {
       purchase_source_id: 3,
       entry_type: 'renewal' as const,
       original_amount: '20.00',
+      expected_token_count: 1_000_000,
       currency: 'CNY',
       fx_rate: '1',
       service_start: '2026-08-01',
@@ -91,6 +100,87 @@ describe('admin shared-pool API', () => {
       headers: { 'Idempotency-Key': 'pool-cost-42-33333333-3333-4333-8333-333333333333' }
     })
     expect(post.mock.calls[0][2]).toEqual(post.mock.calls[1][2])
+  })
+
+  it('submits a batch cost with one retry-safe operation key', async () => {
+    vi.spyOn(globalThis.crypto, 'randomUUID').mockReturnValue('44444444-4444-4444-8444-444444444444')
+    const payload = {
+      amount_mode: 'per_account' as const,
+      common: {
+        payer_user_id: 7,
+        entry_type: 'purchase' as const,
+        original_amount: '10.00',
+        currency: 'CNY',
+        service_start: '2026-07-01',
+        service_end: '2026-08-01',
+        expected_token_count: 1000000
+      },
+      accounts: [
+        { account_id: 41, original_amount: '10.00', expected_token_count: 1000000 },
+        { account_id: 42, original_amount: '10.00', expected_token_count: 1000000 }
+      ]
+    }
+    post.mockRejectedValueOnce(new Error('network timeout'))
+    await expect(createBatchCosts(payload)).rejects.toThrow('network timeout')
+    post.mockResolvedValueOnce({ data: { amount_mode: 'per_account', account_count: 2, total_original_amount: '20.00', total_cny_amount_minor: 2000, entries: [] } })
+
+    await expect(createBatchCosts(payload)).resolves.toMatchObject({ account_count: 2 })
+    expect(post.mock.calls[0][2]).toEqual(post.mock.calls[1][2])
+    expect(post.mock.calls[1][2].headers['Idempotency-Key']).toBe('pool-cost-batch-44444444-4444-4444-8444-444444444444')
+  })
+
+  it('passes ledger filters to paginated server endpoints', async () => {
+    const page = { items: [], total: 0, page: 2, page_size: 50, pages: 1 }
+    get.mockResolvedValueOnce({ data: page }).mockResolvedValueOnce({ data: page })
+
+    await expect(listCostSummaries({ page: 2, page_size: 50, uploader_user_id: 8, has_cost: true })).resolves.toEqual(page)
+    expect(get).toHaveBeenNthCalledWith(1, '/admin/pool/cost-summaries', {
+      params: { page: 2, page_size: 50, uploader_user_id: 8, has_cost: true }
+    })
+
+    await expect(listLedgerEntries({ page: 2, page_size: 50, search: 'order-1', entry_type: 'renewal' })).resolves.toEqual(page)
+    expect(get).toHaveBeenNthCalledWith(2, '/admin/pool/cost-entries', {
+      params: { page: 2, page_size: 50, search: 'order-1', entry_type: 'renewal' }
+    })
+  })
+
+  it('confirms only the current member endpoint and maps confirmation state', async () => {
+    const settlement = {
+      id: 9, period_type: 'month', period_start: '2026-07-01T00:00:00Z', period_end: '2026-08-01T00:00:00Z',
+      status: 'locked', total_cost_minor: 1200, carry_out_minor: 0, total_usage_weight: '1',
+      pricing_coverage: '1', unpriced_usage_count: 0, fx_rate: '1',
+      lines: [{
+        user_id: 23, user_email: 'member@example.com', username: 'member', usage_weight: '1', usage_share: '1',
+        allocated_cost_minor: 1200, contribution_credit_minor: 0, adjustment_minor: 0, net_amount_minor: 1200,
+        payment_status: 'unpaid', confirmation_status: 'confirmed', confirmed_by_user_id: 23, confirmed_at: '2026-07-28T00:00:00Z'
+      }]
+    }
+    post.mockResolvedValueOnce({ data: settlement }).mockResolvedValueOnce({ data: { ...settlement, status: 'paid' } })
+
+    await expect(confirmSettlement(9)).resolves.toMatchObject({
+      status: 'locked', lines: [{ user_id: 23, confirmation_status: 'confirmed', confirmed_by_user_id: 23 }]
+    })
+    expect(post).toHaveBeenNthCalledWith(1, '/admin/pool/settlements/9/confirm')
+    await expect(markSettlementPaid(9)).resolves.toMatchObject({ status: 'paid' })
+    expect(post).toHaveBeenNthCalledWith(2, '/admin/pool/settlements/9/paid')
+  })
+
+  it('sends the selected settlement scope to the draft endpoint', async () => {
+    post.mockResolvedValueOnce({ data: {
+      id: 7, period_type: 'custom', period_start: '2026-07-01T00:00:00Z', period_end: '2026-07-08T00:00:00Z',
+      status: 'draft', total_cost_minor: 0, carry_out_minor: 0, total_usage_weight: '0', pricing_coverage: '1',
+      unpriced_usage_count: 0, fx_rate: '1', lines: []
+    } })
+
+    await previewSettlement({
+      start: '2026-07-01', end: '2026-07-07', period_type: 'custom',
+      account_id: 9, uploader_user_id: 8, payer_user_id: 7, purchase_source_id: 6
+    })
+
+    expect(post).toHaveBeenCalledWith('/admin/pool/settlements/draft', {
+      period_type: 'custom', start_date: '2026-07-01', end_date: '2026-07-07',
+      account_id: 9, uploader_user_id: 8, payer_user_id: 7, purchase_source_id: 6
+    })
   })
 
   it('keeps exact per-account payback fields', async () => {
