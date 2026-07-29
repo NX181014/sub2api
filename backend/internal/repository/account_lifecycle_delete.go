@@ -100,9 +100,6 @@ func hardDeleteAccountFamily(ctx context.Context, exec accountDeleteExecutor, id
 		{`DELETE FROM pool_settlements s WHERE s.filter_snapshot->>'account_id'=ANY($1::text[]) OR EXISTS (
 			SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(s.cost_snapshot)='array' THEN s.cost_snapshot ELSE '[]'::jsonb END) item
 			WHERE item->>'account_id'=ANY($1::text[]))`, []any{pq.Array(textIDs)}},
-		{`DELETE FROM ops_retry_attempts r WHERE r.pinned_account_id=ANY($1) OR r.used_account_id=ANY($1)
-			OR r.source_error_id IN (SELECT id FROM ops_error_logs WHERE account_id=ANY($1))
-			OR r.result_error_id IN (SELECT id FROM ops_error_logs WHERE account_id=ANY($1))`, []any{idArray}},
 		{`DELETE FROM batch_image_jobs WHERE account_id=ANY($1)`, []any{idArray}},
 		{`DELETE FROM ops_system_logs WHERE account_id=ANY($1)`, []any{idArray}},
 		{`DELETE FROM ops_error_logs WHERE account_id=ANY($1)`, []any{idArray}},
@@ -117,27 +114,27 @@ func hardDeleteAccountFamily(ctx context.Context, exec accountDeleteExecutor, id
 			OR payload#>>'{delete_options,replacement_account_id}'=ANY($2::text[])
 			OR change_summary#>>'{fields,replacement_account_id,after}'=ANY($2::text[])`, []any{idArray, pq.Array(textIDs)}},
 		{`UPDATE channel_account_stats_pricing_rules SET account_ids=ARRAY(
-			SELECT id FROM unnest(account_ids) id WHERE NOT id=ANY($1)) WHERE account_ids && $1`, []any{idArray}},
+			SELECT account_id FROM unnest(account_ids) AS account_id WHERE NOT account_id=ANY($1)) WHERE account_ids && $1`, []any{idArray}},
 		{`UPDATE groups g SET model_routing=(
 			SELECT COALESCE(jsonb_object_agg(entry.key, (
-				SELECT COALESCE(jsonb_agg(value), '[]'::jsonb)
-				FROM jsonb_array_elements(entry.value) value
-				WHERE value::text<>ALL($1::text[])
+				SELECT COALESCE(jsonb_agg(route.value), '[]'::jsonb)
+				FROM jsonb_array_elements(entry.value) AS route(value)
+				WHERE route.value::text<>ALL($1::text[])
 			)), '{}'::jsonb)
 			FROM jsonb_each(COALESCE(g.model_routing, '{}'::jsonb)) entry
 		) WHERE EXISTS (
 			SELECT 1 FROM jsonb_each(COALESCE(g.model_routing, '{}'::jsonb)) entry
-			CROSS JOIN LATERAL jsonb_array_elements(entry.value) value
-			WHERE value::text=ANY($1::text[]))`, []any{pq.Array(textIDs)}},
+			CROSS JOIN LATERAL jsonb_array_elements(entry.value) AS route(value)
+			WHERE route.value::text=ANY($1::text[]))`, []any{pq.Array(textIDs)}},
 		{`UPDATE accounts SET extra=COALESCE(extra, '{}'::jsonb)-'linked_openai_account_id',updated_at=NOW()
 			WHERE extra->>'linked_openai_account_id'=ANY($1::text[]) AND NOT id=ANY($2)`, []any{pq.Array(textIDs), idArray}},
 		{`DELETE FROM scheduler_outbox o WHERE account_id=ANY($1) OR EXISTS (
-			SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(o.payload->'account_ids')='array' THEN o.payload->'account_ids' ELSE '[]'::jsonb END) id
-			WHERE id::text=ANY($2::text[]))`, []any{idArray, pq.Array(textIDs)}},
+			SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(o.payload->'account_ids')='array' THEN o.payload->'account_ids' ELSE '[]'::jsonb END) AS payload_id(value)
+			WHERE payload_id.value::text=ANY($2::text[]))`, []any{idArray, pq.Array(textIDs)}},
 		{`DELETE FROM accounts WHERE id=ANY($1) AND id<>$2`, []any{idArray, ids[len(ids)-1]}},
 		{`DELETE FROM accounts WHERE id=$1`, []any{ids[len(ids)-1]}},
 		{`INSERT INTO scheduler_outbox(event_type,account_id)
-			SELECT $2,id FROM unnest($1::bigint[]) id`, []any{idArray, service.SchedulerOutboxEventAccountChanged}},
+			SELECT $2,account_id FROM unnest($1::bigint[]) AS account_id`, []any{idArray, service.SchedulerOutboxEventAccountChanged}},
 	}
 	for _, query := range queries {
 		if _, err := exec.ExecContext(ctx, query.sql, query.args...); err != nil {

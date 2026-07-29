@@ -25,7 +25,6 @@ func TestDeleteAccountWithLifecycleHardDeletesFamily(t *testing.T) {
 	)
 	for _, query := range []string{
 		`DELETE FROM pool_settlements`,
-		`DELETE FROM ops_retry_attempts`,
 		`DELETE FROM batch_image_jobs`,
 		`DELETE FROM ops_system_logs`,
 		`DELETE FROM ops_error_logs`,
