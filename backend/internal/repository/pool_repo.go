@@ -57,7 +57,7 @@ func (r *poolRepository) ListAccounts(ctx context.Context) ([]service.PoolAccoun
 	if err != nil {
 		return nil, fmt.Errorf("list pool accounts: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	items := make([]service.PoolAccount, 0)
 	for rows.Next() {
 		item, scanErr := scanPoolAccount(rows)
@@ -111,7 +111,7 @@ func (r *poolRepository) ListSources(ctx context.Context) ([]service.PurchaseSou
 	if err != nil {
 		return nil, fmt.Errorf("list purchase sources: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	items := make([]service.PurchaseSource, 0)
 	for rows.Next() {
 		var item service.PurchaseSource
@@ -178,7 +178,7 @@ func (r *poolRepository) ListCosts(ctx context.Context, accountID *int64) ([]ser
 	if err != nil {
 		return nil, fmt.Errorf("list account costs: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	items := make([]service.AccountCostEntry, 0)
 	for rows.Next() {
 		item, scanErr := scanCost(rows)
