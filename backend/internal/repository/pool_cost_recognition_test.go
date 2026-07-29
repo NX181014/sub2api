@@ -11,6 +11,16 @@ import (
 
 const pricedTranchesJSON = `[{"cost_minor":10000,"expected_tokens":1000},{"cost_minor":30000,"expected_tokens":1000}]`
 
+func TestDecodePoolCostTranchesAcceptsPostgresDates(t *testing.T) {
+	items, err := decodePoolCostTranches([]byte(`[{"id":9,"cost_minor":10000,"expected_tokens":1000,"paid_at":"2026-07-29T10:00:00+08:00","service_start":"2026-08-01","service_end":"2026-09-01"}]`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 || items[0].ServiceStart.Format(time.DateOnly) != "2026-08-01" || items[0].ServiceEnd.Format(time.DateOnly) != "2026-09-01" {
+		t.Fatalf("unexpected decoded tranche: %#v", items)
+	}
+}
+
 func TestPoolCostRecognitionQueriesUsePricedTranches(t *testing.T) {
 	t.Run("cost summary", func(t *testing.T) {
 		db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherRegexp))
