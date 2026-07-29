@@ -178,7 +178,7 @@ func (r *poolApprovalRepository) GetApproval(ctx context.Context, id int64, forU
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	if !rows.Next() {
 		if err := rows.Err(); err != nil {
 			return nil, err
@@ -197,7 +197,7 @@ func (r *poolApprovalRepository) LockAccount(ctx context.Context, accountID int6
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	if !rows.Next() {
 		if err := rows.Err(); err != nil {
 			return err
@@ -214,7 +214,7 @@ FROM accounts WHERE id=$1 AND deleted_at IS NULL`, accountID)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	if !rows.Next() {
 		if err := rows.Err(); err != nil {
 			return nil, err
@@ -433,7 +433,7 @@ func (r *poolApprovalRepository) LoadCredentials(ctx context.Context, accountID 
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	if !rows.Next() {
 		if err := rows.Err(); err != nil {
 			return nil, err

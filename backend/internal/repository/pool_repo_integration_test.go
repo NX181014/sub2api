@@ -40,6 +40,10 @@ func TestPoolRepository_GetRecoveryKeepsPhysicalAccountsSeparate(t *testing.T) {
 		SetCostSharingEnabled(true).
 		Save(ctx)
 	require.NoError(t, err)
+	_, err = integrationEntClient.Account.UpdateOneID(replacement.ID).
+		SetCostSharingEnabled(true).
+		Save(ctx)
+	require.NoError(t, err)
 
 	repo := NewPoolRepository(integrationDB)
 	source, err := repo.CreateSource(ctx, service.CreatePurchaseSourceInput{Name: fmt.Sprintf("pool-source-%d", stamp)})
