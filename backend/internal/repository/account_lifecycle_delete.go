@@ -74,7 +74,7 @@ FOR UPDATE`, accountID)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	ids := make([]int64, 0, 2)
 	for rows.Next() {
 		var id int64

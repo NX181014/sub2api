@@ -1433,8 +1433,3 @@ func finalizeAccountRecovery(item *service.AccountRecovery, end time.Time) {
 }
 
 var _ service.PoolRepository = (*poolRepository)(nil)
-
-// Keep source names stable for grouping while preserving their display form.
-func normalizePurchaseSourceName(name string) string {
-	return strings.Join(strings.Fields(strings.TrimSpace(name)), " ")
-}

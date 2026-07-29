@@ -754,7 +754,7 @@ func validatePoolApprovalDecisionActor(item *PoolApproval, actorID int64, actorI
 	if item == nil || actorID <= 0 {
 		return infraerrors.BadRequest("INVALID_APPROVAL_DECISION", "approval and actor are required")
 	}
-	if actorID == item.RequestedByUserID && !(item.PrimaryBypass && actorIsPrimary) {
+	if actorID == item.RequestedByUserID && (!item.PrimaryBypass || !actorIsPrimary) {
 		return infraerrors.Forbidden("APPROVAL_SELF_DECISION_FORBIDDEN", "requester cannot approve or reject their own request")
 	}
 	return nil

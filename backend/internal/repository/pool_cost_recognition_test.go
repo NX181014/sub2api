@@ -17,7 +17,7 @@ func TestPoolCostRecognitionQueriesUsePricedTranches(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		defer db.Close()
+		defer func() { _ = db.Close() }()
 		mock.ExpectQuery(`SELECT COUNT`).WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
 		mock.ExpectQuery(`WITH filtered AS`).WithArgs(20, 0).WillReturnRows(sqlmock.NewRows([]string{
 			"id", "name", "identity", "status", "uploader_id", "uploader", "uploader_username", "contributor_id", "contributor", "expected",
@@ -41,7 +41,7 @@ func TestPoolCostRecognitionQueriesUsePricedTranches(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		defer db.Close()
+		defer func() { _ = db.Close() }()
 		mock.ExpectQuery(`SELECT a.id,uploader.email`).WithArgs(int64(9)).WillReturnRows(sqlmock.NewRows([]string{
 			"id", "uploader", "uploader_username", "expected", "basis", "refund", "transferred", "written_off", "net", "tranches", "usage", "lifecycle",
 		}).AddRow(9, nil, nil, 2000, 40000, 0, 0, 0, 40000, pricedTranchesJSON, 1000, "active"))
@@ -60,7 +60,7 @@ func TestPoolCostRecognitionQueriesUsePricedTranches(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		defer db.Close()
+		defer func() { _ = db.Close() }()
 		end := time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)
 		mock.ExpectQuery(`WITH RECURSIVE pool_accounts AS`).WithArgs(end).WillReturnRows(sqlmock.NewRows([]string{
 			"id", "name", "identity", "uploader_id", "uploader_username", "uploaded_at", "source", "lifecycle", "basis", "value", "avg_tokens", "purchased_at", "banned_at",

@@ -16,13 +16,3 @@ func decodePoolCostTranches(raw []byte) ([]service.AccountCostTranche, error) {
 	}
 	return tranches, nil
 }
-
-func poolCostTrancheExpectedTokens(tranches []service.AccountCostTranche) int64 {
-	var total int64
-	for _, tranche := range tranches {
-		if tranche.CostMinor > 0 && tranche.ExpectedTokens > 0 {
-			total += tranche.ExpectedTokens
-		}
-	}
-	return total
-}

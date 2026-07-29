@@ -157,7 +157,7 @@ func (r *poolApprovalRepository) ListApprovals(ctx context.Context, filter servi
 	if err != nil {
 		return nil, 0, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	items := make([]service.PoolApproval, 0, limit)
 	for rows.Next() {
 		item, scanErr := scanPoolApproval(rows)

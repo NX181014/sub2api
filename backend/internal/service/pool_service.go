@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"sort"
 	"strconv"
@@ -1313,16 +1312,4 @@ func decimalRatio(numerator, denominator int64) string {
 		return "0"
 	}
 	return decimal.NewFromInt(numerator).Div(decimal.NewFromInt(denominator)).String()
-}
-
-func marshalCostSnapshot(items []SettlementCostSnapshot) ([]byte, error) { return json.Marshal(items) }
-func unmarshalCostSnapshot(raw []byte) ([]SettlementCostSnapshot, error) {
-	var items []SettlementCostSnapshot
-	if len(raw) == 0 {
-		return items, nil
-	}
-	if err := json.Unmarshal(raw, &items); err != nil {
-		return nil, fmt.Errorf("decode settlement cost snapshot: %w", err)
-	}
-	return items, nil
 }

@@ -1027,7 +1027,7 @@ WHERE a.id IN (`+strings.Join(placeholders, ",")+`)`, args...)
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	for rows.Next() {
 		var (
