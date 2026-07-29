@@ -168,13 +168,14 @@ type AccountCostTrancheRecognition struct {
 }
 
 type AccountCostSummaryFilter struct {
-	Search           string
-	UploaderUserID   *int64
-	PayerUserID      *int64
-	PurchaseSourceID *int64
-	LifecycleStatus  string
-	EntryType        string
-	HasCost          *bool
+	Search             string
+	UploaderUserID     *int64
+	UploaderUnassigned bool
+	PayerUserID        *int64
+	PurchaseSourceID   *int64
+	LifecycleStatus    string
+	EntryType          string
+	HasCost            *bool
 }
 
 type AccountCostEntryFilter struct {
@@ -398,6 +399,16 @@ type PurchaseSourceRecovery struct {
 	RankEligible        bool   `json:"rank_eligible"`
 }
 
+type AccountCostUploaderSummary struct {
+	UploaderUserID      *int64  `json:"uploader_user_id"`
+	UploaderEmail       *string `json:"uploader_email"`
+	UploaderUsername    *string `json:"uploader_username"`
+	AccountCount        int64   `json:"account_count"`
+	NetCostMinor        int64   `json:"net_cost_minor"`
+	RecognizedCostMinor int64   `json:"recognized_cost_minor"`
+	RemainingCostMinor  int64   `json:"remaining_cost_minor"`
+}
+
 type PoolRecoveryOverview struct {
 	Start             time.Time                `json:"start_at"`
 	End               time.Time                `json:"end_at"`
@@ -421,6 +432,7 @@ type PoolRepository interface {
 	CreateCost(ctx context.Context, input CreateAccountCostInput) (*AccountCostEntry, error)
 	ListCostEntries(ctx context.Context, filter AccountCostEntryFilter, limit, offset int) ([]AccountCostEntry, int64, error)
 	ListCostSummaries(ctx context.Context, filter AccountCostSummaryFilter, limit, offset int) ([]AccountCostSummary, int64, error)
+	ListCostUploaderSummaries(ctx context.Context, filter AccountCostSummaryFilter, limit, offset int) ([]AccountCostUploaderSummary, int64, error)
 	CreateCostsBatch(ctx context.Context, inputs []CreateAccountCostInput) ([]AccountCostEntry, error)
 	CreateAccountIntake(ctx context.Context, input CreateAccountIntakeInput) (*AccountIntakeResult, error)
 	ListLifecycle(ctx context.Context, accountID *int64) ([]AccountLifecycleEvent, error)
@@ -532,6 +544,19 @@ func (s *PoolService) ListCostSummaries(ctx context.Context, filter AccountCostS
 		applyCostRecognition(&items[i])
 	}
 	return items, total, nil
+}
+
+func (s *PoolService) ListCostUploaderSummaries(ctx context.Context, filter AccountCostSummaryFilter, page, pageSize int) ([]AccountCostUploaderSummary, int64, error) {
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 || pageSize > 100 {
+		pageSize = 20
+	}
+	filter.Search = strings.TrimSpace(filter.Search)
+	filter.LifecycleStatus = strings.TrimSpace(filter.LifecycleStatus)
+	filter.EntryType = strings.TrimSpace(filter.EntryType)
+	return s.repo.ListCostUploaderSummaries(ctx, filter, pageSize, (page-1)*pageSize)
 }
 
 func (s *PoolService) CreateCostsBatch(ctx context.Context, input BatchCreateAccountCostsInput) (*BatchCreateAccountCostsResult, error) {

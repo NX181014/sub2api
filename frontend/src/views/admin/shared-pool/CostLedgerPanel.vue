@@ -47,18 +47,19 @@
       </div>
 
       <div class="space-y-3 p-3 sm:p-4">
-        <article v-for="group in summaryUploaderGroups" :key="group.key" class="overflow-hidden rounded-lg border border-gray-200 dark:border-dark-700">
-          <button type="button" class="flex min-h-14 w-full items-center justify-between gap-3 px-3 py-2 text-left sm:px-4" @click="toggleUploaderGroup(group.key)">
-            <span class="min-w-0"><span class="block truncate font-semibold text-gray-900 dark:text-white">{{ group.name }}</span><span class="block text-xs text-gray-500 dark:text-gray-400">{{ group.items.length }} {{ t('admin.sharedPool.columns.accounts') }}</span></span>
-            <span class="shrink-0 text-xs font-medium text-primary-600 dark:text-primary-400">{{ expandedUploaderGroups.has(group.key) ? t('common.collapse') : t('common.expand') }}</span>
+        <article v-for="group in uploaderSummaries" :key="uploaderGroupKey(group)" class="overflow-hidden rounded-lg border border-gray-200 dark:border-dark-700">
+          <button type="button" class="flex min-h-14 w-full items-center justify-between gap-3 px-3 py-2 text-left sm:px-4" @click="toggleUploaderGroup(group)">
+            <span class="min-w-0"><span class="block truncate font-semibold text-gray-900 dark:text-white">{{ uploaderGroupName(group) }}</span><span class="block text-xs text-gray-500 dark:text-gray-400">{{ group.account_count }} {{ t('admin.sharedPool.columns.accounts') }}</span></span>
+            <span class="shrink-0 text-xs font-medium text-primary-600 dark:text-primary-400">{{ expandedUploaderGroups.has(uploaderGroupKey(group)) ? t('common.collapse') : t('common.expand') }}</span>
           </button>
           <dl class="grid grid-cols-3 gap-2 border-t border-gray-100 bg-gray-50 px-3 py-2 text-xs dark:border-dark-700 dark:bg-dark-800/60 sm:px-4">
-            <div><dt class="text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.ledger.netCost') }}</dt><dd class="mt-1 font-medium tabular-nums">{{ formatMinor(group.netCost) }}</dd></div>
-            <div><dt class="text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.ledger.recognizedCost') }}</dt><dd class="mt-1 font-medium tabular-nums">{{ formatMinor(group.recognizedCost) }}</dd></div>
-            <div><dt class="text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.columns.remaining') }}</dt><dd class="mt-1 font-medium tabular-nums text-amber-600 dark:text-amber-400">{{ formatMinor(group.remainingCost) }}</dd></div>
+            <div><dt class="text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.ledger.netCost') }}</dt><dd class="mt-1 font-medium tabular-nums">{{ formatMinor(group.net_cost_minor) }}</dd></div>
+            <div><dt class="text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.ledger.recognizedCost') }}</dt><dd class="mt-1 font-medium tabular-nums">{{ formatMinor(group.recognized_cost_minor) }}</dd></div>
+            <div><dt class="text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.columns.remaining') }}</dt><dd class="mt-1 font-medium tabular-nums text-amber-600 dark:text-amber-400">{{ formatMinor(group.remaining_cost_minor) }}</dd></div>
           </dl>
-          <div v-if="expandedUploaderGroups.has(group.key)" class="divide-y divide-gray-100 border-t border-gray-100 dark:divide-dark-700 dark:border-dark-700">
-            <article v-for="row in group.items" :key="row.account_id" class="p-3 sm:p-4">
+          <div v-if="expandedUploaderGroups.has(uploaderGroupKey(group))" class="divide-y divide-gray-100 border-t border-gray-100 dark:divide-dark-700 dark:border-dark-700">
+            <div v-if="uploaderAccountStates[uploaderGroupKey(group)]?.loading" class="flex min-h-24 items-center justify-center"><LoadingSpinner /></div>
+            <article v-for="row in uploaderAccountStates[uploaderGroupKey(group)]?.items || []" :key="row.account_id" class="p-3 sm:p-4">
               <div class="flex min-w-0 items-start justify-between gap-3">
                 <div class="min-w-0"><p class="truncate text-sm font-semibold" :title="row.account_name">{{ row.account_name }}</p><p class="truncate text-xs text-gray-500 dark:text-gray-400" :title="row.provider_identity || ''">{{ row.provider_identity || '-' }}</p></div>
                 <StatusBadge :status="statusPresentation(row.latest_lifecycle_status).badge" :label="t(`admin.sharedPool.status.${statusPresentation(row.latest_lifecycle_status).key}`)" />
@@ -74,9 +75,17 @@
                 <button type="button" class="min-h-11 border-l border-gray-100 text-sm font-medium text-primary-600 dark:border-dark-700 dark:text-primary-400" @click="showAccountEntries(row.account_id)">{{ t('admin.sharedPool.ledger.viewEntries') }}</button>
               </div>
             </article>
+            <Pagination
+              v-if="(uploaderAccountStates[uploaderGroupKey(group)]?.total || 0) > (uploaderAccountStates[uploaderGroupKey(group)]?.pageSize || 10)"
+              :page="uploaderAccountStates[uploaderGroupKey(group)]?.page || 1"
+              :page-size="uploaderAccountStates[uploaderGroupKey(group)]?.pageSize || 10"
+              :show-page-size-selector="false"
+              :total="uploaderAccountStates[uploaderGroupKey(group)]?.total || 0"
+              @update:page="loadUploaderAccounts(group, $event)"
+            />
           </div>
         </article>
-        <EmptyState v-if="!loading && !summaries.length" :title="t('admin.sharedPool.ledger.emptySummary')" />
+        <EmptyState v-if="!loading && !uploaderSummaries.length" :title="t('admin.sharedPool.ledger.emptySummary')" />
       </div>
       <Pagination v-if="summaryPagination.total" :page="summaryPagination.page" :page-size="summaryPagination.page_size" :total="summaryPagination.total" @update:page="changeSummaryPage" @update:page-size="changeSummaryPageSize" />
     </div>
@@ -227,6 +236,7 @@ import type {
   PoolCostEntryType,
   SharedPoolBatchAmountMode,
   SharedPoolCostSummary,
+  SharedPoolCostUploaderSummary,
   SharedPoolLedgerEntry,
   SharedPoolPurchaseSource
 } from '@/api/admin/sharedPool'
@@ -243,6 +253,7 @@ import { formatDateLocalInput } from '@/utils/format'
 
 type LedgerView = 'summary' | 'entries'
 type AccountChoice = Pick<Account, 'id' | 'name'>
+type UploaderAccountState = { items: SharedPoolCostSummary[]; page: number; pageSize: number; total: number; loading: boolean }
 const props = withDefaults(defineProps<{
   initialPurchaseSourceId?: number
   initialUploaderUserId?: number
@@ -260,7 +271,7 @@ const appStore = useAppStore()
 const activeView = ref<LedgerView>('summary')
 const loading = ref(false)
 const submitting = ref(false)
-const summaries = ref<SharedPoolCostSummary[]>([])
+const uploaderSummaries = ref<SharedPoolCostUploaderSummary[]>([])
 const entries = ref<SharedPoolLedgerEntry[]>([])
 const users = ref<Array<{ id: number; label: string; active: boolean }>>([])
 const sources = ref<SharedPoolPurchaseSource[]>([])
@@ -268,6 +279,7 @@ const accountChoices = ref<AccountChoice[]>([])
 const batchAccounts = ref<AccountChoice[]>([])
 const selectedAccounts = ref<AccountChoice[]>([])
 const expandedUploaderGroups = ref(new Set<string>())
+const uploaderAccountStates = reactive<Record<string, UploaderAccountState>>({})
 const accountSearch = ref('')
 const showBatchDialog = ref(false)
 const batchStep = ref(1)
@@ -352,25 +364,21 @@ const entryColumns = computed<Column[]>(() => [
 	{ key: 'actions', label: t('admin.sharedPool.columns.actions') }
 ])
 
-const summaryUploaderGroups = computed(() => {
-  const groups = new Map<string, { key: string; name: string; items: SharedPoolCostSummary[]; netCost: number; recognizedCost: number; remainingCost: number }>()
-  for (const item of summaries.value) {
-    const name = item.uploader_username || item.uploader_email || '-'
-    const key = String(item.uploader_user_id || `name:${name}`)
-    const group = groups.get(key) || { key, name, items: [], netCost: 0, recognizedCost: 0, remainingCost: 0 }
-    group.items.push(item)
-    group.netCost += item.net_cost_minor || 0
-    group.recognizedCost += item.recognized_cost_minor || 0
-    group.remainingCost += item.remaining_cost_minor || 0
-    groups.set(key, group)
-  }
-  return [...groups.values()]
-})
-
-function toggleUploaderGroup(key: string) {
+const uploaderGroupKey = (group: SharedPoolCostUploaderSummary) => group.uploader_user_id ? String(group.uploader_user_id) : 'unassigned'
+const uploaderGroupName = (group: SharedPoolCostUploaderSummary) => group.uploader_username || group.uploader_email || t('admin.sharedPool.ledger.unassignedUploader')
+const uploaderGroupState = (group: SharedPoolCostUploaderSummary) => {
+  const key = uploaderGroupKey(group)
+  return uploaderAccountStates[key] ||= { items: [], page: 1, pageSize: 10, total: 0, loading: false }
+}
+async function toggleUploaderGroup(group: SharedPoolCostUploaderSummary) {
+  const key = uploaderGroupKey(group)
   const next = new Set(expandedUploaderGroups.value)
-  if (next.has(key)) next.delete(key)
-  else next.add(key)
+  if (next.has(key)) {
+    next.delete(key)
+  } else {
+    next.add(key)
+    if (!uploaderGroupState(group).items.length) void loadUploaderAccounts(group, 1)
+  }
   expandedUploaderGroups.value = next
 }
 
@@ -414,7 +422,7 @@ async function loadReferences() {
 async function loadSummary() {
   loading.value = true
   try {
-    const response = await adminAPI.sharedPool.listCostSummaries({
+    const response = await adminAPI.sharedPool.listCostUploaderSummaries({
       page: summaryPagination.page,
       page_size: summaryPagination.page_size,
       search: summaryFilters.search.trim() || undefined,
@@ -424,11 +432,38 @@ async function loadSummary() {
       lifecycle_status: summaryFilters.lifecycle_status || undefined,
       has_cost: summaryFilters.has_cost === '' ? undefined : summaryFilters.has_cost === 'true'
     })
-    summaries.value = response.items || []
+    uploaderSummaries.value = response.items || []
     summaryPagination.total = response.total || 0
+    expandedUploaderGroups.value = new Set()
+    Object.keys(uploaderAccountStates).forEach((key) => delete uploaderAccountStates[key])
   } catch (error: any) {
     appStore.showError(error?.message || t('admin.sharedPool.ledger.errors.load'))
   } finally { loading.value = false }
+}
+
+async function loadUploaderAccounts(group: SharedPoolCostUploaderSummary, page: number) {
+  const state = uploaderGroupState(group)
+  state.loading = true
+  try {
+    const response = await adminAPI.sharedPool.listCostSummaries({
+      page,
+      page_size: state.pageSize,
+      search: summaryFilters.search.trim() || undefined,
+      uploader_user_id: group.uploader_user_id || undefined,
+      uploader_unassigned: !group.uploader_user_id || undefined,
+      payer_user_id: summaryFilters.payer_user_id || undefined,
+      purchase_source_id: summaryFilters.purchase_source_id || undefined,
+      lifecycle_status: summaryFilters.lifecycle_status || undefined,
+      has_cost: summaryFilters.has_cost === '' ? undefined : summaryFilters.has_cost === 'true'
+    })
+    state.items = response.items || []
+    state.page = page
+    state.total = response.total || 0
+  } catch (error: any) {
+    appStore.showError(error?.message || t('admin.sharedPool.ledger.errors.load'))
+  } finally {
+    state.loading = false
+  }
 }
 
 async function loadEntries() {

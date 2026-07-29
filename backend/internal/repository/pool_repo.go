@@ -237,7 +237,7 @@ func (r *poolRepository) ListCostEntries(ctx context.Context, filter service.Acc
 	if err != nil {
 		return nil, 0, fmt.Errorf("list account cost entries: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	items := make([]service.AccountCostEntry, 0)
 	for rows.Next() {
 		item, scanErr := scanCost(rows)
@@ -400,7 +400,7 @@ ORDER BY a.id DESC`, where, limitArg, offsetArg), queryArgs...)
 	if err != nil {
 		return nil, 0, fmt.Errorf("list account cost summaries: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	items := make([]service.AccountCostSummary, 0)
 	for rows.Next() {
 		var item service.AccountCostSummary
@@ -424,6 +424,101 @@ ORDER BY a.id DESC`, where, limitArg, offsetArg), queryArgs...)
 	return items, total, rows.Err()
 }
 
+func (r *poolRepository) ListCostUploaderSummaries(ctx context.Context, filter service.AccountCostSummaryFilter, limit, offset int) ([]service.AccountCostUploaderSummary, int64, error) {
+	where, args := buildCostSummaryWhere(filter)
+	var total int64
+	if err := r.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM (
+SELECT COALESCE(a.created_by_user_id,0) FROM accounts a WHERE `+where+`
+GROUP BY COALESCE(a.created_by_user_id,0)) uploader_groups`, args...).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("count cost uploader summaries: %w", err)
+	}
+	queryArgs := append(append([]any{}, args...), limit, offset)
+	limitArg, offsetArg := len(args)+1, len(args)+2
+	rows, err := r.db.QueryContext(ctx, fmt.Sprintf(`
+WITH filtered AS (
+    SELECT a.id,a.created_by_user_id FROM accounts a WHERE %s
+),
+uploader_page AS (
+    SELECT COALESCE(created_by_user_id,0) uploader_key
+    FROM filtered
+    GROUP BY COALESCE(created_by_user_id,0)
+    ORDER BY COALESCE(created_by_user_id,0)
+    LIMIT $%d OFFSET $%d
+),
+cost_totals AS (
+    SELECT f.id account_id,f.created_by_user_id,
+           COALESCE(SUM(c.cny_amount_minor) FILTER (WHERE c.entry_type NOT IN ('refund','replacement_out','write_off')),0)::bigint cost_basis_minor,
+           COALESCE(-SUM(c.cny_amount_minor) FILTER (WHERE c.entry_type='refund' AND c.cny_amount_minor<0),0)::bigint +
+             COALESCE(-SUM(c.cny_amount_minor) FILTER (WHERE c.entry_type='replacement_out' AND c.cny_amount_minor<0),0)::bigint +
+             COALESCE(-SUM(c.cny_amount_minor) FILTER (WHERE c.entry_type='write_off' AND c.cny_amount_minor<0),0)::bigint disposed_minor,
+           COALESCE(SUM(c.cny_amount_minor) FILTER (WHERE c.entry_type<>'write_off'),0)::bigint net_cost_minor
+    FROM filtered f JOIN uploader_page p ON p.uploader_key=COALESCE(f.created_by_user_id,0)
+    LEFT JOIN account_cost_entries c ON c.account_id=f.id
+    GROUP BY f.id,f.created_by_user_id
+),
+priced AS (
+    SELECT c.id,c.account_id,c.cny_amount_minor::bigint cost_minor,c.expected_token_count::bigint expected_tokens,c.paid_at,
+           LEAD(c.paid_at) OVER (PARTITION BY c.account_id ORDER BY c.paid_at,c.id) next_paid_at
+    FROM account_cost_entries c JOIN cost_totals f ON f.account_id=c.account_id
+    WHERE c.cny_amount_minor>0 AND c.expected_token_count>0
+),
+tranche_usage AS (
+    SELECT p.id,p.account_id,p.cost_minor,p.expected_tokens,p.paid_at,
+           COALESCE(SUM(ul.input_tokens::bigint+ul.output_tokens::bigint+ul.cache_creation_tokens::bigint+
+             ul.cache_read_tokens::bigint+ul.image_output_tokens::bigint+ul.image_input_tokens::bigint),0)::bigint interval_usage
+    FROM priced p LEFT JOIN usage_logs ul ON ul.account_id=p.account_id AND ul.created_at>=p.paid_at
+      AND (p.next_paid_at IS NULL OR ul.created_at<p.next_paid_at)
+    GROUP BY p.id,p.account_id,p.cost_minor,p.expected_tokens,p.paid_at
+),
+tranches AS (
+    SELECT account_id,jsonb_agg(jsonb_build_object(
+      'id',id,'cost_minor',cost_minor,'expected_tokens',expected_tokens,
+      'paid_at',paid_at,'usage_tokens',interval_usage
+    ) ORDER BY paid_at,id) value
+    FROM tranche_usage GROUP BY account_id
+)
+SELECT NULLIF(COALESCE(c.created_by_user_id,0),0),u.email,COALESCE(NULLIF(u.username,''),u.email,'-'),
+       c.net_cost_minor,c.cost_basis_minor,c.disposed_minor,COALESCE(t.value,'[]'::jsonb)
+FROM cost_totals c
+LEFT JOIN users u ON u.id=c.created_by_user_id
+LEFT JOIN tranches t ON t.account_id=c.account_id
+ORDER BY COALESCE(c.created_by_user_id,0),c.account_id`, where, limitArg, offsetArg), queryArgs...)
+	if err != nil {
+		return nil, 0, fmt.Errorf("list cost uploader summaries: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	items := make([]service.AccountCostUploaderSummary, 0, limit)
+	var currentUploaderID int64
+	for rows.Next() {
+		var uploaderID *int64
+		var uploaderEmail, uploaderUsername *string
+		var netCost, costBasis, disposed int64
+		var trancheJSON []byte
+		if err := rows.Scan(&uploaderID, &uploaderEmail, &uploaderUsername, &netCost, &costBasis, &disposed, &trancheJSON); err != nil {
+			return nil, 0, fmt.Errorf("scan cost uploader summary: %w", err)
+		}
+		key := int64(0)
+		if uploaderID != nil {
+			key = *uploaderID
+		}
+		if len(items) == 0 || key != currentUploaderID {
+			items = append(items, service.AccountCostUploaderSummary{UploaderUserID: uploaderID, UploaderEmail: uploaderEmail, UploaderUsername: uploaderUsername})
+			currentUploaderID = key
+		}
+		item := &items[len(items)-1]
+		tranches, decodeErr := decodePoolCostTranches(trancheJSON)
+		if decodeErr != nil {
+			return nil, 0, fmt.Errorf("decode cost uploader tranches: %w", decodeErr)
+		}
+		recognized, remaining, _ := service.CalculateAccountCostRecognitionByTranches(costBasis, disposed, 0, tranches)
+		item.AccountCount++
+		item.NetCostMinor += netCost
+		item.RecognizedCostMinor += recognized
+		item.RemainingCostMinor += remaining
+	}
+	return items, total, rows.Err()
+}
+
 func buildCostSummaryWhere(filter service.AccountCostSummaryFilter) (string, []any) {
 	conditions := []string{"(a.cost_sharing_enabled=TRUE OR EXISTS (SELECT 1 FROM account_cost_entries pc WHERE pc.account_id=a.id))"}
 	args := make([]any, 0)
@@ -437,6 +532,8 @@ func buildCostSummaryWhere(filter service.AccountCostSummaryFilter) (string, []a
 	}
 	if filter.UploaderUserID != nil {
 		conditions = append(conditions, "a.created_by_user_id="+arg(*filter.UploaderUserID))
+	} else if filter.UploaderUnassigned {
+		conditions = append(conditions, "a.created_by_user_id IS NULL")
 	}
 	costConditions := make([]string, 0, 3)
 	if filter.PayerUserID != nil {
@@ -594,7 +691,7 @@ func (r *poolRepository) ListLifecycle(ctx context.Context, accountID *int64) ([
 	if err != nil {
 		return nil, fmt.Errorf("list lifecycle events: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	items := make([]service.AccountLifecycleEvent, 0)
 	for rows.Next() {
 		item, scanErr := scanLifecycle(rows)
@@ -673,7 +770,7 @@ func (r *poolRepository) ListFXRates(ctx context.Context) ([]service.ValuationFX
 	if err != nil {
 		return nil, fmt.Errorf("list valuation fx rates: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	items := make([]service.ValuationFXRate, 0)
 	for rows.Next() {
 		var item service.ValuationFXRate
@@ -854,7 +951,7 @@ GROUP BY (item->>'entry_id')::bigint`, pq.Array(ids))
 	if err != nil {
 		return nil, fmt.Errorf("sum locked cost allocations: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	for rows.Next() {
 		var id, amount int64
 		if err := rows.Scan(&id, &amount); err != nil {
@@ -1206,7 +1303,7 @@ FROM pool_settlement_lines l JOIN users u ON u.id=l.user_id WHERE l.settlement_i
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	items := make([]service.PoolSettlementLine, 0)
 	for rows.Next() {
 		var item service.PoolSettlementLine
@@ -1239,7 +1336,7 @@ func (r *poolRepository) ListSettlements(ctx context.Context, limit, offset int)
 	if err != nil {
 		return nil, 0, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	items := make([]service.PoolSettlement, 0)
 	for rows.Next() {
 		item, err := scanSettlement(rows)
@@ -1390,7 +1487,7 @@ ORDER BY a.id DESC`, end)
 	if err != nil {
 		return nil, fmt.Errorf("get pool recovery: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	items := make([]service.AccountRecovery, 0)
 	for rows.Next() {
 		var item service.AccountRecovery

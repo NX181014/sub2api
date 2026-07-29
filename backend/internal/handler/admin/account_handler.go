@@ -188,6 +188,20 @@ type accountLifecycleDeletionService interface {
 	DeleteAccountWithOptions(context.Context, int64, service.AccountDeleteOptions) (*service.AccountDeleteResult, error)
 }
 
+type BulkDeleteAccountsRequest struct {
+	AccountIDs []int64 `json:"account_ids"`
+}
+
+type BulkDeleteAccountResult struct {
+	AccountID int64                        `json:"account_id"`
+	Status    string                       `json:"status"`
+	Result    *service.AccountDeleteResult `json:"result,omitempty"`
+	Approval  *service.PoolApproval        `json:"approval,omitempty"`
+	Error     string                       `json:"error,omitempty"`
+}
+
+const accountDeleteApprovalReason = "delete account"
+
 // BulkUpdateAccountsRequest represents the payload for bulk editing accounts
 type BulkUpdateAccountsRequest struct {
 	AccountIDs              []int64                   `json:"account_ids"`
@@ -1201,25 +1215,13 @@ func (h *AccountHandler) Delete(c *gin.Context) {
 		if !actorOK {
 			return
 		}
-		options := service.AccountDeleteOptions{}
-		if h.poolService != nil && !h.poolService.IsPrimaryAdmin(c.Request.Context(), actorID) {
-			approval, approvalErr := h.poolService.CreateApproval(c.Request.Context(), service.CreatePoolApprovalInput{
-				ActionType:  service.PoolApprovalDeleteAccount,
-				AccountID:   accountID,
-				Reason:      "delete account",
-				RequesterID: actorID,
-				Payload:     service.PoolApprovalPayload{DeleteOptions: &options},
-			})
-			if approvalErr != nil {
-				response.ErrorFrom(c, approvalErr)
-				return
-			}
-			response.Accepted(c, gin.H{"message": "Account deletion approval submitted", "approval": approval})
-			return
-		}
-		result, deleteErr := lifecycleService.DeleteAccountWithOptions(c.Request.Context(), accountID, options)
+		result, approval, deleteErr := h.deleteAccount(c.Request.Context(), lifecycleService, actorID, accountID)
 		if deleteErr != nil {
 			response.ErrorFrom(c, deleteErr)
+			return
+		}
+		if approval != nil {
+			response.Accepted(c, gin.H{"message": "Account deletion approval submitted", "approval": approval})
 			return
 		}
 		response.Success(c, gin.H{"message": "Account deleted successfully", "result": result})
@@ -1233,6 +1235,77 @@ func (h *AccountHandler) Delete(c *gin.Context) {
 	}
 
 	response.Success(c, gin.H{"message": "Account deleted successfully"})
+}
+
+func (h *AccountHandler) deleteAccount(ctx context.Context, lifecycleService accountLifecycleDeletionService, actorID, accountID int64) (*service.AccountDeleteResult, *service.PoolApproval, error) {
+	options := service.AccountDeleteOptions{}
+	if h.poolService != nil && !h.poolService.IsPrimaryAdmin(ctx, actorID) {
+		approval, err := h.poolService.CreateApproval(ctx, service.CreatePoolApprovalInput{
+			ActionType:  service.PoolApprovalDeleteAccount,
+			AccountID:   accountID,
+			Reason:      accountDeleteApprovalReason,
+			RequesterID: actorID,
+			Payload:     service.PoolApprovalPayload{DeleteOptions: &options},
+		})
+		return nil, approval, err
+	}
+	result, err := lifecycleService.DeleteAccountWithOptions(ctx, accountID, options)
+	return result, nil, err
+}
+
+// BulkDelete runs the normal account deletion lifecycle once per requested account.
+// POST /api/v1/admin/accounts/bulk-delete
+func (h *AccountHandler) BulkDelete(c *gin.Context) {
+	var req BulkDeleteAccountsRequest
+	if err := c.ShouldBindJSON(&req); err != nil || len(req.AccountIDs) == 0 || len(req.AccountIDs) > 100 {
+		response.BadRequest(c, "account_ids must contain between 1 and 100 accounts")
+		return
+	}
+	lifecycleService, ok := h.adminService.(accountLifecycleDeletionService)
+	if !ok {
+		response.InternalError(c, "Account lifecycle deletion service is not configured")
+		return
+	}
+	actorID, actorOK := poolActorID(c)
+	if !actorOK {
+		return
+	}
+
+	seen := make(map[int64]struct{}, len(req.AccountIDs))
+	accountIDs := make([]int64, 0, len(req.AccountIDs))
+	for _, accountID := range req.AccountIDs {
+		if accountID <= 0 {
+			response.BadRequest(c, "account_ids must contain positive account IDs")
+			return
+		}
+		if _, exists := seen[accountID]; exists {
+			continue
+		}
+		seen[accountID] = struct{}{}
+		accountIDs = append(accountIDs, accountID)
+	}
+
+	results := make([]BulkDeleteAccountResult, 0, len(accountIDs))
+	deleted, approvalRequired, failed := 0, 0, 0
+	for _, accountID := range accountIDs {
+		result, approval, err := h.deleteAccount(c.Request.Context(), lifecycleService, actorID, accountID)
+		item := BulkDeleteAccountResult{AccountID: accountID, Result: result, Approval: approval}
+		switch {
+		case err != nil:
+			item.Status, item.Error = "failed", err.Error()
+			failed++
+		case approval != nil:
+			item.Status = "approval_required"
+			approvalRequired++
+		default:
+			item.Status = "deleted"
+			deleted++
+		}
+		results = append(results, item)
+	}
+	response.Success(c, gin.H{
+		"deleted": deleted, "approval_required": approvalRequired, "failed": failed, "results": results,
+	})
 }
 
 // TestAccountRequest represents the request body for testing an account

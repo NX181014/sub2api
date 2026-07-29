@@ -396,22 +396,38 @@
                   <div><dt class="text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.columns.ban30') }}</dt><dd class="mt-1 font-medium tabular-nums text-red-600 dark:text-red-400">{{ formatPercent(group.ban_rate_30d) }}</dd></div>
                 </dl>
                 <div v-if="expandedSourceUploaders.has(sourceUploaderKey(group))" class="space-y-2 border-t border-gray-100 p-2 dark:border-dark-700 sm:p-3">
-                  <article v-for="source in group.sources" :key="sourceItemKey(group, source)" class="rounded-md border border-gray-100 dark:border-dark-700">
+                  <article v-for="source in paginatedSourceItems(group)" :key="sourceItemKey(group, source)" class="rounded-md border border-gray-100 dark:border-dark-700">
                     <button type="button" class="flex min-h-12 w-full items-center justify-between gap-3 px-3 py-2 text-left" @click="toggleSourceItem(group, source)">
                       <span class="min-w-0"><span class="block truncate text-sm font-medium">{{ source.name }}</span><span class="block text-xs text-gray-500 dark:text-gray-400">{{ source.account_count }} {{ t('admin.sharedPool.columns.accounts') }} / {{ formatPercent(source.roi_rate) }}</span></span>
                       <span class="shrink-0 text-xs text-primary-600 dark:text-primary-400">{{ expandedSourceItems.has(sourceItemKey(group, source)) ? t('common.collapse') : t('common.expand') }}</span>
                     </button>
                     <div v-if="expandedSourceItems.has(sourceItemKey(group, source))" class="border-t border-gray-100 dark:border-dark-700">
-                      <div v-for="account in source.accounts" :key="account.account_id" class="grid grid-cols-[minmax(0,1fr)_auto] gap-3 border-b border-gray-100 px-3 py-2 text-sm last:border-b-0 dark:border-dark-700 sm:grid-cols-[minmax(0,1fr)_150px_110px]">
+                      <div v-for="account in paginatedSourceAccounts(group, source)" :key="account.account_id" class="grid grid-cols-[minmax(0,1fr)_auto] gap-3 border-b border-gray-100 px-3 py-2 text-sm last:border-b-0 dark:border-dark-700 sm:grid-cols-[minmax(0,1fr)_150px_110px]">
                         <div class="min-w-0"><p class="truncate font-medium" :title="account.account_name">{{ account.account_name }}</p><p class="truncate text-xs text-gray-500 dark:text-gray-400">{{ formatDateTimeToMinute(account.uploaded_at, locale) }}</p></div>
                         <span class="hidden self-center text-right tabular-nums sm:block">{{ formatMoney(account.purchase_cost) }}</span>
                         <span class="self-center text-right font-medium tabular-nums">{{ formatPercent(account.roi_rate) }}</span>
                       </div>
+                      <Pagination
+                        v-if="source.accounts.length > sourceDetailPageSize"
+                        :page="sourceAccountPage(group, source)"
+                        :page-size="sourceDetailPageSize"
+                        :show-page-size-selector="false"
+                        :total="source.accounts.length"
+                        @update:page="setSourceAccountPage(group, source, $event)"
+                      />
                       <div class="border-t border-gray-100 p-2 text-right dark:border-dark-700">
                         <button type="button" class="btn btn-secondary min-h-10 px-3 text-xs" :disabled="!sourceID(source)" @click="openSourceLedger(group, source)">{{ t('admin.sharedPool.sources.locateRecords') }}</button>
                       </div>
                     </div>
                   </article>
+                  <Pagination
+                    v-if="group.sources.length > sourceDetailPageSize"
+                    :page="sourceItemPage(group)"
+                    :page-size="sourceDetailPageSize"
+                    :show-page-size-selector="false"
+                    :total="group.sources.length"
+                    @update:page="setSourceItemPage(group, $event)"
+                  />
                 </div>
               </article>
             </div>
@@ -709,6 +725,9 @@ const overviewPagination = reactive({ page: 1, page_size: 10 })
 const sourcePagination = reactive({ page: 1, page_size: 8 })
 const expandedSourceUploaders = ref(new Set<string>())
 const expandedSourceItems = ref(new Set<string>())
+const sourceDetailPageSize = 5
+const sourceItemPages = reactive<Record<string, number>>({})
+const sourceAccountPages = reactive<Record<string, number>>({})
 
 const tabs = computed(() => [
   { key: 'overview' as const, label: t('admin.sharedPool.tabs.overview'), icon: 'chart' as const },
@@ -965,6 +984,13 @@ const sourceID = (source: SharedPoolSourceStat) => purchaseSources.value.find(
 )?.id
 const sourceUploaderKey = (group: SharedPoolUploaderSourceGroup) => String(group.uploader_user_id || `name:${group.uploader_name}`)
 const sourceItemKey = (group: SharedPoolUploaderSourceGroup, source: SharedPoolSourceStat) => `${sourceUploaderKey(group)}:${source.name}`
+const sourceItemPage = (group: SharedPoolUploaderSourceGroup) => sourceItemPages[sourceUploaderKey(group)] || 1
+const sourceAccountPage = (group: SharedPoolUploaderSourceGroup, source: SharedPoolSourceStat) => sourceAccountPages[sourceItemKey(group, source)] || 1
+const pageItems = <T,>(items: T[], page: number) => items.slice((page - 1) * sourceDetailPageSize, page * sourceDetailPageSize)
+const paginatedSourceItems = (group: SharedPoolUploaderSourceGroup) => pageItems(group.sources, sourceItemPage(group))
+const paginatedSourceAccounts = (group: SharedPoolUploaderSourceGroup, source: SharedPoolSourceStat) => pageItems(source.accounts, sourceAccountPage(group, source))
+const setSourceItemPage = (group: SharedPoolUploaderSourceGroup, page: number) => { sourceItemPages[sourceUploaderKey(group)] = page }
+const setSourceAccountPage = (group: SharedPoolUploaderSourceGroup, source: SharedPoolSourceStat, page: number) => { sourceAccountPages[sourceItemKey(group, source)] = page }
 const toggleSetValue = (target: Set<string>, key: string) => {
   const next = new Set(target)
   if (next.has(key)) next.delete(key)
@@ -1007,6 +1033,10 @@ async function loadActiveTab() {
       ])
       sources.value = sourceResponse.items || []
       sourcePagination.page = 1
+      expandedSourceUploaders.value = new Set()
+      expandedSourceItems.value = new Set()
+      Object.keys(sourceItemPages).forEach((key) => delete sourceItemPages[key])
+      Object.keys(sourceAccountPages).forEach((key) => delete sourceAccountPages[key])
       purchaseSources.value = sourceOptions
     }
   } catch (error: any) {

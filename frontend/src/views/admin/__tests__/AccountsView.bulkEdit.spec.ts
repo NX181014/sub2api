@@ -10,7 +10,9 @@ const {
   getUpstreamBillingProbeSettings,
   getAllProxies,
   getAllGroups,
-  probeUpstreamBillingBatch
+  probeUpstreamBillingBatch,
+  bulkDelete,
+  listUsers
 } = vi.hoisted(() => ({
   listAccounts: vi.fn(),
   listWithEtag: vi.fn(),
@@ -18,7 +20,9 @@ const {
   getUpstreamBillingProbeSettings: vi.fn(),
   getAllProxies: vi.fn(),
   getAllGroups: vi.fn(),
-  probeUpstreamBillingBatch: vi.fn()
+  probeUpstreamBillingBatch: vi.fn(),
+  bulkDelete: vi.fn(),
+  listUsers: vi.fn()
 }))
 
 vi.mock('@/api/admin', () => ({
@@ -31,6 +35,7 @@ vi.mock('@/api/admin', () => ({
       delete: vi.fn(),
       batchClearError: vi.fn(),
       batchRefresh: vi.fn(),
+      bulkDelete,
       probeUpstreamBillingBatch,
       toggleSchedulable: vi.fn()
     },
@@ -39,6 +44,9 @@ vi.mock('@/api/admin', () => ({
     },
     groups: {
       getAll: getAllGroups
+    },
+    users: {
+      list: listUsers
     }
   }
 }))
@@ -62,7 +70,8 @@ vi.mock('vue-i18n', async () => {
   return {
     ...actual,
     useI18n: () => ({
-      t: (key: string) => key
+      t: (key: string) => key,
+      te: () => false
     })
   }
 })
@@ -82,11 +91,12 @@ const DataTableStub = {
 
 const AccountBulkActionsBarStub = {
   props: ['selectedIds'],
-  emits: ['edit-filtered', 'probe-upstream-billing'],
+  emits: ['delete', 'edit-filtered', 'probe-upstream-billing'],
   template: `
     <div>
       <button data-test="edit-filtered" @click="$emit('edit-filtered')">edit filtered</button>
       <button data-test="probe-upstream-billing" @click="$emit('probe-upstream-billing')">probe</button>
+      <button data-test="bulk-delete" @click="$emit('delete')">delete</button>
     </div>
   `
 }
@@ -112,6 +122,8 @@ describe('admin AccountsView bulk edit scope', () => {
     getAllProxies.mockReset()
     getAllGroups.mockReset()
     probeUpstreamBillingBatch.mockReset()
+    bulkDelete.mockReset()
+		listUsers.mockReset()
 
     listAccounts.mockResolvedValue({
       items: [],
@@ -130,6 +142,8 @@ describe('admin AccountsView bulk edit scope', () => {
     getAllProxies.mockResolvedValue([])
     getAllGroups.mockResolvedValue([])
     probeUpstreamBillingBatch.mockResolvedValue([])
+    bulkDelete.mockResolvedValue({ deleted: 0, approval_required: 0, failed: 0, results: [] })
+		listUsers.mockResolvedValue({ items: [], total: 0, page: 1, page_size: 200, pages: 0 })
   })
 
   it('opens bulk edit in filtered-results mode from the bulk actions dropdown', async () => {
@@ -177,6 +191,69 @@ describe('admin AccountsView bulk edit scope', () => {
     expect(wrapper.get('[data-test="bulk-edit-modal"]').attributes('data-show')).toBe('true')
     expect(wrapper.get('[data-test="bulk-edit-modal"]').attributes('data-target-mode')).toBe('filtered')
   })
+
+	it('splits more than 100 selected accounts into bounded delete requests', async () => {
+		const items = Array.from({ length: 101 }, (_, index) => ({
+			id: index + 1,
+			name: `account-${index + 1}`,
+			platform: 'anthropic',
+			type: 'oauth',
+			status: 'active',
+			schedulable: true,
+			created_at: '2026-07-29T00:00:00Z',
+			updated_at: '2026-07-29T00:00:00Z'
+		}))
+		listAccounts.mockResolvedValue({ items, total: items.length, page: 1, page_size: items.length, pages: 1 })
+		bulkDelete
+			.mockResolvedValueOnce({ deleted: 100, approval_required: 0, failed: 0, results: [] })
+			.mockResolvedValueOnce({ deleted: 1, approval_required: 0, failed: 0, results: [] })
+		vi.stubGlobal('confirm', vi.fn(() => true))
+
+		const wrapper = mount(AccountsView, {
+			global: {
+				stubs: {
+					AppLayout: { template: '<div><slot /></div>' },
+					TablePageLayout: { template: '<div><slot name="filters" /><slot name="table" /><slot name="pagination" /></div>' },
+					DataTable: DataTableStub,
+					Pagination: true,
+					ConfirmDialog: true,
+					AccountTableActions: { template: '<div><slot name="beforeCreate" /><slot name="after" /></div>' },
+					AccountTableFilters: true,
+					AccountBulkActionsBar: AccountBulkActionsBarStub,
+					AccountActionMenu: true,
+					ImportDataModal: true,
+					ReAuthAccountModal: true,
+					AccountTestModal: true,
+					AccountStatsModal: true,
+					ScheduledTestsPanel: true,
+					SyncFromCrsModal: true,
+					TempUnschedStatusModal: true,
+					ErrorPassthroughRulesModal: true,
+					TLSFingerprintProfilesModal: true,
+					CreateAccountModal: true,
+					EditAccountModal: true,
+					BulkEditAccountModal: true,
+					PlatformTypeBadge: true,
+					AccountCapacityCell: true,
+					AccountStatusIndicator: true,
+					AccountTodayStatsCell: true,
+					AccountGroupsCell: true,
+					AccountUsageCell: true,
+					Icon: true
+				}
+			}
+		})
+
+		await flushPromises()
+		for (const checkbox of wrapper.findAll('[data-test="select-row"] input')) await checkbox.setValue(true)
+		await wrapper.get('[data-test="bulk-delete"]').trigger('click')
+		await flushPromises()
+
+		expect(bulkDelete).toHaveBeenCalledTimes(2)
+		expect(bulkDelete.mock.calls[0]?.[0]).toHaveLength(100)
+		expect(bulkDelete.mock.calls[1]?.[0]).toHaveLength(1)
+		vi.unstubAllGlobals()
+	})
 
   it('renders the created_at column by default', async () => {
     listAccounts.mockResolvedValue({

@@ -167,10 +167,21 @@ export interface SharedPoolCostSummaryQuery {
   page_size?: number
   search?: string
   uploader_user_id?: number
+  uploader_unassigned?: boolean
   payer_user_id?: number
   purchase_source_id?: number
   lifecycle_status?: string
   has_cost?: boolean
+}
+
+export interface SharedPoolCostUploaderSummary {
+  uploader_user_id?: number | null
+  uploader_email?: string | null
+  uploader_username?: string | null
+  account_count: number
+  net_cost_minor: number
+  recognized_cost_minor: number
+  remaining_cost_minor: number
 }
 
 export interface SharedPoolLedgerEntry {
@@ -662,6 +673,13 @@ export async function listCostSummaries(
   return data
 }
 
+export async function listCostUploaderSummaries(
+  params: SharedPoolCostSummaryQuery = {}
+): Promise<SharedPoolPaginated<SharedPoolCostUploaderSummary>> {
+  const { data } = await apiClient.get<SharedPoolPaginated<SharedPoolCostUploaderSummary>>('/admin/pool/cost-uploader-summaries', { params })
+  return data
+}
+
 export async function listLedgerEntries(
   params: SharedPoolLedgerEntryQuery = {}
 ): Promise<SharedPoolPaginated<SharedPoolLedgerEntry>> {
@@ -943,6 +961,7 @@ export default {
   getOverview,
   listAccountCosts,
   listCostSummaries,
+  listCostUploaderSummaries,
   listLedgerEntries,
   listPurchaseSources,
   createPurchaseSource,

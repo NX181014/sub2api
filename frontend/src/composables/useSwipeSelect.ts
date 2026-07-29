@@ -35,7 +35,7 @@ export interface SwipeSelectVirtualContext {
   /** Get all sorted data */
   getSortedData: () => any[]
   /** Get row ID from data row */
-  getRowId: (row: any, index: number) => number
+  getRowId: (row: any, index: number) => number | null
 }
 
 /**
@@ -264,6 +264,7 @@ export function useSwipeSelect(
       adapter.batchUpdate((draft) => {
         for (let i = lo; i <= hi && i < data.length; i++) {
           const id = virtualContext!.getRowId(data[i], i)
+          if (id === null) continue
           const shouldBeSelected = (i >= rangeMin && i <= rangeMax)
             ? (dragMode === 'select')
             : (initialSelectedSnapshot.get(id) ?? false)
@@ -274,6 +275,7 @@ export function useSwipeSelect(
     } else {
       for (let i = lo; i <= hi && i < data.length; i++) {
         const id = virtualContext!.getRowId(data[i], i)
+        if (id === null) continue
         if (i >= rangeMin && i <= rangeMax) {
           if (dragMode === 'select') adapter.select(id)
           else adapter.deselect(id)
@@ -463,6 +465,7 @@ export function useSwipeSelect(
     initialSelectedSnapshot = new Map()
     for (let i = 0; i < data.length; i++) {
       const id = virtualContext!.getRowId(data[i], i)
+      if (id === null) continue
       initialSelectedSnapshot.set(id, adapter.isSelected(id))
     }
 

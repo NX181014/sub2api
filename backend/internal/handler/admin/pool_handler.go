@@ -483,38 +483,69 @@ func (h *PoolHandler) ListCostEntries(c *gin.Context) {
 }
 
 func (h *PoolHandler) ListCostSummaries(c *gin.Context) {
-	uploaderID, ok := optionalPoolQueryID(c, "uploader_user_id")
+	filter, ok := poolCostSummaryFilter(c)
 	if !ok {
 		return
+	}
+	page, pageSize := response.ParsePagination(c)
+	items, total, err := h.poolService.ListCostSummaries(c.Request.Context(), filter, page, pageSize)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Paginated(c, items, total, page, pageSize)
+}
+
+func (h *PoolHandler) ListCostUploaderSummaries(c *gin.Context) {
+	filter, ok := poolCostSummaryFilter(c)
+	if !ok {
+		return
+	}
+	page, pageSize := response.ParsePagination(c)
+	items, total, err := h.poolService.ListCostUploaderSummaries(c.Request.Context(), filter, page, pageSize)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Paginated(c, items, total, page, pageSize)
+}
+
+func poolCostSummaryFilter(c *gin.Context) (service.AccountCostSummaryFilter, bool) {
+	uploaderID, ok := optionalPoolQueryID(c, "uploader_user_id")
+	if !ok {
+		return service.AccountCostSummaryFilter{}, false
 	}
 	payerID, ok := optionalPoolQueryID(c, "payer_user_id")
 	if !ok {
-		return
+		return service.AccountCostSummaryFilter{}, false
 	}
 	sourceID, ok := optionalPoolQueryID(c, "purchase_source_id")
 	if !ok {
-		return
+		return service.AccountCostSummaryFilter{}, false
 	}
 	var hasCost *bool
 	if raw := strings.TrimSpace(c.Query("has_cost")); raw != "" {
 		value, err := strconv.ParseBool(raw)
 		if err != nil {
 			response.BadRequest(c, "has_cost must be true or false")
-			return
+			return service.AccountCostSummaryFilter{}, false
 		}
 		hasCost = &value
 	}
-	page, pageSize := response.ParsePagination(c)
-	items, total, err := h.poolService.ListCostSummaries(c.Request.Context(), service.AccountCostSummaryFilter{
-		Search: strings.TrimSpace(c.Query("search")), UploaderUserID: uploaderID, PayerUserID: payerID,
+	uploaderUnassigned := false
+	if raw := strings.TrimSpace(c.Query("uploader_unassigned")); raw != "" {
+		value, err := strconv.ParseBool(raw)
+		if err != nil {
+			response.BadRequest(c, "uploader_unassigned must be true or false")
+			return service.AccountCostSummaryFilter{}, false
+		}
+		uploaderUnassigned = value
+	}
+	return service.AccountCostSummaryFilter{
+		Search: strings.TrimSpace(c.Query("search")), UploaderUserID: uploaderID, UploaderUnassigned: uploaderUnassigned, PayerUserID: payerID,
 		PurchaseSourceID: sourceID, LifecycleStatus: strings.TrimSpace(c.Query("lifecycle_status")),
 		EntryType: strings.TrimSpace(c.Query("entry_type")), HasCost: hasCost,
-	}, page, pageSize)
-	if err != nil {
-		response.ErrorFrom(c, err)
-		return
-	}
-	response.Paginated(c, items, total, page, pageSize)
+	}, true
 }
 
 type createPoolCostRequest struct {

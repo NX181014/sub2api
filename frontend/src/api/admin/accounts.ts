@@ -226,6 +226,28 @@ export async function deleteAccount(id: number): Promise<{ message: string; resu
   return data
 }
 
+export interface BulkDeleteAccountItem {
+  account_id: number
+  status: 'deleted' | 'approval_required' | 'failed'
+  result?: DeleteAccountResult
+  approval?: { id: number }
+  error?: string
+}
+
+export interface BulkDeleteAccountsResult {
+  deleted: number
+  approval_required: number
+  failed: number
+  results: BulkDeleteAccountItem[]
+}
+
+export async function bulkDelete(accountIds: number[]): Promise<BulkDeleteAccountsResult> {
+  const { data } = await apiClient.post<BulkDeleteAccountsResult>('/admin/accounts/bulk-delete', {
+    account_ids: accountIds
+  })
+  return data
+}
+
 /**
  * Toggle account status
  * @param id - Account ID
@@ -946,6 +968,7 @@ export const accountsAPI = {
   update,
   checkMixedChannelRisk,
   delete: deleteAccount,
+  bulkDelete,
   toggleStatus,
   testAccount,
   refreshCredentials,

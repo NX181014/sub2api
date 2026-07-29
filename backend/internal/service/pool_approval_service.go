@@ -602,7 +602,18 @@ func isApprovalRuntimeExtraKey(key string) bool {
 func buildPoolApprovalSummary(account *Account, pool *PoolApprovalAccountState, costBefore *AccountCostEntry, payload PoolApprovalPayload) PoolApprovalChangeSummary {
 	result := PoolApprovalChangeSummary{Fields: make(map[string]PoolApprovalValueChange)}
 	add := func(key string, before, after any) {
+		before = approvalSummaryValue(before)
+		after = approvalSummaryValue(after)
+		if reflect.DeepEqual(before, after) {
+			return
+		}
 		result.Fields[key] = PoolApprovalValueChange{Before: before, After: after}
+	}
+	addMasked := func(key string, before, after *string) {
+		if reflect.DeepEqual(approvalSummaryValue(before), approvalSummaryValue(after)) {
+			return
+		}
+		result.Fields[key] = PoolApprovalValueChange{Before: maskApprovalValue(before), After: maskApprovalValue(after)}
 	}
 	if u := payload.AccountUpdate; u != nil {
 		if u.Name != "" {
@@ -618,7 +629,7 @@ func buildPoolApprovalSummary(account *Account, pool *PoolApprovalAccountState, 
 			result.CredentialKeys = changedApprovalCredentialKeys(account.Credentials, u.Credentials)
 		}
 		if u.Extra != nil {
-			result.ExtraKeys = sortedMapKeys(u.Extra)
+			result.ExtraKeys = replacedApprovalMapKeys(account.Extra, u.Extra)
 		}
 		if u.ProxyID != nil {
 			add("proxy_id", account.ProxyID, u.ProxyID)
@@ -642,7 +653,11 @@ func buildPoolApprovalSummary(account *Account, pool *PoolApprovalAccountState, 
 			add("group_ids", account.GroupIDs, *u.GroupIDs)
 		}
 		if u.ExpiresAt != nil {
-			add("expires_at", account.ExpiresAt, *u.ExpiresAt)
+			var currentExpiresAt any
+			if account.ExpiresAt != nil {
+				currentExpiresAt = account.ExpiresAt.Unix()
+			}
+			add("expires_at", currentExpiresAt, *u.ExpiresAt)
 		}
 		if u.AutoPauseOnExpired != nil {
 			add("auto_pause_on_expired", account.AutoPauseOnExpired, *u.AutoPauseOnExpired)
@@ -650,7 +665,7 @@ func buildPoolApprovalSummary(account *Account, pool *PoolApprovalAccountState, 
 	}
 	if u := payload.PoolUpdate; u != nil {
 		if u.ProviderIdentity != nil {
-			add("provider_identity", maskApprovalValue(pool.ProviderIdentity), maskApprovalValue(u.ProviderIdentity))
+			addMasked("provider_identity", pool.ProviderIdentity, u.ProviderIdentity)
 		}
 		if u.ContributorUserID != nil {
 			add("contributor_user_id", pool.ContributorUserID, *u.ContributorUserID)
@@ -683,12 +698,26 @@ func buildPoolApprovalSummary(account *Account, pool *PoolApprovalAccountState, 
 		add("delete_account", false, true)
 	}
 	if len(payload.ExtraMerge) > 0 {
-		result.ExtraKeys = mergeSortedKeys(result.ExtraKeys, payload.ExtraMerge)
+		result.ExtraKeys = mergeSortedKeys(result.ExtraKeys, changedApprovalMapKeys(account.Extra, payload.ExtraMerge))
 	}
 	if len(result.Fields) == 0 {
 		result.Fields = nil
 	}
 	return result
+}
+
+func approvalSummaryValue(value any) any {
+	v := reflect.ValueOf(value)
+	for v.IsValid() && v.Kind() == reflect.Pointer {
+		if v.IsNil() {
+			return nil
+		}
+		v = v.Elem()
+	}
+	if !v.IsValid() {
+		return nil
+	}
+	return v.Interface()
 }
 
 func changedApprovalCredentialKeys(current, requested map[string]any) []string {
@@ -711,6 +740,38 @@ func changedApprovalCredentialKeys(current, requested map[string]any) []string {
 	return sortedMapKeys(changed)
 }
 
+func changedApprovalMapKeys(current, requested map[string]any) []string {
+	changed := make(map[string]any)
+	for key, after := range requested {
+		before, exists := current[key]
+		if !exists || !reflect.DeepEqual(before, after) {
+			changed[key] = nil
+		}
+	}
+	return sortedMapKeys(changed)
+}
+
+func replacedApprovalMapKeys(current, requested map[string]any) []string {
+	current = approvalManagedExtra(current)
+	requested = approvalManagedExtra(requested)
+	keys := make(map[string]any, len(current)+len(requested))
+	for key := range current {
+		keys[key] = nil
+	}
+	for key := range requested {
+		keys[key] = nil
+	}
+	changed := make(map[string]any)
+	for key := range keys {
+		before, beforeOK := current[key]
+		after, afterOK := requested[key]
+		if beforeOK != afterOK || !reflect.DeepEqual(before, after) {
+			changed[key] = nil
+		}
+	}
+	return sortedMapKeys(changed)
+}
+
 func sortedMapKeys(values map[string]any) []string {
 	keys := make([]string, 0, len(values))
 	for key := range values {
@@ -720,12 +781,12 @@ func sortedMapKeys(values map[string]any) []string {
 	return keys
 }
 
-func mergeSortedKeys(existing []string, values map[string]any) []string {
+func mergeSortedKeys(existing, values []string) []string {
 	keys := make(map[string]any, len(existing)+len(values))
 	for _, key := range existing {
 		keys[key] = nil
 	}
-	for key := range values {
+	for _, key := range values {
 		keys[key] = nil
 	}
 	return sortedMapKeys(keys)

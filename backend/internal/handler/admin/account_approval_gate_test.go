@@ -67,6 +67,7 @@ func newApprovalGateHandler(actorID int64) (*gin.Engine, *stubAdminService, *app
 	router.POST("/accounts/:id/apply-oauth-credentials", h.ApplyOAuthCredentials)
 	router.POST("/accounts/bulk-update", h.BulkUpdate)
 	router.POST("/accounts/batch-update-credentials", h.BatchUpdateCredentials)
+	router.POST("/accounts/bulk-delete", h.BulkDelete)
 	router.GET("/accounts/data", h.ExportData)
 	router.DELETE("/accounts/:id", h.Delete)
 	return router, adminSvc, repo
@@ -90,6 +91,60 @@ func TestAccountDeleteUsesApprovalExceptForPrimaryAdmin(t *testing.T) {
 	router.ServeHTTP(w, req)
 	if w.Code != http.StatusOK || adminSvc.deleteAccountCalls != 1 || repo.created != nil {
 		t.Fatalf("primary delete status=%d body=%s calls=%d approval=%+v", w.Code, w.Body.String(), adminSvc.deleteAccountCalls, repo.created)
+	}
+}
+
+func TestAccountBulkDeleteReportsDeletedAndApprovalResults(t *testing.T) {
+	for _, tt := range []struct {
+		name            string
+		actorID         int64
+		wantDeleted     int
+		wantApproval    int
+		wantDeleteCalls int
+	}{
+		{name: "primary deletes", actorID: 1, wantDeleted: 2, wantDeleteCalls: 2},
+		{name: "non-primary requests approval", actorID: 2, wantApproval: 2},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			router, adminSvc, _ := newApprovalGateHandler(tt.actorID)
+			w := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodPost, "/accounts/bulk-delete", strings.NewReader(`{"account_ids":[7,8]}`))
+			req.Header.Set("Content-Type", "application/json")
+			router.ServeHTTP(w, req)
+			if w.Code != http.StatusOK {
+				t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+			}
+			var envelope struct {
+				Data struct {
+					Deleted          int `json:"deleted"`
+					ApprovalRequired int `json:"approval_required"`
+					Failed           int `json:"failed"`
+					Results          []struct {
+						Status string `json:"status"`
+					} `json:"results"`
+				} `json:"data"`
+			}
+			if err := json.Unmarshal(w.Body.Bytes(), &envelope); err != nil {
+				t.Fatal(err)
+			}
+			if envelope.Data.Deleted != tt.wantDeleted || envelope.Data.ApprovalRequired != tt.wantApproval || envelope.Data.Failed != 0 || len(envelope.Data.Results) != 2 {
+				t.Fatalf("unexpected result: %+v", envelope.Data)
+			}
+			if adminSvc.deleteAccountCalls != tt.wantDeleteCalls {
+				t.Fatalf("delete calls=%d want=%d", adminSvc.deleteAccountCalls, tt.wantDeleteCalls)
+			}
+		})
+	}
+}
+
+func TestAccountBulkDeleteValidatesAllIDsBeforeDeleting(t *testing.T) {
+	router, adminSvc, _ := newApprovalGateHandler(1)
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/accounts/bulk-delete", strings.NewReader(`{"account_ids":[7,0]}`))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest || adminSvc.deleteAccountCalls != 0 {
+		t.Fatalf("status=%d body=%s delete_calls=%d", w.Code, w.Body.String(), adminSvc.deleteAccountCalls)
 	}
 }
 

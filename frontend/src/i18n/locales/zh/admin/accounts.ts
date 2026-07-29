@@ -120,6 +120,11 @@ export default {
         actions: '操作'
       },
 		importBatchSummary: '批量导入 {count} 个账号 · {time}',
+      importBatchGroup: '批量导入组',
+      importBatchCount: '{count} 个账号',
+      selectImportBatch: '选择这批 {count} 个账号',
+      expandImportBatch: '展开',
+      collapseImportBatch: '收起',
       schedulerScore: {
         baseShort: '普通',
         stickyShort: '粘性',

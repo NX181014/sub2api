@@ -12,7 +12,7 @@ export default {
       title: 'Account Cost Ledger', subtitle: 'Review account summaries and trace every purchase, renewal, and adjustment',
       summaryView: 'Account Summary', entriesView: 'Cost Entries', batchAdd: 'Add Costs in Batch',
       searchPlaceholder: 'Search account or provider identity...', searchEntries: 'Search account, order, or note...', searchAccounts: 'Search accounts to add costs...', selectedCount: '{count} accounts selected',
-      selectVisible: 'Select current results', clearVisible: 'Clear current results', allUploaders: 'All uploaders', allPayers: 'All payers', allSources: 'All sources', allAccounts: 'All accounts', allStatuses: 'All statuses', allEntryTypes: 'All cost types',
+      selectVisible: 'Select current results', clearVisible: 'Clear current results', allUploaders: 'All uploaders', unassignedUploader: 'Uploader not recorded', allPayers: 'All payers', allSources: 'All sources', allAccounts: 'All accounts', allStatuses: 'All statuses', allEntryTypes: 'All cost types',
       costState: 'Cost State', allCostStates: 'All cost states', withCost: 'With cost', withoutCost: 'Without cost', startDate: 'Start Date', endDate: 'End Date',
       payer: 'Payer', netCost: 'Net Cost', recognizedCost: 'Recognized Cost', costProgress: 'Cost Progress', usageExpected: 'Usage / Expected Tokens', viewEntries: 'View Entries',
       emptySummary: 'No account cost summaries', emptyEntries: 'No cost entries', batchTitle: 'Add Account Costs in Batch',
@@ -38,7 +38,7 @@ export default {
     actions: { poolRecord: 'Pool Record' },
     delete: {
       hardDeleteHint: 'The account and all related data will be permanently deleted.',
-		bulkRequiresIndividual: '{count} accounts are selected. Confirm each deletion individually.', approvalSubmitted: 'Deletion request submitted for another administrator to review', success: 'Account and related data deleted', failed: 'Failed to delete account'
+		bulkConfirm: 'Delete the selected {count} accounts and their related business data?', bulkSummary: 'Deleted {deleted}, sent {approval} for approval, failed {failed}', approvalSubmitted: 'Deletion request submitted for another administrator to review', success: 'Account and related data deleted', failed: 'Failed to delete account'
     },
     approval: {
       title: 'Approval Center', subtitle: 'Account changes and credential access require another administrator to review',
@@ -46,6 +46,12 @@ export default {
 		updateAccount: 'Account update', viewCredential: 'View credentials', deleteAccount: 'Delete account',
       pending: 'Pending', approved: 'Approved', rejected: 'Rejected', expired: 'Expired', consumed: 'Viewed', empty: 'No approval requests',
       field: 'Field', before: 'Before', after: 'After', decisionReason: 'Decision note', decisionReasonHint: 'Optional when approving; required when rejecting',
+      triggerReason: 'Why approval is required', requestNote: 'Request note',
+      triggerUpdate: 'Account business information changes require review by another administrator', triggerCredential: 'Sensitive credential access requires review by another administrator', triggerDelete: 'Deleting an account and its related data is a high-risk operation',
+      businessUpdate: 'Update account business information', businessUpdateFields: 'Fields changed: {fields}', businessCredential: 'View sensitive account credentials', businessDelete: 'Delete the account and its related business data',
+      sensitiveValue: 'Sensitive value hidden',
+      reasons: { deleteAccountReason: 'Request to delete the account', updateAccountReason: 'Request to update account information', reauthorizeReason: 'Request to update account authorization credentials', updatePoolReason: 'Request to update shared-pool account metadata', updateCostReason: 'Request to update a shared-pool cost record', credentialAccessReason: 'Administrator request to view credentials' },
+      fieldLabels: { name: 'Account name', notes: 'Notes', type: 'Account type', proxy: 'Proxy', concurrency: 'Concurrency', priority: 'Priority', rateMultiplier: 'Billing multiplier', loadFactor: 'Load factor', status: 'Account status', groups: 'Groups', expiresAt: 'Expires at', autoPauseOnExpired: 'Pause when expired', providerIdentity: 'Provider identity', contributor: 'Contributor', uploader: 'Uploader', costSharingEnabled: 'Include in cost sharing', credentialKeys: 'Credential key names changed', extraKeys: 'Extra fields changed', deleteAccount: 'Delete account', costEntry: 'Cost entry', payer: 'Payer', purchaseSource: 'Purchase source', costType: 'Cost type', costAmount: 'Cost amount', currency: 'Currency', fxRate: 'FX rate', serviceStart: 'Service start', serviceEnd: 'Service end', warrantyEnd: 'Warranty end', paidAt: 'Paid at', orderNo: 'Order number', purchaseUrl: 'Purchase URL', note: 'Cost note', expectedTokens: 'Expected tokens' },
       approve: 'Approve', reject: 'Reject', submit: 'Submit for review', revealOnce: 'View once', verifyAndReveal: 'Verify and view',
       selfReviewBlocked: 'Requesters cannot review their own requests. Another administrator must decide.', rejectReasonRequired: 'Enter a reason before rejecting',
       approveSuccess: 'Request approved', rejectSuccess: 'Request rejected', credentialSubmitted: 'Credential access submitted for another administrator to review',

@@ -14,6 +14,7 @@ import {
   getOverview,
   listAccountCosts,
   listCostSummaries,
+  listCostUploaderSummaries,
   listLedgerEntries,
   listSources,
   markSettlementPaid,
@@ -132,15 +133,20 @@ describe('admin shared-pool API', () => {
 
   it('passes ledger filters to paginated server endpoints', async () => {
     const page = { items: [], total: 0, page: 2, page_size: 50, pages: 1 }
-    get.mockResolvedValueOnce({ data: page }).mockResolvedValueOnce({ data: page })
+    get.mockResolvedValueOnce({ data: page }).mockResolvedValueOnce({ data: page }).mockResolvedValueOnce({ data: page })
 
     await expect(listCostSummaries({ page: 2, page_size: 50, uploader_user_id: 8, has_cost: true })).resolves.toEqual(page)
     expect(get).toHaveBeenNthCalledWith(1, '/admin/pool/cost-summaries', {
       params: { page: 2, page_size: 50, uploader_user_id: 8, has_cost: true }
     })
 
+    await expect(listCostUploaderSummaries({ page: 2, page_size: 50, payer_user_id: 7, has_cost: true })).resolves.toEqual(page)
+    expect(get).toHaveBeenNthCalledWith(2, '/admin/pool/cost-uploader-summaries', {
+      params: { page: 2, page_size: 50, payer_user_id: 7, has_cost: true }
+    })
+
     await expect(listLedgerEntries({ page: 2, page_size: 50, search: 'order-1', entry_type: 'renewal' })).resolves.toEqual(page)
-    expect(get).toHaveBeenNthCalledWith(2, '/admin/pool/cost-entries', {
+    expect(get).toHaveBeenNthCalledWith(3, '/admin/pool/cost-entries', {
       params: { page: 2, page_size: 50, search: 'order-1', entry_type: 'renewal' }
     })
   })

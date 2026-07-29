@@ -12,7 +12,7 @@ export default {
       title: '账号成本台账', subtitle: '按账号查看成本摘要，按流水追溯每次采购、续费和调整',
       summaryView: '账号成本汇总', entriesView: '成本流水', batchAdd: '批量添加成本',
       searchPlaceholder: '搜索账号或上游身份...', searchEntries: '搜索账号、订单号或备注...', searchAccounts: '搜索要录入成本的账号...', selectedCount: '已选择 {count} 个账号',
-      selectVisible: '选择当前结果', clearVisible: '取消当前结果', allUploaders: '全部上传人', allPayers: '全部付款人', allSources: '全部来源', allAccounts: '全部账号', allStatuses: '全部状态', allEntryTypes: '全部成本类型',
+      selectVisible: '选择当前结果', clearVisible: '取消当前结果', allUploaders: '全部上传人', unassignedUploader: '未记录上传人', allPayers: '全部付款人', allSources: '全部来源', allAccounts: '全部账号', allStatuses: '全部状态', allEntryTypes: '全部成本类型',
       costState: '成本状态', allCostStates: '全部成本状态', withCost: '已有成本', withoutCost: '未录入成本', startDate: '开始日期', endDate: '结束日期',
       payer: '付款人', netCost: '净成本', recognizedCost: '已摊销成本', costProgress: '成本消耗率', usageExpected: '用量 / 预期 Token', viewEntries: '查看流水',
       emptySummary: '暂无账号成本汇总', emptyEntries: '暂无成本流水', batchTitle: '批量添加账号成本',
@@ -38,7 +38,7 @@ export default {
     actions: { poolRecord: '号池资料' },
     delete: {
       hardDeleteHint: '账号及全部关联数据将永久删除。',
-		bulkRequiresIndividual: '已选择 {count} 个账号，请逐个确认删除。', approvalSubmitted: '删除申请已提交，等待其他管理员审核', success: '账号及关联数据已删除', failed: '删除账号失败'
+		bulkConfirm: '确定删除选中的 {count} 个账号及关联业务数据吗？', bulkSummary: '已删除 {deleted} 个，进入审批 {approval} 个，失败 {failed} 个', approvalSubmitted: '删除申请已提交，等待其他管理员审核', success: '账号及关联数据已删除', failed: '删除账号失败'
     },
     approval: {
       title: '审批中心', subtitle: '账号变更和凭证查看均由另一名管理员复核',
@@ -46,6 +46,12 @@ export default {
 		updateAccount: '账号信息变更', viewCredential: '查看凭证', deleteAccount: '删除账号',
       pending: '待审核', approved: '已批准', rejected: '已驳回', expired: '已过期', consumed: '已查看', empty: '暂无审批申请',
       field: '字段', before: '变更前', after: '变更后', decisionReason: '审批意见', decisionReasonHint: '批准可选填，驳回时必须填写原因',
+      triggerReason: '触发审批原因', requestNote: '申请说明',
+      triggerUpdate: '账号业务信息变更需要其他管理员复核', triggerCredential: '敏感凭证查看需要其他管理员复核', triggerDelete: '删除账号及关联数据属于高风险操作',
+      businessUpdate: '变更账号业务信息', businessUpdateFields: '变更字段：{fields}', businessCredential: '查看账号敏感凭证', businessDelete: '删除账号及其关联业务数据',
+      sensitiveValue: '敏感值已隐藏',
+      reasons: { deleteAccountReason: '申请删除账号', updateAccountReason: '申请变更账号信息', reauthorizeReason: '申请更新账号授权凭证', updatePoolReason: '申请变更号池账号资料', updateCostReason: '申请变更号池成本记录', credentialAccessReason: '管理员申请查看凭证' },
+      fieldLabels: { name: '账号名称', notes: '备注', type: '账号类型', proxy: '代理', concurrency: '并发数', priority: '优先级', rateMultiplier: '计费倍率', loadFactor: '负载系数', status: '账号状态', groups: '所属分组', expiresAt: '过期时间', autoPauseOnExpired: '过期自动暂停', providerIdentity: '上游账号身份', contributor: '贡献人', uploader: '上传人', costSharingEnabled: '参与 AA 结算', credentialKeys: '变更的凭证键名', extraKeys: '变更的扩展字段', deleteAccount: '删除账号', costEntry: '成本记录', payer: '付款人', purchaseSource: '采购来源', costType: '成本类型', costAmount: '成本金额', currency: '币种', fxRate: '汇率', serviceStart: '服务开始', serviceEnd: '服务结束', warrantyEnd: '质保截止', paidAt: '付款时间', orderNo: '订单号', purchaseUrl: '采购链接', note: '成本备注', expectedTokens: '预期 Token 数' },
       approve: '批准', reject: '驳回', submit: '提交审核', revealOnce: '查看一次', verifyAndReveal: '验证后查看',
       selfReviewBlocked: '申请人不能审批自己的申请，请等待其他管理员处理。', rejectReasonRequired: '驳回时请填写原因',
       approveSuccess: '申请已批准', rejectSuccess: '申请已驳回', credentialSubmitted: '凭证查看申请已提交，等待其他管理员审核',

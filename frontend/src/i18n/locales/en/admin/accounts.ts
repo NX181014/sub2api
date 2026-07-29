@@ -167,6 +167,11 @@ export default {
         actions: 'Actions'
       },
 		importBatchSummary: '{count} accounts imported · {time}',
+      importBatchGroup: 'Import batch',
+      importBatchCount: '{count} accounts',
+      selectImportBatch: 'Select all {count} accounts in this batch',
+      expandImportBatch: 'Expand',
+      collapseImportBatch: 'Collapse',
       schedulerScore: {
         baseShort: 'Base',
         stickyShort: 'Sticky',

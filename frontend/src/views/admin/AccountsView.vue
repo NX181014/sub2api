@@ -206,45 +206,10 @@
           @toggle-schedulable="handleBulkToggleSchedulable"
         />
         <div ref="accountTableRef" class="flex min-h-0 flex-1 flex-col overflow-hidden">
-        <div v-if="importBatchGroups.length" class="mb-3 grid shrink-0 gap-3 px-1 sm:grid-cols-2 xl:grid-cols-3">
-          <article
-            v-for="batch in importBatchGroups"
-            :key="batch.id"
-            class="overflow-hidden rounded-xl border border-emerald-200 bg-white shadow-sm dark:border-emerald-800/60 dark:bg-dark-900"
-          >
-            <button type="button" class="flex w-full items-start justify-between gap-3 p-4 text-left" @click="toggleImportBatch(batch.id)">
-              <div class="min-w-0">
-                <p class="truncate font-semibold text-gray-900 dark:text-white" :title="batch.uploader">
-                  {{ batch.uploader }}
-                </p>
-                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                  {{ t('admin.accounts.importBatchSummary', { count: batch.accounts.length, time: formatDateTime(batch.createdAt) }) }}
-                </p>
-                <p class="mt-2 truncate text-sm text-gray-600 dark:text-gray-300" :title="batch.names">
-                  {{ batch.names }}
-                </p>
-              </div>
-              <Icon :name="expandedImportBatches.has(batch.id) ? 'chevronDown' : 'chevronRight'" size="sm" class="mt-1 shrink-0 text-gray-400" />
-            </button>
-            <div v-if="expandedImportBatches.has(batch.id)" class="space-y-2 border-t border-gray-100 p-3 dark:border-dark-700">
-              <div v-for="account in batch.accounts" :key="account.id" class="flex items-center justify-between gap-3 rounded-lg bg-gray-50 px-3 py-2 dark:bg-dark-800">
-                <div class="min-w-0">
-                  <p class="max-w-56 truncate text-sm font-medium text-gray-900 dark:text-white" :title="account.name">{{ account.name }}</p>
-                  <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">#{{ account.id }} · {{ account.platform }} · {{ formatDateTime(account.created_at) }}</p>
-                </div>
-                <div class="flex shrink-0 items-center gap-1">
-                  <button type="button" class="btn btn-secondary min-h-9 px-2 text-xs" @click.stop="emit('pool-record', account)">{{ t('admin.sharedPool.actions.poolRecord') }}</button>
-                  <button type="button" class="btn btn-secondary min-h-9 px-2 text-xs" @click.stop="handleEdit(account)">{{ t('common.edit') }}</button>
-                </div>
-              </div>
-            </div>
-          </article>
-        </div>
         <DataTable
-          v-if="loading || ungroupedAccounts.length || !importBatchGroups.length"
           ref="dataTableRef"
           :columns="cols"
-          :data="ungroupedAccounts"
+          :data="accountTableRows"
           :loading="loading"
           row-key="id"
           :server-side-sort="true"
@@ -267,13 +232,36 @@
             />
           </template>
           <template #cell-select="{ row }">
-            <input type="checkbox" :checked="isSelected(row.id)" @change="toggleSel(row.id)" class="rounded border-gray-300 text-primary-600 focus:ring-primary-500" />
+            <input
+              type="checkbox"
+              class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+              :checked="isImportBatchRow(row) ? isImportBatchSelected(row) : isSelected(row.id)"
+              :indeterminate="isImportBatchRow(row) && isImportBatchPartiallySelected(row)"
+              :aria-label="isImportBatchRow(row) ? t('admin.accounts.selectImportBatch', { count: row.accounts.length }) : t('common.selectOption')"
+              @change="isImportBatchRow(row) ? toggleImportBatchSelection(row, ($event.target as HTMLInputElement).checked) : toggleSel(row.id)"
+            />
           </template>
-          <template #cell-id="{ value }">
-            <span class="font-mono text-xs text-gray-500 dark:text-gray-400">#{{ value }}</span>
+          <template #cell-id="{ row, value }">
+            <span v-if="isImportBatchRow(row)" class="text-xs tabular-nums text-gray-500 dark:text-gray-400">
+              {{ t('admin.accounts.importBatchCount', { count: row.accounts.length }) }}
+            </span>
+            <span v-else class="font-mono text-xs text-gray-500 dark:text-gray-400">#{{ value }}</span>
           </template>
           <template #cell-name="{ row, value }">
-            <div class="flex flex-col">
+            <button
+              v-if="isImportBatchRow(row)"
+              type="button"
+              class="flex min-h-11 max-w-80 items-center gap-2 text-left"
+              :aria-expanded="expandedImportBatches.has(row.batchID)"
+              @click="toggleImportBatch(row.batchID)"
+            >
+              <Icon :name="expandedImportBatches.has(row.batchID) ? 'chevronDown' : 'chevronRight'" size="sm" class="shrink-0 text-emerald-600 dark:text-emerald-400" />
+              <span class="min-w-0">
+                <span class="block font-semibold text-gray-900 dark:text-white">{{ t('admin.accounts.importBatchGroup') }}</span>
+                <span class="block max-w-64 truncate text-xs text-gray-500 dark:text-gray-400" :title="row.names">{{ row.names }}</span>
+              </span>
+            </button>
+            <div v-else class="flex flex-col" :class="isImportBatchChild(row) ? 'border-l-2 border-emerald-200 pl-4 dark:border-emerald-800' : ''">
               <HelpTooltip
                 v-if="accountHomepageUrl(row)"
                 :content="accountHomepageUrl(row)"
@@ -302,7 +290,21 @@
             </div>
           </template>
           <template #cell-uploader="{ row }">
-            <div class="min-w-0">
+            <button
+              v-if="isImportBatchRow(row)"
+              type="button"
+              class="flex min-h-11 max-w-64 items-center gap-2 text-left"
+              :aria-expanded="expandedImportBatches.has(row.batchID)"
+              @click="toggleImportBatch(row.batchID)"
+            >
+              <Icon :name="expandedImportBatches.has(row.batchID) ? 'chevronDown' : 'chevronRight'" size="sm" class="shrink-0 text-emerald-600 md:hidden" />
+              <span class="min-w-0">
+                <span class="block truncate font-semibold text-gray-900 dark:text-white" :title="row.uploader">{{ row.uploader }}</span>
+                <span class="block text-xs text-gray-500 dark:text-gray-400">{{ t('admin.accounts.importBatchSummary', { count: row.accounts.length, time: formatDateTime(row.createdAt) }) }}</span>
+                <span class="mt-1 block max-w-56 truncate text-xs text-gray-500 dark:text-gray-400 md:hidden" :title="row.names">{{ row.names }}</span>
+              </span>
+            </button>
+            <div v-else class="min-w-0" :class="isImportBatchChild(row) ? 'border-l-2 border-emerald-200 pl-3 dark:border-emerald-800 md:border-0 md:pl-0' : ''">
               <p class="max-w-52 truncate font-medium text-gray-900 dark:text-white" :title="accountUploader(row)">
                 {{ accountUploader(row) }}
               </p>
@@ -311,12 +313,14 @@
               </p>
             </div>
           </template>
-          <template #cell-notes="{ value }">
-            <span v-if="value" :title="value" class="block max-w-xs truncate text-sm text-gray-600 dark:text-gray-300">{{ value }}</span>
-            <span v-else class="text-sm text-gray-400 dark:text-dark-500">-</span>
+          <template #cell-notes="{ row, value }">
+            <template v-if="!isImportBatchRow(row)">
+              <span v-if="value" :title="value" class="block max-w-xs truncate text-sm text-gray-600 dark:text-gray-300">{{ value }}</span>
+              <span v-else class="text-sm text-gray-400 dark:text-dark-500">-</span>
+            </template>
           </template>
           <template #cell-platform_type="{ row }">
-            <div class="flex min-w-0 flex-col gap-1">
+            <div v-if="!isImportBatchRow(row)" class="flex min-w-0 flex-col gap-1">
               <div class="flex flex-wrap items-center gap-1">
                 <PlatformTypeBadge :platform="row.platform" :type="row.type"
                   :auth-mode="getOpenAIAuthMode(row)"
@@ -344,27 +348,28 @@
             </div>
           </template>
           <template #cell-capacity="{ row }">
-            <AccountCapacityCell :account="row" />
+            <AccountCapacityCell v-if="!isImportBatchRow(row)" :account="row" />
           </template>
           <template #cell-status="{ row }">
-            <div class="flex items-center gap-1.5">
+            <div v-if="!isImportBatchRow(row)" class="flex items-center gap-1.5">
               <AccountStatusIndicator :account="row" @show-temp-unsched="handleShowTempUnsched" />
             </div>
           </template>
           <template #cell-schedulable="{ row }">
-            <button @click="handleToggleSchedulable(row)" :disabled="togglingSchedulable === row.id" class="relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 dark:focus:ring-offset-dark-800" :class="[row.schedulable ? 'bg-primary-500 hover:bg-primary-600' : 'bg-gray-200 hover:bg-gray-300 dark:bg-dark-600 dark:hover:bg-dark-500']" :title="row.schedulable ? t('admin.accounts.schedulableEnabled') : t('admin.accounts.schedulableDisabled')">
+            <button v-if="!isImportBatchRow(row)" @click="handleToggleSchedulable(row)" :disabled="togglingSchedulable === row.id" class="relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 dark:focus:ring-offset-dark-800" :class="[row.schedulable ? 'bg-primary-500 hover:bg-primary-600' : 'bg-gray-200 hover:bg-gray-300 dark:bg-dark-600 dark:hover:bg-dark-500']" :title="row.schedulable ? t('admin.accounts.schedulableEnabled') : t('admin.accounts.schedulableDisabled')">
               <span class="pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out" :class="[row.schedulable ? 'translate-x-4' : 'translate-x-0']" />
             </button>
           </template>
           <template #cell-today_stats="{ row }">
             <AccountTodayStatsCell
+              v-if="!isImportBatchRow(row)"
               :stats="todayStatsByAccountId[String(row.id)] ?? null"
               :loading="todayStatsLoading"
               :error="todayStatsError"
             />
           </template>
           <template #cell-groups="{ row }">
-            <AccountGroupsCell :groups="row.groups" :max-display="4" />
+            <AccountGroupsCell v-if="!isImportBatchRow(row)" :groups="row.groups" :max-display="4" />
           </template>
           <template #header-usage="{ column }">
             <div class="flex items-center">
@@ -374,6 +379,7 @@
           </template>
           <template #cell-usage="{ row }">
             <AccountUsageCell
+              v-if="!isImportBatchRow(row)"
               :account="row"
               :today-stats="todayStatsByAccountId[String(row.id)] ?? null"
               :today-stats-loading="todayStatsLoading"
@@ -382,6 +388,7 @@
           </template>
           <template #cell-pool_record="{ row }">
             <button
+              v-if="!isImportBatchRow(row)"
               type="button"
               class="min-h-11 rounded-lg px-2 py-1 text-left transition-colors hover:bg-emerald-50 dark:hover:bg-emerald-900/20"
               @click="emit('pool-record', row)"
@@ -400,7 +407,7 @@
             </button>
           </template>
           <template #cell-proxy="{ row }">
-            <div class="flex flex-col gap-1">
+            <div v-if="!isImportBatchRow(row)" class="flex flex-col gap-1">
               <div v-if="row.proxy" class="flex items-center gap-2">
                 <span class="text-sm text-gray-700 dark:text-gray-300">{{ row.proxy.name }}</span>
                 <span v-if="row.proxy.country_code" class="text-xs text-gray-500 dark:text-gray-400">
@@ -421,7 +428,7 @@
             </div>
           </template>
           <template #cell-rate_multiplier="{ row }">
-            <span class="text-sm font-mono text-gray-700 dark:text-gray-300">
+            <span v-if="!isImportBatchRow(row)" class="text-sm font-mono text-gray-700 dark:text-gray-300">
               {{ (row.rate_multiplier ?? 1).toFixed(2) }}x
             </span>
           </template>
@@ -435,6 +442,7 @@
           </template>
           <template #cell-upstream_billing_rate="{ row }">
             <UpstreamBillingRateCell
+              v-if="!isImportBatchRow(row)"
               :account="row"
               :global-probe-enabled="upstreamBillingProbeGloballyEnabled"
               :now="upstreamBillingNow"
@@ -442,8 +450,8 @@
               @probe="handleProbeUpstreamBilling(row)"
             />
           </template>
-          <template #cell-priority="{ value }">
-            <span class="text-sm text-gray-700 dark:text-gray-300">{{ value }}</span>
+          <template #cell-priority="{ row, value }">
+            <span v-if="!isImportBatchRow(row)" class="text-sm text-gray-700 dark:text-gray-300">{{ value }}</span>
           </template>
           <template #header-scheduler_score="{ column }">
             <div class="flex items-center">
@@ -452,7 +460,7 @@
             </div>
           </template>
           <template #cell-scheduler_score="{ row }">
-            <div v-if="getSchedulerScoreRows(row).length" class="flex min-w-[7rem] flex-col gap-0.5 font-mono text-[11px] leading-4">
+            <div v-if="!isImportBatchRow(row) && getSchedulerScoreRows(row).length" class="flex min-w-[7rem] flex-col gap-0.5 font-mono text-[11px] leading-4">
               <div
                 v-for="score in getSchedulerScoreRows(row)"
                 :key="String(score.group_id)"
@@ -466,16 +474,16 @@
                 <span class="text-primary-700 dark:text-primary-300">{{ formatStickySchedulerScore(score) }}</span>
               </div>
             </div>
-            <span v-else class="text-sm text-gray-400 dark:text-dark-500">-</span>
+            <span v-else-if="!isImportBatchRow(row)" class="text-sm text-gray-400 dark:text-dark-500">-</span>
           </template>
-          <template #cell-last_used_at="{ value }">
-            <span class="text-sm text-gray-500 dark:text-dark-400">{{ formatRelativeTime(value) }}</span>
+          <template #cell-last_used_at="{ row, value }">
+            <span v-if="!isImportBatchRow(row)" class="text-sm text-gray-500 dark:text-dark-400">{{ formatRelativeTime(value) }}</span>
           </template>
-          <template #cell-created_at="{ value }">
-            <span class="text-sm text-gray-500 dark:text-dark-400">{{ formatDateTime(value) }}</span>
+          <template #cell-created_at="{ row, value }">
+            <span v-if="!isImportBatchRow(row)" class="text-sm text-gray-500 dark:text-dark-400">{{ formatDateTime(value) }}</span>
           </template>
           <template #cell-expires_at="{ row, value }">
-            <div class="flex flex-col items-start gap-1">
+            <div v-if="!isImportBatchRow(row)" class="flex flex-col items-start gap-1">
               <span class="text-sm text-gray-500 dark:text-dark-400">{{ formatExpiresAt(value) }}</span>
               <div v-if="isExpired(value) || (row.auto_pause_on_expired && value)" class="flex items-center gap-1">
                 <span
@@ -494,7 +502,17 @@
             </div>
           </template>
           <template #cell-actions="{ row }">
-            <div class="flex items-center gap-1">
+            <button
+              v-if="isImportBatchRow(row)"
+              type="button"
+              class="btn btn-secondary min-h-11 px-3 text-xs"
+              :aria-expanded="expandedImportBatches.has(row.batchID)"
+              @click="toggleImportBatch(row.batchID)"
+            >
+              <Icon :name="expandedImportBatches.has(row.batchID) ? 'chevronDown' : 'chevronRight'" size="sm" />
+              {{ expandedImportBatches.has(row.batchID) ? t('admin.accounts.collapseImportBatch') : t('admin.accounts.expandImportBatch') }}
+            </button>
+            <div v-else class="flex items-center gap-1">
               <button @click="handleEdit(row)" class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-primary-600 dark:hover:bg-dark-700 dark:hover:text-primary-400">
                 <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10" /></svg>
                 <span class="text-xs">{{ t('common.edit') }}</span>
@@ -654,10 +672,21 @@
               <h4 class="font-semibold text-gray-900 dark:text-white">
                 {{ approvalActionLabel(selectedApproval.action_type) }} · {{ selectedApproval.account_name || `#${selectedApproval.account_id}` }}
               </h4>
-              <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">{{ selectedApproval.reason }}</p>
+              <p class="mt-1 text-sm font-medium text-gray-700 dark:text-gray-300">{{ approvalBusinessSummary }}</p>
             </div>
             <StatusBadge :status="approvalStatusBadge(selectedApproval.status)" :label="approvalStatusLabel(selectedApproval.status)" />
           </div>
+
+          <dl class="mt-3 grid gap-2 text-sm sm:grid-cols-2">
+            <div>
+              <dt class="font-medium text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.approval.triggerReason') }}</dt>
+              <dd class="mt-0.5 text-gray-900 dark:text-white">{{ approvalTriggerReason(selectedApproval.action_type) }}</dd>
+            </div>
+            <div>
+              <dt class="font-medium text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.approval.requestNote') }}</dt>
+              <dd class="mt-0.5 break-words text-gray-900 dark:text-white">{{ approvalRequestReason(selectedApproval.reason) }}</dd>
+            </div>
+          </dl>
 
           <div v-if="approvalDiffRows.length" class="mt-4 overflow-hidden rounded-lg border border-gray-200 dark:border-dark-700">
             <div class="hidden grid-cols-[minmax(8rem,0.8fr)_minmax(0,1fr)_minmax(0,1fr)] bg-gray-100 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:bg-dark-800 dark:text-gray-400 sm:grid">
@@ -670,7 +699,7 @@
               :key="row.field"
               class="grid grid-cols-1 gap-2 border-t border-gray-200 px-3 py-3 text-sm dark:border-dark-700 sm:grid-cols-[minmax(8rem,0.8fr)_minmax(0,1fr)_minmax(0,1fr)] sm:gap-3 sm:py-2"
             >
-              <span class="break-all font-mono text-xs text-gray-600 dark:text-gray-300"><span class="font-sans font-semibold sm:hidden">{{ t('admin.sharedPool.approval.field') }}: </span>{{ row.field }}</span>
+              <span class="break-all text-sm font-medium text-gray-700 dark:text-gray-300"><span class="font-semibold sm:hidden">{{ t('admin.sharedPool.approval.field') }}: </span>{{ row.field }}</span>
               <span class="break-all whitespace-pre-wrap text-gray-500 dark:text-gray-400"><span class="font-semibold sm:hidden">{{ t('admin.sharedPool.approval.before') }}: </span>{{ row.before }}</span>
               <span class="break-all whitespace-pre-wrap text-gray-900 dark:text-white"><span class="font-semibold sm:hidden">{{ t('admin.sharedPool.approval.after') }}: </span>{{ row.after }}</span>
             </div>
@@ -814,7 +843,7 @@ const emit = defineEmits<{
   'pool-imported': [accounts: Array<{ id: number; name: string }>]
 }>()
 
-const { t } = useI18n()
+const { t, te } = useI18n()
 const appStore = useAppStore()
 const authStore = useAuthStore()
 
@@ -928,12 +957,56 @@ const approvalColumns = computed(() => [
 
 const credentialRevealJSON = computed(() => JSON.stringify(credentialReveal.value?.credentials ?? {}, null, 2))
 const SENSITIVE_APPROVAL_FIELD = /(credential|token|secret|password|api[_-]?key|cookie|authorization)/i
+const APPROVAL_FIELD_LABELS: Record<string, string> = {
+  name: 'name', notes: 'notes', type: 'type', proxy_id: 'proxy', concurrency: 'concurrency', priority: 'priority',
+  rate_multiplier: 'rateMultiplier', load_factor: 'loadFactor', status: 'status', group_ids: 'groups', expires_at: 'expiresAt',
+  auto_pause_on_expired: 'autoPauseOnExpired', provider_identity: 'providerIdentity', contributor_user_id: 'contributor',
+  created_by_user_id: 'uploader', cost_sharing_enabled: 'costSharingEnabled', credential_keys: 'credentialKeys',
+  extra_keys: 'extraKeys', delete_account: 'deleteAccount', cost_entry_id: 'costEntry', cost_payer_user_id: 'payer',
+  cost_purchase_source_id: 'purchaseSource', cost_entry_type: 'costType', cost_original_amount: 'costAmount',
+  cost_currency: 'currency', cost_fx_rate: 'fxRate', cost_service_start: 'serviceStart', cost_service_end: 'serviceEnd',
+  cost_warranty_end: 'warrantyEnd', cost_paid_at: 'paidAt', cost_order_no: 'orderNo', cost_purchase_url: 'purchaseUrl',
+  cost_note: 'note', cost_expected_token_count: 'expectedTokens'
+}
+const APPROVAL_ACCOUNT_TYPE_KEYS: Record<string, string> = {
+  oauth: 'admin.accounts.types.oauth',
+  'setup-token': 'admin.accounts.setupToken',
+  apikey: 'admin.accounts.apiKey',
+  bedrock: 'admin.accounts.bedrockLabel'
+}
+const approvalFieldLabel = (path: string) => {
+  const field = path.replace(/^fields\./, '')
+  const key = APPROVAL_FIELD_LABELS[field]
+  return key ? t(`admin.sharedPool.approval.fieldLabels.${key}`) : field
+}
+const approvalValuesEqual = (before: unknown, after: unknown) => {
+  if (Object.is(before, after)) return true
+  if (typeof before !== 'object' || typeof after !== 'object' || before === null || after === null) return false
+  return JSON.stringify(before) === JSON.stringify(after)
+}
 const formatApprovalValue = (value: unknown, field: string): string => {
   if (value === undefined || value === null || value === '') return '-'
   if (field.endsWith('_keys') && Array.isArray(value)) return value.join(', ') || '-'
-  if (SENSITIVE_APPROVAL_FIELD.test(field)) return '••••••'
+  if (SENSITIVE_APPROVAL_FIELD.test(field)) return t('admin.sharedPool.approval.sensitiveValue')
+  if (typeof value === 'boolean') return t(value ? 'common.yes' : 'common.no')
+  const normalizedField = field.replace(/^fields\./, '')
+  if (normalizedField === 'status' && typeof value === 'string') {
+    const key = `admin.accounts.status.${value}`
+    return te(key) ? t(key) : value
+  }
+  if (normalizedField === 'type' && typeof value === 'string') {
+    const key = APPROVAL_ACCOUNT_TYPE_KEYS[value]
+    return key && te(key) ? t(key) : value
+  }
+  if (normalizedField === 'cost_entry_type' && typeof value === 'string') {
+    const key = `admin.sharedPool.entryTypes.${value}`
+    return te(key) ? t(key) : value
+  }
+  if ((normalizedField.endsWith('_at') || normalizedField.endsWith('_start') || normalizedField.endsWith('_end')) && (typeof value === 'string' || typeof value === 'number')) {
+    return formatDateTime(typeof value === 'number' ? new Date(value * 1000) : value)
+  }
   if (typeof value !== 'object') return String(value)
-  return JSON.stringify(value, (key, nested) => SENSITIVE_APPROVAL_FIELD.test(key) ? '••••••' : nested, 2)
+  return JSON.stringify(value, (key, nested) => SENSITIVE_APPROVAL_FIELD.test(key) ? t('admin.sharedPool.approval.sensitiveValue') : nested, 2)
 }
 
 const approvalDiffRows = computed(() => {
@@ -947,8 +1020,9 @@ const approvalDiffRows = computed(() => {
     const beforeRecord = before as Record<string, unknown>
     const afterRecord = after as Record<string, unknown>
     for (const field of new Set([...Object.keys(beforeRecord), ...Object.keys(afterRecord)])) {
+      if (approvalValuesEqual(beforeRecord[field], afterRecord[field])) continue
       rows.push({
-        field,
+        field: approvalFieldLabel(field),
         before: formatApprovalValue(beforeRecord[field], field),
         after: formatApprovalValue(afterRecord[field], field)
       })
@@ -964,19 +1038,22 @@ const approvalDiffRows = computed(() => {
           const change = rawChange as Record<string, unknown>
           const hasPair = 'before' in change || 'after' in change || 'old' in change || 'new' in change
           if (hasPair) {
+            const previousValue = change.before ?? change.old
+            const nextValue = change.after ?? change.new
+            if (approvalValuesEqual(previousValue, nextValue)) continue
             rows.push({
-              field: path,
-              before: formatApprovalValue(change.before ?? change.old, path),
-              after: formatApprovalValue(change.after ?? change.new, path)
+              field: approvalFieldLabel(path),
+              before: formatApprovalValue(previousValue, path),
+              after: formatApprovalValue(nextValue, path)
             })
             continue
           }
         }
-        rows.push({ field: path, before: '-', after: formatApprovalValue(rawChange, path) })
+        rows.push({ field: approvalFieldLabel(path), before: '-', after: formatApprovalValue(rawChange, path) })
       }
       continue
     }
-    rows.push({ field: section, before: '-', after: formatApprovalValue(rawSection, section) })
+    rows.push({ field: approvalFieldLabel(section), before: '-', after: formatApprovalValue(rawSection, section) })
   }
   return rows
 })
@@ -1316,17 +1393,56 @@ const importBatchAccountGroups = computed(() => {
   }
   return groups
 })
-const importBatchGroups = computed(() => [...importBatchAccountGroups.value.entries()].filter(([, items]) => items.length > 1).map(([id, items]) => ({
+const importBatchGroups = computed(() => [...importBatchAccountGroups.value.entries()].map(([id, items]) => ({
     id,
     accounts: items,
     uploader: accountUploader(items[0]!),
     createdAt: items[0]!.created_at,
     names: items.map(item => item.name).join('、')
   })))
-const ungroupedAccounts = computed(() => accounts.value.filter(account => {
-  const id = importBatchID(account)
-  return !id || (importBatchAccountGroups.value.get(id)?.length || 0) < 2
-}))
+type ImportBatchRow = {
+  __rowKind: 'import-batch'
+  id: string
+  batchID: string
+  accounts: Account[]
+  uploader: string
+  createdAt: string
+  names: string
+}
+type AccountTableRow = Account | ImportBatchRow
+const isImportBatchRow = (row: AccountTableRow): row is ImportBatchRow => '__rowKind' in row && row.__rowKind === 'import-batch'
+const isImportBatchChild = (row: AccountTableRow): row is Account => {
+  if (isImportBatchRow(row)) return false
+  const id = importBatchID(row)
+  return Boolean(id && importBatchAccountGroups.value.has(id))
+}
+const accountTableRows = computed<AccountTableRow[]>(() => {
+  const batchRows = new Map(importBatchGroups.value.map(batch => [batch.id, batch]))
+  const emitted = new Set<string>()
+  const rows: AccountTableRow[] = []
+
+  for (const account of accounts.value) {
+    const batchID = importBatchID(account)
+    const batch = batchRows.get(batchID)
+    if (!batch) {
+      rows.push(account)
+      continue
+    }
+    if (emitted.has(batchID)) continue
+    emitted.add(batchID)
+    rows.push({
+      __rowKind: 'import-batch',
+      id: `import-batch:${batchID}`,
+      batchID,
+      accounts: batch.accounts,
+      uploader: batch.uploader,
+      createdAt: batch.createdAt,
+      names: batch.names
+    })
+    if (expandedImportBatches.value.has(batchID)) rows.push(...batch.accounts)
+  }
+  return rows
+})
 const toggleImportBatch = (id: string) => {
   const next = new Set(expandedImportBatches.value)
   next.has(id) ? next.delete(id) : next.add(id)
@@ -1350,11 +1466,19 @@ const {
   rows: accounts,
   getId: (account) => account.id
 })
+const isImportBatchSelected = (batch: ImportBatchRow) => batch.accounts.every(account => isSelected(account.id))
+const isImportBatchPartiallySelected = (batch: ImportBatchRow) => {
+  const selectedCount = batch.accounts.filter(account => isSelected(account.id)).length
+  return selectedCount > 0 && selectedCount < batch.accounts.length
+}
+const toggleImportBatchSelection = (batch: ImportBatchRow, checked: boolean) => {
+  for (const account of batch.accounts) checked ? select(account.id) : deselect(account.id)
+}
 
 const swipeVirtualContext: SwipeSelectVirtualContext = {
   getVirtualizer: () => dataTableRef.value?.virtualizer ?? null,
   getSortedData: () => dataTableRef.value?.sortedData ?? accounts.value,
-  getRowId: (row: any) => row.id,
+  getRowId: (row: AccountTableRow) => isImportBatchRow(row) ? null : row.id,
 }
 
 useSwipeSelect(accountTableRef, {
@@ -1892,10 +2016,7 @@ const poolRecoveryLabel = (account: Account) => {
   return `${t('admin.sharedPool.status.recovering')} ${(Math.max(0, progress) * 100).toFixed(1)}%`
 }
 
-const normalizeApprovalStatus = (status: string) => {
-  const normalized = status.toLowerCase()
-  return normalized === 'consumed' ? 'revealed' : normalized
-}
+const normalizeApprovalStatus = (status: string) => status.toLowerCase()
 
 const approvalActionLabel = (action: PoolApproval['action_type']) => t(
   action === 'VIEW_CREDENTIAL'
@@ -1904,6 +2025,38 @@ const approvalActionLabel = (action: PoolApproval['action_type']) => t(
 		  ? 'admin.sharedPool.approval.deleteAccount'
 		  : 'admin.sharedPool.approval.updateAccount'
 )
+
+const approvalTriggerReason = (action: PoolApproval['action_type']) => t(
+  action === 'VIEW_CREDENTIAL'
+    ? 'admin.sharedPool.approval.triggerCredential'
+    : action === 'DELETE_ACCOUNT'
+      ? 'admin.sharedPool.approval.triggerDelete'
+      : 'admin.sharedPool.approval.triggerUpdate'
+)
+
+const approvalRequestReason = (reason: string) => {
+  const defaults: Record<string, string> = {
+    'delete account': 'deleteAccountReason',
+    'update account information': 'updateAccountReason',
+    'reauthorize account credentials': 'reauthorizeReason',
+    'update shared pool account metadata': 'updatePoolReason',
+    'update shared pool account cost record': 'updateCostReason',
+    'primary administrator direct credential access': 'credentialAccessReason'
+  }
+  const key = defaults[reason.trim().toLowerCase()]
+  return key ? t(`admin.sharedPool.approval.reasons.${key}`) : reason || '-'
+}
+
+const approvalBusinessSummary = computed(() => {
+  const approval = selectedApproval.value
+  if (!approval) return ''
+  if (approval.action_type === 'DELETE_ACCOUNT') return t('admin.sharedPool.approval.businessDelete')
+  if (approval.action_type === 'VIEW_CREDENTIAL') return t('admin.sharedPool.approval.businessCredential')
+  const fields = approvalDiffRows.value.map(row => row.field).join('、')
+  return fields
+    ? t('admin.sharedPool.approval.businessUpdateFields', { fields })
+    : t('admin.sharedPool.approval.businessUpdate')
+})
 
 const approvalStatusLabel = (status: string) => {
   const normalized = normalizeApprovalStatus(status)
@@ -2157,8 +2310,46 @@ const toggleSelectAllVisible = (event: Event) => {
   const target = event.target as HTMLInputElement
   toggleVisible(target.checked)
 }
-const handleBulkDelete = () => {
-  appStore.showWarning(t('admin.sharedPool.delete.bulkRequiresIndividual', { count: selIds.value.length }))
+const handleBulkDelete = async () => {
+  const accountIDs = [...selIds.value]
+  if (!accountIDs.length || !confirm(t('admin.sharedPool.delete.bulkConfirm', { count: accountIDs.length }))) return
+
+	let remainingIDs = [...accountIDs]
+	let activeChunk: number[] = []
+	const failedIDs = new Set<number>()
+	let deleted = 0
+	let approvalRequired = 0
+	let failed = 0
+  try {
+		while (remainingIDs.length) {
+			activeChunk = remainingIDs.splice(0, 100)
+			const result = await adminAPI.accounts.bulkDelete(activeChunk)
+			deleted += result.deleted
+			approvalRequired += result.approval_required
+			failed += result.failed
+			const affectedIDs = new Set<number>()
+			for (const item of result.results) {
+				if (item.status === 'failed') failedIDs.add(item.account_id)
+				for (const id of item.result?.affected_account_ids || []) affectedIDs.add(id)
+			}
+			if (affectedIDs.size) remainingIDs = remainingIDs.filter(id => !affectedIDs.has(id))
+			activeChunk = []
+		}
+		setSelectedIds([...failedIDs])
+    const message = t('admin.sharedPool.delete.bulkSummary', {
+			deleted,
+			approval: approvalRequired,
+			failed
+    })
+		failed ? appStore.showError(message) : appStore.showSuccess(message)
+    await reload()
+    void loadPendingApprovalCount()
+  } catch (error) {
+		setSelectedIds([...new Set([...failedIDs, ...activeChunk, ...remainingIDs])])
+    appStore.showError(extractApiErrorMessage(error, t('admin.sharedPool.delete.failed')))
+		await reload()
+		void loadPendingApprovalCount()
+  }
 }
 const handleBulkResetStatus = async () => {
   if (!confirm(t('common.confirm'))) return

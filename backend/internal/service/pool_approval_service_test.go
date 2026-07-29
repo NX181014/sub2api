@@ -6,6 +6,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 )
@@ -67,6 +68,27 @@ func TestPoolApprovalSummaryListsOnlyChangedCredentialKeys(t *testing.T) {
 	}
 }
 
+func TestPoolApprovalSummaryOmitsUnchangedFieldsAndExtraKeys(t *testing.T) {
+	priority := 10
+	contributorID := int64(7)
+	expiresAt := time.Unix(1_800_000_000, 0)
+	expiresAtUnix := expiresAt.Unix()
+	summary := buildPoolApprovalSummary(
+		&Account{Name: "same", Priority: priority, ExpiresAt: &expiresAt, Extra: map[string]any{"same": true, "changed": "before", "removed": true}},
+		&PoolApprovalAccountState{ContributorUserID: &contributorID},
+		nil,
+		PoolApprovalPayload{AccountUpdate: &UpdateAccountInput{
+			Name: "same", Priority: &priority, ExpiresAt: &expiresAtUnix, Extra: map[string]any{"same": true, "changed": "after"},
+		}, PoolUpdate: &UpdatePoolAccountInput{ContributorUserID: &contributorID}},
+	)
+	if len(summary.Fields) != 0 {
+		t.Fatalf("unchanged fields should be omitted: %#v", summary.Fields)
+	}
+	if len(summary.ExtraKeys) != 2 || summary.ExtraKeys[0] != "changed" || summary.ExtraKeys[1] != "removed" {
+		t.Fatalf("unexpected extra key summary: %#v", summary.ExtraKeys)
+	}
+}
+
 func TestPoolApprovalRevisionTracksOnlyMergedExtraKeys(t *testing.T) {
 	account := &Account{Extra: map[string]any{"account_uuid": "before", "runtime": "one"}}
 	pool := &PoolApprovalAccountState{}
@@ -94,8 +116,8 @@ func TestPoolApprovalRevisionTracksOnlyMergedExtraKeys(t *testing.T) {
 }
 
 func TestPoolApprovalSummaryRedactsCredentialAndProviderValues(t *testing.T) {
-	beforeProvider := "provider-secret-before"
-	afterProvider := "provider-secret-after"
+	beforeProvider := "ab-provider-one-yz"
+	afterProvider := "ab-provider-two-yz"
 	summary := buildPoolApprovalSummary(
 		&Account{Credentials: map[string]any{"access_token": "old-secret"}},
 		&PoolApprovalAccountState{ProviderIdentity: &beforeProvider},
@@ -117,6 +139,9 @@ func TestPoolApprovalSummaryRedactsCredentialAndProviderValues(t *testing.T) {
 	}
 	if len(summary.CredentialKeys) != 1 || summary.CredentialKeys[0] != "access_token" {
 		t.Fatalf("unexpected credential key summary: %#v", summary.CredentialKeys)
+	}
+	if _, ok := summary.Fields["provider_identity"]; !ok {
+		t.Fatal("a provider identity change with the same mask must remain visible")
 	}
 }
 
