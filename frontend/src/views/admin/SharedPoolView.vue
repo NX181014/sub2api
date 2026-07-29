@@ -162,7 +162,10 @@
                   {{ t('admin.sharedPool.overview.accountRecovery') }}
                 </h2>
               </div>
-              <DataTable :columns="overviewColumns" :data="overview.accounts" row-key="id" :loading="loading">
+              <div v-if="paginatedOverviewAccounts.length" class="h-52 border-b border-gray-100 p-3 dark:border-dark-700">
+                <Bar :data="overviewChartData" :options="overviewChartOptions" />
+              </div>
+              <DataTable :columns="overviewColumns" :data="paginatedOverviewAccounts" row-key="id" :loading="loading" :mobile-column-keys="['account_name', 'uploader_name', 'uploaded_at', 'roi_rate', 'remaining_cost']">
                 <template #cell-account_name="{ row }">
                   <div class="min-w-0">
                     <button
@@ -177,6 +180,12 @@
                       {{ row.provider_identity || '-' }}
                     </p>
                   </div>
+                </template>
+                <template #cell-uploader_name="{ row }">
+                  <span class="block max-w-40 truncate" :title="row.uploader_name || ''">{{ row.uploader_name || '-' }}</span>
+                </template>
+                <template #cell-uploaded_at="{ row }">
+                  <span class="whitespace-nowrap">{{ row.uploaded_at ? formatDateTimeToMinute(row.uploaded_at, locale) : '-' }}</span>
                 </template>
                 <template #cell-status="{ row }">
                   <StatusBadge
@@ -210,6 +219,14 @@
                   </span>
                 </template>
               </DataTable>
+              <Pagination
+                v-if="overview.accounts.length"
+                :page="overviewPagination.page"
+                :page-size="overviewPagination.page_size"
+                :total="overview.accounts.length"
+                @update:page="overviewPagination.page = $event"
+                @update:page-size="changeOverviewPageSize"
+              />
             </section>
           </div>
         </template>
@@ -236,6 +253,15 @@
           @pool-import-request="prepareAccountAction('import')"
           @pool-created="completeCreatedAccountIntake"
           @pool-imported="completeImportedAccountsIntake"
+        />
+      </template>
+
+      <template v-else-if="activeTab === 'ledger'">
+        <CostLedgerPanel
+          :initial-purchase-source-id="routeQueryID('purchase_source_id')"
+          :initial-uploader-user-id="routeQueryID('uploader_user_id')"
+          @open-account="openLedgerAccount"
+          @edit-entry="openLedgerEntry"
         />
       </template>
 
@@ -350,37 +376,46 @@
               <Bar :data="sourceChartData" :options="sourceChartOptions" />
             </div>
           </section>
-          <section class="card overflow-hidden xl:col-span-3">
+          <section class="card min-w-0 overflow-hidden xl:col-span-3">
             <div class="border-b border-gray-100 px-4 py-3 dark:border-dark-700">
               <h2 class="text-sm font-semibold text-gray-900 dark:text-white">{{ t('admin.sharedPool.sources.title') }}</h2>
               <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.sources.sampleHint') }}</p>
             </div>
-            <DataTable :columns="sourceColumns" :data="sources" row-key="name" :loading="loading" :mobile-column-keys="['name', 'uploaders', 'account_count', 'roi_rate', 'ban_rate_30d']">
-              <template #cell-name="{ row }">
-                <div class="flex items-center gap-2">
-                  <span class="font-medium text-gray-900 dark:text-white">{{ row.name }}</span>
-                  <span v-if="row.sample_size < 5" class="rounded bg-gray-100 px-1.5 py-0.5 text-xs text-gray-500 dark:bg-dark-700 dark:text-gray-400">
-                    {{ t('admin.sharedPool.sources.smallSample') }}
+            <div class="space-y-3 p-3 sm:p-4">
+              <article v-for="group in paginatedSources" :key="sourceUploaderKey(group)" class="overflow-hidden rounded-lg border border-gray-200 dark:border-dark-700">
+                <button type="button" class="flex min-h-14 w-full items-center justify-between gap-3 px-3 py-2 text-left sm:px-4" @click="toggleSourceUploader(group)">
+                  <span class="min-w-0">
+                    <span class="block truncate font-semibold text-gray-900 dark:text-white">{{ group.uploader_name }}</span>
+                    <span class="block text-xs text-gray-500 dark:text-gray-400">{{ group.account_count }} {{ t('admin.sharedPool.columns.accounts') }} / {{ group.sources.length }} {{ t('admin.sharedPool.columns.source') }}</span>
                   </span>
-                </div>
-              </template>
-              <template #cell-roi_rate="{ row }"><span class="font-medium tabular-nums">{{ formatPercent(row.roi_rate) }}</span></template>
-              <template #cell-ban_rate_30d="{ row }"><span class="tabular-nums text-red-600 dark:text-red-400">{{ formatPercent(row.ban_rate_30d) }}</span></template>
-              <template #cell-purchase_cost="{ row }"><span class="tabular-nums">{{ formatMoney(row.purchase_cost) }}</span></template>
-              <template #cell-uploaders="{ row }">
-                <span class="block max-w-52 truncate" :title="sourceUploaderLabel(row)">{{ sourceUploaderLabel(row) }}</span>
-              </template>
-              <template #cell-actions="{ row }">
-                <button
-                  type="button"
-                  class="btn btn-secondary min-h-9 whitespace-nowrap px-2 text-xs"
-                  :disabled="!sourceID(row)"
-                  @click="openSourceLedger(row)"
-                >
-                  {{ t('admin.sharedPool.sources.locateRecords') }}
+                  <span class="shrink-0 text-xs font-medium text-primary-600 dark:text-primary-400">{{ expandedSourceUploaders.has(sourceUploaderKey(group)) ? t('common.collapse') : t('common.expand') }}</span>
                 </button>
-              </template>
-            </DataTable>
+                <dl class="grid grid-cols-3 gap-2 border-t border-gray-100 bg-gray-50 px-3 py-2 text-xs dark:border-dark-700 dark:bg-dark-800/60 sm:px-4">
+                  <div><dt class="text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.columns.cost') }}</dt><dd class="mt-1 font-medium tabular-nums">{{ formatMoney(group.purchase_cost) }}</dd></div>
+                  <div><dt class="text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.columns.roi') }}</dt><dd class="mt-1 font-medium tabular-nums">{{ formatPercent(group.roi_rate) }}</dd></div>
+                  <div><dt class="text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.columns.ban30') }}</dt><dd class="mt-1 font-medium tabular-nums text-red-600 dark:text-red-400">{{ formatPercent(group.ban_rate_30d) }}</dd></div>
+                </dl>
+                <div v-if="expandedSourceUploaders.has(sourceUploaderKey(group))" class="space-y-2 border-t border-gray-100 p-2 dark:border-dark-700 sm:p-3">
+                  <article v-for="source in group.sources" :key="sourceItemKey(group, source)" class="rounded-md border border-gray-100 dark:border-dark-700">
+                    <button type="button" class="flex min-h-12 w-full items-center justify-between gap-3 px-3 py-2 text-left" @click="toggleSourceItem(group, source)">
+                      <span class="min-w-0"><span class="block truncate text-sm font-medium">{{ source.name }}</span><span class="block text-xs text-gray-500 dark:text-gray-400">{{ source.account_count }} {{ t('admin.sharedPool.columns.accounts') }} / {{ formatPercent(source.roi_rate) }}</span></span>
+                      <span class="shrink-0 text-xs text-primary-600 dark:text-primary-400">{{ expandedSourceItems.has(sourceItemKey(group, source)) ? t('common.collapse') : t('common.expand') }}</span>
+                    </button>
+                    <div v-if="expandedSourceItems.has(sourceItemKey(group, source))" class="border-t border-gray-100 dark:border-dark-700">
+                      <div v-for="account in source.accounts" :key="account.account_id" class="grid grid-cols-[minmax(0,1fr)_auto] gap-3 border-b border-gray-100 px-3 py-2 text-sm last:border-b-0 dark:border-dark-700 sm:grid-cols-[minmax(0,1fr)_150px_110px]">
+                        <div class="min-w-0"><p class="truncate font-medium" :title="account.account_name">{{ account.account_name }}</p><p class="truncate text-xs text-gray-500 dark:text-gray-400">{{ formatDateTimeToMinute(account.uploaded_at, locale) }}</p></div>
+                        <span class="hidden self-center text-right tabular-nums sm:block">{{ formatMoney(account.purchase_cost) }}</span>
+                        <span class="self-center text-right font-medium tabular-nums">{{ formatPercent(account.roi_rate) }}</span>
+                      </div>
+                      <div class="border-t border-gray-100 p-2 text-right dark:border-dark-700">
+                        <button type="button" class="btn btn-secondary min-h-10 px-3 text-xs" :disabled="!sourceID(source)" @click="openSourceLedger(group, source)">{{ t('admin.sharedPool.sources.locateRecords') }}</button>
+                      </div>
+                    </div>
+                  </article>
+                </div>
+              </article>
+            </div>
+            <Pagination v-if="sources.length" :page="sourcePagination.page" :page-size="sourcePagination.page_size" :total="sources.length" @update:page="sourcePagination.page = $event" @update:page-size="changeSourcePageSize" />
           </section>
         </div>
         <EmptyState v-else :title="t('admin.sharedPool.empty.sources')" />
@@ -572,6 +607,7 @@ import {
 } from 'chart.js'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import AccountsView from '@/views/admin/AccountsView.vue'
+import CostLedgerPanel from '@/views/admin/shared-pool/CostLedgerPanel.vue'
 import {
   BaseDialog,
   ConfirmDialog,
@@ -579,6 +615,7 @@ import {
   EmptyState,
   FormDialogActions,
   LoadingSpinner,
+  Pagination,
   StatCard
 } from '@/components/common'
 import DateRangePicker from '@/components/common/DateRangePicker.vue'
@@ -599,6 +636,7 @@ import type {
   SharedPoolOverview,
   SharedPoolSettlementPreview,
   SharedPoolSourceStat,
+  SharedPoolUploaderSourceGroup,
   SharedPoolPurchaseSource,
   SharedPoolLedgerEntry
 } from '@/api/admin/sharedPool'
@@ -632,7 +670,7 @@ const appStore = useAppStore()
 const authStore = useAuthStore()
 const initialPeriod = resolvePoolPeriod('month')
 const requestedTab = Array.isArray(route.query.tab) ? route.query.tab[0] : route.query.tab
-const activeTab = ref<TabKey>(['overview', 'accounts', 'settlement', 'sources'].includes(String(requestedTab)) ? requestedTab as TabKey : 'accounts')
+const activeTab = ref<TabKey>(['overview', 'accounts', 'ledger', 'settlement', 'sources'].includes(String(requestedTab)) ? requestedTab as TabKey : 'accounts')
 const periodType = ref<PoolPeriodType>('month')
 const startDate = ref(initialPeriod.start)
 const endDate = ref(initialPeriod.end)
@@ -653,7 +691,7 @@ const showPaidConfirm = ref(false)
 const overview = ref<SharedPoolOverview | null>(null)
 const accountCosts = ref<SharedPoolAccountCost[]>([])
 const settlement = ref<SharedPoolSettlementPreview | null>(null)
-const sources = ref<SharedPoolSourceStat[]>([])
+const sources = ref<SharedPoolUploaderSourceGroup[]>([])
 const purchaseSources = ref<SharedPoolPurchaseSource[]>([])
 const accountOptions = ref<Array<{ value: number; label: string }>>([])
 const userOptions = ref<Array<{ value: number; label: string }>>([])
@@ -667,6 +705,10 @@ const retryAccounts = ref<CreatedAccount[]>([])
 const autoAccountIdentity = ref(false)
 const recoveryRecord = ref<SharedPoolAccountCost | null>(null)
 const editingLedgerEntry = ref<SharedPoolLedgerEntry | null>(null)
+const overviewPagination = reactive({ page: 1, page_size: 10 })
+const sourcePagination = reactive({ page: 1, page_size: 8 })
+const expandedSourceUploaders = ref(new Set<string>())
+const expandedSourceItems = ref(new Set<string>())
 
 const tabs = computed(() => [
   { key: 'overview' as const, label: t('admin.sharedPool.tabs.overview'), icon: 'chart' as const },
@@ -719,6 +761,8 @@ const CarryIcon = { render: () => h(Icon, { name: 'swap', size: 'lg' }) }
 
 const overviewColumns = computed<Column[]>(() => [
   { key: 'account_name', label: t('admin.sharedPool.columns.account'), sortable: true },
+  { key: 'uploader_name', label: t('admin.sharedPool.columns.uploader'), sortable: true },
+  { key: 'uploaded_at', label: t('admin.sharedPool.columns.uploadedAt'), sortable: true },
   { key: 'purchase_source_name', label: t('admin.sharedPool.columns.source'), sortable: true },
   { key: 'status', label: t('admin.sharedPool.columns.status'), sortable: true },
   { key: 'usage_value', label: t('admin.sharedPool.metrics.usageValue'), sortable: true },
@@ -727,6 +771,29 @@ const overviewColumns = computed<Column[]>(() => [
   { key: 'net_profit', label: t('admin.sharedPool.columns.netProfit'), sortable: true },
   { key: 'recovered_at', label: t('admin.sharedPool.columns.recoveredAt'), sortable: true }
 ])
+
+const paginatedOverviewAccounts = computed(() => {
+  const start = (overviewPagination.page - 1) * overviewPagination.page_size
+  return (overview.value?.accounts || []).slice(start, start + overviewPagination.page_size)
+})
+
+const overviewChartData = computed<ChartData<'bar'>>(() => ({
+  labels: paginatedOverviewAccounts.value.map((account) => account.account_name),
+  datasets: [{
+    label: t('admin.sharedPool.columns.roi'),
+    data: paginatedOverviewAccounts.value.map((account) => account.roi_rate),
+    backgroundColor: 'rgba(34, 197, 94, 0.72)',
+    borderRadius: 4
+  }]
+}))
+
+const overviewChartOptions = computed<ChartOptions<'bar'>>(() => ({
+  responsive: true,
+  maintainAspectRatio: false,
+  indexAxis: 'y',
+  plugins: { legend: { display: false } },
+  scales: { x: { beginAtZero: true, ticks: { callback: (value) => `${value}%` } }, y: { grid: { display: false } } }
+}))
 
 const settlementColumns = computed<Column[]>(() => [
   { key: 'user_name', label: t('admin.sharedPool.columns.member'), sortable: true },
@@ -751,28 +818,9 @@ const settlementSourceOptions = computed(() => [
   ...purchaseSources.value.map(source => ({ value: source.id, label: source.name }))
 ])
 
-const sourceColumns = computed<Column[]>(() => [
-  { key: 'name', label: t('admin.sharedPool.columns.source'), sortable: true },
-  { key: 'uploaders', label: t('admin.sharedPool.columns.uploader') },
-  { key: 'account_count', label: t('admin.sharedPool.columns.accounts'), sortable: true },
-  { key: 'purchase_cost', label: t('admin.sharedPool.columns.cost'), sortable: true },
-  { key: 'roi_rate', label: t('admin.sharedPool.columns.roi'), sortable: true },
-  { key: 'ban_rate_30d', label: t('admin.sharedPool.columns.ban30'), sortable: true },
-  { key: 'average_survival_days', label: t('admin.sharedPool.columns.survival'), sortable: true },
-  { key: 'actions', label: t('admin.sharedPool.columns.actions') }
-])
-
-const sourceAccountMetadata = computed(() => {
-  const metadata = new Map<string, { accountIDs: Set<number>; uploaderNames: Set<string> }>()
-  for (const record of accountCosts.value) {
-    const key = record.purchase_source_name.trim().toLocaleLowerCase()
-    if (!key) continue
-    const item = metadata.get(key) || { accountIDs: new Set<number>(), uploaderNames: new Set<string>() }
-    item.accountIDs.add(record.account_id)
-    if (record.uploader_name) item.uploaderNames.add(record.uploader_name)
-    metadata.set(key, item)
-  }
-  return metadata
+const paginatedSources = computed(() => {
+  const start = (sourcePagination.page - 1) * sourcePagination.page_size
+  return sources.value.slice(start, start + sourcePagination.page_size)
 })
 
 const hasActiveData = computed(() => {
@@ -784,17 +832,17 @@ const hasActiveData = computed(() => {
 })
 
 const sourceChartData = computed<ChartData<'bar'>>(() => ({
-  labels: sources.value.map((source) => source.name),
+  labels: paginatedSources.value.map((source) => source.uploader_name),
   datasets: [
     {
       label: t('admin.sharedPool.columns.roi'),
-      data: sources.value.map((source) => source.roi_rate),
+      data: paginatedSources.value.map((source) => source.roi_rate),
       backgroundColor: 'rgba(34, 197, 94, 0.72)',
       borderRadius: 4
     },
     {
       label: t('admin.sharedPool.columns.ban30'),
-      data: sources.value.map((source) => source.ban_rate_30d),
+      data: paginatedSources.value.map((source) => source.ban_rate_30d),
       backgroundColor: 'rgba(239, 68, 68, 0.68)',
       borderRadius: 4
     }
@@ -907,32 +955,45 @@ function handleDateRangeChange(range: { startDate: string; endDate: string }) {
 }
 
 function switchTab(tab: TabKey) {
-  if (tab === 'ledger') {
-    void router.push({ name: 'AdminSharedPoolLedger' })
-    return
-  }
   activeTab.value = tab
   void router.replace({ query: { tab } })
-  void loadActiveTab()
+  if (tab !== 'ledger') void loadActiveTab()
 }
 
 const sourceID = (source: SharedPoolSourceStat) => purchaseSources.value.find(
   (item) => item.name.trim().toLocaleLowerCase() === source.name.trim().toLocaleLowerCase()
 )?.id
-const sourceUploaderLabel = (source: SharedPoolSourceStat) => {
-  const names = [...(sourceAccountMetadata.value.get(source.name.trim().toLocaleLowerCase())?.uploaderNames || [])]
-  return names.length ? names.join(', ') : '-'
+const sourceUploaderKey = (group: SharedPoolUploaderSourceGroup) => String(group.uploader_user_id || `name:${group.uploader_name}`)
+const sourceItemKey = (group: SharedPoolUploaderSourceGroup, source: SharedPoolSourceStat) => `${sourceUploaderKey(group)}:${source.name}`
+const toggleSetValue = (target: Set<string>, key: string) => {
+  const next = new Set(target)
+  if (next.has(key)) next.delete(key)
+  else next.add(key)
+  return next
 }
-const openSourceLedger = (source: SharedPoolSourceStat) => {
+const toggleSourceUploader = (group: SharedPoolUploaderSourceGroup) => {
+  expandedSourceUploaders.value = toggleSetValue(expandedSourceUploaders.value, sourceUploaderKey(group))
+}
+const toggleSourceItem = (group: SharedPoolUploaderSourceGroup, source: SharedPoolSourceStat) => {
+  expandedSourceItems.value = toggleSetValue(expandedSourceItems.value, sourceItemKey(group, source))
+}
+const openSourceLedger = async (group: SharedPoolUploaderSourceGroup, source: SharedPoolSourceStat) => {
   const id = sourceID(source)
-  if (id) void router.push({ name: 'AdminSharedPoolLedger', query: { purchase_source_id: String(id) } })
+  if (!id) return
+  await router.replace({ query: { tab: 'ledger', purchase_source_id: String(id), ...(group.uploader_user_id ? { uploader_user_id: String(group.uploader_user_id) } : {}) } })
+  activeTab.value = 'ledger'
 }
 
+function changeOverviewPageSize(size: number) { overviewPagination.page_size = size; overviewPagination.page = 1 }
+function changeSourcePageSize(size: number) { sourcePagination.page_size = size; sourcePagination.page = 1 }
+
 async function loadActiveTab() {
+  if (activeTab.value === 'ledger') return
   loading.value = true
   try {
     if (activeTab.value === 'overview') {
       overview.value = await adminAPI.sharedPool.getOverview(periodParams())
+      overviewPagination.page = 1
     } else if (activeTab.value === 'accounts') {
       const response = await adminAPI.sharedPool.listAccountCosts(periodParams())
       accountCosts.value = response.items || []
@@ -940,13 +1001,12 @@ async function loadActiveTab() {
       if (!accountOptions.value.length || !userOptions.value.length) await loadReferenceOptions()
       settlement.value = await adminAPI.sharedPool.previewSettlement(settlementParams())
     } else {
-      const [sourceResponse, costResponse, sourceOptions] = await Promise.all([
+      const [sourceResponse, sourceOptions] = await Promise.all([
         adminAPI.sharedPool.listSources(periodParams()),
-        adminAPI.sharedPool.listAccountCosts(periodParams()),
         adminAPI.sharedPool.listPurchaseSources()
       ])
       sources.value = sourceResponse.items || []
-      accountCosts.value = costResponse.items || []
+      sourcePagination.page = 1
       purchaseSources.value = sourceOptions
     }
   } catch (error: any) {
@@ -1072,10 +1132,19 @@ async function openOverviewAccountPoolRecord(row: SharedPoolAccountCost) {
   }
 }
 
-const routeQueryID = (key: 'account_id' | 'ledger_entry_id') => {
+const routeQueryID = (key: 'account_id' | 'ledger_entry_id' | 'purchase_source_id' | 'uploader_user_id') => {
   const raw = route.query[key]
   const id = Number(Array.isArray(raw) ? raw[0] : raw)
   return Number.isSafeInteger(id) && id > 0 ? id : 0
+}
+
+async function openLedgerAccount(accountID: number) {
+  try {
+    const account = await adminAPI.accounts.getById(accountID)
+    await openAccountPoolRecord(account)
+  } catch (error: any) {
+    appStore.showError(error?.message || t('admin.sharedPool.errors.load'))
+  }
 }
 
 async function openRouteTarget() {

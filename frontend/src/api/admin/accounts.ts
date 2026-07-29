@@ -216,28 +216,13 @@ export async function checkMixedChannelRisk(
  * @param id - Account ID
  * @returns Success confirmation
  */
-export interface DeleteAccountOptions {
-  cost_disposition?: 'write_off' | 'refund' | 'transfer'
-  replacement_account_id?: number
-	refund_amount_minor?: number
-  reason?: string
-}
-
 export interface DeleteAccountResult {
   account_id: number
-  archived: boolean
-  already_deleted: boolean
-  remaining_cost_minor: number
-  cost_disposition: string
-	refund_amount_minor?: number
-	written_off_minor?: number
   affected_account_ids: number[]
 }
 
-export async function deleteAccount(id: number, options?: DeleteAccountOptions): Promise<{ message: string; result?: DeleteAccountResult; approval?: { id: number } }> {
-	const { data } = await apiClient.delete<{ message: string; result?: DeleteAccountResult; approval?: { id: number } }>(`/admin/accounts/${id}`, {
-    data: options
-  })
+export async function deleteAccount(id: number): Promise<{ message: string; result?: DeleteAccountResult; approval?: { id: number } }> {
+	const { data } = await apiClient.delete<{ message: string; result?: DeleteAccountResult; approval?: { id: number } }>(`/admin/accounts/${id}`)
   return data
 }
 
@@ -435,12 +420,12 @@ export async function exchangeCode(
 export async function batchCreate(accounts: CreateAccountRequest[]): Promise<{
   success: number
   failed: number
-  results: Array<{ success: boolean; account?: Account; error?: string }>
+  results: Array<{ success: boolean; name: string; id?: number; error?: string }>
 }> {
   const { data } = await apiClient.post<{
     success: number
     failed: number
-    results: Array<{ success: boolean; account?: Account; error?: string }>
+    results: Array<{ success: boolean; name: string; id?: number; error?: string }>
   }>('/admin/accounts/batch', { accounts })
   return data
 }

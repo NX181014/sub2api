@@ -166,6 +166,7 @@ export default {
         expiresAt: 'Expires At',
         actions: 'Actions'
       },
+		importBatchSummary: '{count} accounts imported · {time}',
       schedulerScore: {
         baseShort: 'Base',
         stickyShort: 'Sticky',

@@ -15,6 +15,7 @@ import {
   listAccountCosts,
   listCostSummaries,
   listLedgerEntries,
+  listSources,
   markSettlementPaid,
   previewSettlement,
   listApprovals,
@@ -224,6 +225,24 @@ describe('admin shared-pool API', () => {
       current_net_loss: 0,
       observation_days: 12
     })
+  })
+
+  it('groups source quality by uploader and keeps account details', async () => {
+    get.mockResolvedValueOnce({ data: {
+      end_at: '2026-08-01T00:00:00Z',
+      accounts: [
+        { account_id: 2, account_name: 'beta', uploader_user_id: 8, uploader_username: 'alice', uploaded_at: '2026-05-01T00:00:00Z', purchase_source: 'shop-b', net_cost_minor: 10000, value_minor: 5000, recovery_rate: '0.5', purchased_at: '2026-05-01T00:00:00Z', banned_at: '2026-05-20T00:00:00Z', refunded: false, survival_days: 19 },
+        { account_id: 1, account_name: 'alpha', uploader_user_id: 8, uploader_username: 'alice', uploaded_at: '2026-04-01T00:00:00Z', purchase_source: 'shop-a', net_cost_minor: 10000, value_minor: 15000, recovery_rate: '1.5', purchased_at: '2026-04-01T00:00:00Z', banned_at: null, refunded: true, survival_days: 122 },
+        { account_id: 3, account_name: 'gamma', uploader_user_id: 9, uploader_username: 'bob', uploaded_at: '2026-07-01T00:00:00Z', purchase_source: 'shop-a', net_cost_minor: 5000, value_minor: 5000, recovery_rate: '1', purchased_at: '2026-07-01T00:00:00Z', banned_at: null, refunded: false, survival_days: 31 }
+      ]
+    } })
+
+    const result = await listSources({ start: '2026-07-01', end: '2026-08-01' })
+
+    expect(result.items).toHaveLength(2)
+    expect(result.items[0]).toMatchObject({ uploader_name: 'alice', account_count: 2, purchase_cost: 200, usage_value: 200, roi_rate: 100, ban_rate_30d: 50 })
+    expect(result.items[0].sources.map((source) => source.name)).toEqual(['shop-a', 'shop-b'])
+    expect(result.items[0].sources[1].accounts[0]).toMatchObject({ account_id: 2, account_name: 'beta', purchase_cost: 100 })
   })
 
   it('keeps saved pool profile fields for dialog prefill', async () => {

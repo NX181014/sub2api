@@ -85,6 +85,7 @@ export interface SharedPoolAccountCost {
   contributor_name: string
   uploader_user_id?: number | null
   uploader_name: string
+  uploaded_at?: string | null
   purchase_source_id?: number | null
   purchase_source_name: string
   purchase_url?: string | null
@@ -134,6 +135,7 @@ export interface SharedPoolCostSummary {
   account_status?: string | null
   uploader_user_id?: number | null
   uploader_email?: string | null
+  uploader_username?: string | null
   contributor_user_id?: number | null
   contributor_email?: string | null
   expected_token_count?: number | null
@@ -381,9 +383,28 @@ export interface SharedPoolSourceStat {
   refund_rate: number
   average_survival_days: number
   average_recovery_days?: number | null
+  accounts: Array<{
+    account_id: number
+    account_name: string
+    uploaded_at: string
+    purchase_cost: number
+    usage_value: number
+    roi_rate: number
+  }>
 }
 
-export interface SharedPoolSourceList { items: SharedPoolSourceStat[] }
+export interface SharedPoolUploaderSourceGroup {
+  uploader_user_id?: number | null
+  uploader_name: string
+  account_count: number
+  purchase_cost: number
+  usage_value: number
+  roi_rate: number
+  ban_rate_30d: number
+  sources: SharedPoolSourceStat[]
+}
+
+export interface SharedPoolSourceList { items: SharedPoolUploaderSourceGroup[] }
 
 interface RawPoolAccount {
   id: number
@@ -394,6 +415,7 @@ interface RawPoolAccount {
   contributor_email?: string | null
   created_by_user_id?: number | null
   created_by_email?: string | null
+  created_by_username?: string | null
   cost_sharing_enabled: boolean
   latest_lifecycle_status: string
   net_cost_minor: number
@@ -427,6 +449,9 @@ interface RawRecoveryAccount {
   account_id: number
   account_name: string
   provider_identity?: string | null
+  uploader_user_id?: number | null
+  uploader_username?: string | null
+  uploaded_at: string
   purchase_source?: string | null
   lifecycle_status: string
   net_cost_minor: number
@@ -441,6 +466,10 @@ interface RawRecoveryAccount {
   latest_recovery_at?: string | null
   currently_recovered: boolean
   observation_days: number
+  purchased_at?: string | null
+  banned_at?: string | null
+  refunded: boolean
+  survival_days: number
 }
 
 interface RawSourceStat {
@@ -554,7 +583,9 @@ export async function getOverview(params: PoolPeriodParams): Promise<SharedPoolO
       account_name: item.account_name,
       provider_identity: item.provider_identity || '',
       contributor_name: '',
-      uploader_name: '',
+      uploader_user_id: item.uploader_user_id,
+      uploader_name: item.uploader_username || '',
+      uploaded_at: item.uploaded_at,
       purchase_source_name: item.purchase_source || '',
       purchase_cost: minorToAmount(item.net_cost_minor),
       currency: 'CNY',
@@ -598,7 +629,8 @@ export async function listAccountCosts(params?: PoolPeriodParams): Promise<Share
       contributor_user_id: account?.contributor_user_id,
       contributor_name: account?.contributor_email || '',
       uploader_user_id: account?.created_by_user_id,
-      uploader_name: account?.created_by_email || '',
+      uploader_name: account?.created_by_username || account?.created_by_email || '',
+      uploaded_at: undefined,
       purchase_source_id: cost.purchase_source_id,
       purchase_source_name: cost.purchase_source || '',
       purchase_url: cost.purchase_url,
@@ -784,21 +816,91 @@ export async function markSettlementPaid(id: number): Promise<SharedPoolSettleme
 export async function listSources(params?: PoolPeriodParams): Promise<SharedPoolSourceList> {
   if (!params) return { items: [] }
   const raw = await getRawOverview(params)
-  return {
-    items: (raw.source_stats || []).map((item) => ({
-      name: item.name,
-      account_count: item.account_count,
-      sample_size: item.sample_size,
-      purchase_cost: minorToAmount(item.purchase_cost_minor),
-      usage_value: minorToAmount(item.value_minor),
-      roi_rate: ratioToPercent(item.recovery_rate),
-      ban_rate_7d: ratioToPercent(item.ban_rate_7d),
-      ban_rate_30d: ratioToPercent(item.ban_rate_30d),
-      ban_rate_90d: ratioToPercent(item.ban_rate_90d),
-      refund_rate: ratioToPercent(item.refund_rate),
-      average_survival_days: Number(item.average_survival_days || 0)
-    }))
+  type Accumulator = {
+    accountCount: number
+    costMinor: number
+    valueMinor: number
+    eligible7: number
+    banned7: number
+    eligible30: number
+    banned30: number
+    eligible90: number
+    banned90: number
+    refunded: number
+    survivalDays: number
   }
+  type SourceAccumulator = Accumulator & { name: string; accounts: SharedPoolSourceStat['accounts'] }
+  type UploaderAccumulator = Accumulator & {
+    uploader_user_id?: number | null
+    uploader_name: string
+    sources: Map<string, SourceAccumulator>
+  }
+  const empty = (): Accumulator => ({ accountCount: 0, costMinor: 0, valueMinor: 0, eligible7: 0, banned7: 0, eligible30: 0, banned30: 0, eligible90: 0, banned90: 0, refunded: 0, survivalDays: 0 })
+  const uploaders = new Map<string, UploaderAccumulator>()
+  const end = new Date(raw.end_at)
+  for (const account of raw.accounts || []) {
+    const uploaderName = account.uploader_username?.trim() || '-'
+    const uploaderKey = account.uploader_user_id ? String(account.uploader_user_id) : `name:${uploaderName}`
+    let uploader = uploaders.get(uploaderKey)
+    if (!uploader) {
+      uploader = { ...empty(), uploader_user_id: account.uploader_user_id, uploader_name: uploaderName, sources: new Map() }
+      uploaders.set(uploaderKey, uploader)
+    }
+    const sourceName = account.purchase_source?.trim() || 'Unspecified'
+    let source = uploader.sources.get(sourceName)
+    if (!source) {
+      source = { ...empty(), name: sourceName, accounts: [] }
+      uploader.sources.set(sourceName, source)
+    }
+    const purchasedAt = account.purchased_at ? new Date(account.purchased_at) : null
+    const bannedAt = account.banned_at ? new Date(account.banned_at) : null
+    for (const item of [uploader, source]) {
+      item.accountCount++
+      item.costMinor += account.net_cost_minor || 0
+      item.valueMinor += account.value_minor || 0
+      for (const days of [7, 30, 90] as const) {
+        const eligible = !!purchasedAt && end.getTime() - purchasedAt.getTime() >= days * 86400000
+        const banned = eligible && !!bannedAt && bannedAt.getTime() <= purchasedAt!.getTime() + days * 86400000
+        item[`eligible${days}`] += eligible ? 1 : 0
+        item[`banned${days}`] += banned ? 1 : 0
+      }
+      item.refunded += account.refunded ? 1 : 0
+      item.survivalDays += account.survival_days || 0
+    }
+    source.accounts.push({
+      account_id: account.account_id,
+      account_name: account.account_name,
+      uploaded_at: account.uploaded_at,
+      purchase_cost: minorToAmount(account.net_cost_minor),
+      usage_value: minorToAmount(account.value_minor),
+      roi_rate: ratioToPercent(account.recovery_rate)
+    })
+  }
+  const rate = (part: number, total: number) => total > 0 ? part / total * 100 : 0
+  const finishSource = (item: SourceAccumulator): SharedPoolSourceStat => ({
+    name: item.name,
+    account_count: item.accountCount,
+    sample_size: item.accountCount,
+    purchase_cost: minorToAmount(item.costMinor),
+    usage_value: minorToAmount(item.valueMinor),
+    roi_rate: rate(item.valueMinor, item.costMinor),
+    ban_rate_7d: rate(item.banned7, item.eligible7),
+    ban_rate_30d: rate(item.banned30, item.eligible30),
+    ban_rate_90d: rate(item.banned90, item.eligible90),
+    refund_rate: rate(item.refunded, item.accountCount),
+    average_survival_days: item.accountCount ? item.survivalDays / item.accountCount : 0,
+    accounts: item.accounts.sort((a, b) => b.account_id - a.account_id)
+  })
+  return { items: [...uploaders.values()].map((item) => ({
+    uploader_user_id: item.uploader_user_id,
+    uploader_name: item.uploader_name,
+    account_count: item.accountCount,
+    purchase_cost: minorToAmount(item.costMinor),
+    usage_value: minorToAmount(item.valueMinor),
+    roi_rate: rate(item.valueMinor, item.costMinor),
+    ban_rate_30d: rate(item.banned30, item.eligible30),
+    sources: [...item.sources.values()].map(finishSource).sort((a, b) => a.name.localeCompare(b.name))
+  })).sort((a, b) => a.uploader_name.localeCompare(b.uploader_name)) }
 }
 
 export async function createApproval(payload: CreatePoolApprovalRequest): Promise<PoolApproval> {

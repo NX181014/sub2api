@@ -254,6 +254,7 @@ func AccountFromServiceShallow(a *service.Account) *Account {
 		CreatedByUserID:         a.CreatedByUserID,
 		CostSharingEnabled:      a.CostSharingEnabled,
 		UploaderEmail:           a.UploaderEmail,
+		UploaderUsername:        a.UploaderUsername,
 		ExpectedTokenCount:      a.ExpectedTokenCount,
 		PoolTotalUsageTokens:    a.PoolTotalUsageTokens,
 		PoolNetCostMinor:        a.PoolNetCostMinor,

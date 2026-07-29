@@ -23,7 +23,7 @@ func NewPoolRepository(db *sql.DB) service.PoolRepository { return &poolReposito
 const poolAccountSelect = `
 SELECT a.id, a.name, a.platform, a.provider_identity,
        a.contributor_user_id, contributor.email,
-       a.created_by_user_id, creator.email,
+       a.created_by_user_id, creator.email, COALESCE(NULLIF(creator.username,''),creator.email),
        a.cost_sharing_enabled,
        COALESCE(lifecycle.event_type, 'active'), lifecycle.occurred_at,
        COALESCE(costs.net_cost_minor, 0)
@@ -47,7 +47,7 @@ WHERE a.deleted_at IS NULL`
 func scanPoolAccount(scanner interface{ Scan(...any) error }) (*service.PoolAccount, error) {
 	var item service.PoolAccount
 	err := scanner.Scan(&item.ID, &item.Name, &item.Platform, &item.ProviderIdentity,
-		&item.ContributorUserID, &item.ContributorEmail, &item.CreatedByUserID, &item.CreatedByEmail,
+		&item.ContributorUserID, &item.ContributorEmail, &item.CreatedByUserID, &item.CreatedByEmail, &item.CreatedByUsername,
 		&item.CostSharingEnabled, &item.LatestLifecycleStatus, &item.LatestLifecycleAt, &item.NetCostMinor)
 	return &item, err
 }
@@ -344,7 +344,7 @@ WITH filtered AS (
     LIMIT $%d OFFSET $%d
 )
 SELECT a.id,a.name,a.provider_identity,a.status,
-       a.created_by_user_id,uploader.email,a.contributor_user_id,contributor.email,a.expected_token_count,
+       a.created_by_user_id,uploader.email,COALESCE(NULLIF(uploader.username,''),uploader.email),a.contributor_user_id,contributor.email,a.expected_token_count,
        COALESCE(usage.total_tokens,0)::bigint,
        COALESCE(costs.purchase_cost_minor,0)::bigint,COALESCE(costs.refund_minor,0)::bigint,
        COALESCE(costs.transferred_out_minor,0)::bigint,
@@ -407,7 +407,7 @@ ORDER BY a.id DESC`, where, limitArg, offsetArg), queryArgs...)
 		var trancheJSON []byte
 		if err := rows.Scan(
 			&item.AccountID, &item.AccountName, &item.ProviderIdentity, &item.AccountStatus,
-			&item.UploaderUserID, &item.UploaderEmail, &item.ContributorUserID, &item.ContributorEmail, &item.ExpectedTokenCount,
+			&item.UploaderUserID, &item.UploaderEmail, &item.UploaderUsername, &item.ContributorUserID, &item.ContributorEmail, &item.ExpectedTokenCount,
 			&item.TotalUsageTokens, &item.PurchaseCostMinor, &item.RefundMinor, &item.TransferredOutMinor, &item.WrittenOffMinor, &item.CostBasisMinor, &item.NetCostMinor, &trancheJSON, &item.EntryCount,
 			&item.LatestLifecycleStatus, &item.LatestLifecycleAt, &item.LatestPayerUserID, &item.LatestPayerEmail,
 			&item.LatestPurchaseSourceID, &item.LatestPurchaseSource, &item.LatestOrderNo,
@@ -433,7 +433,7 @@ func buildCostSummaryWhere(filter service.AccountCostSummaryFilter) (string, []a
 	}
 	if filter.Search != "" {
 		p := arg("%" + filter.Search + "%")
-		conditions = append(conditions, `(a.name ILIKE `+p+` OR COALESCE(a.provider_identity,'') ILIKE `+p+` OR EXISTS (SELECT 1 FROM users su WHERE su.id=a.created_by_user_id AND su.email ILIKE `+p+`))`)
+		conditions = append(conditions, `(a.name ILIKE `+p+` OR COALESCE(a.provider_identity,'') ILIKE `+p+` OR EXISTS (SELECT 1 FROM users su WHERE su.id=a.created_by_user_id AND (su.username ILIKE `+p+` OR su.email ILIKE `+p+`)))`)
 	}
 	if filter.UploaderUserID != nil {
 		conditions = append(conditions, "a.created_by_user_id="+arg(*filter.UploaderUserID))
@@ -1255,7 +1255,9 @@ func (r *poolRepository) GetRecovery(ctx context.Context, start, end time.Time) 
 	_ = start // Recovery is cumulative as of end; start is used by period AA only.
 	rows, err := r.db.QueryContext(ctx, `
 WITH RECURSIVE pool_accounts AS (
-  SELECT a.id,a.name,a.provider_identity,a.created_at FROM accounts a
+  SELECT a.id,a.name,a.provider_identity,a.created_at,a.created_by_user_id,
+         COALESCE(NULLIF(uploader.username,''),uploader.email) uploader_username
+  FROM accounts a LEFT JOIN users uploader ON uploader.id=a.created_by_user_id
 	WHERE a.cost_sharing_enabled=TRUE
 ), costs AS (
   SELECT a.id account_id,
@@ -1361,7 +1363,8 @@ WITH RECURSIVE pool_accounts AS (
   SELECT c.account_id,TRUE has_investment FROM account_cost_entries c JOIN pool_accounts a ON a.id=c.account_id
 	WHERE c.paid_at<$1 AND c.cny_amount_minor>0 AND c.expected_token_count>0 GROUP BY c.account_id
 )
-SELECT a.id,a.name,a.provider_identity,source.name,COALESCE(lifecycle.event_type,'active'),
+SELECT a.id,a.name,a.provider_identity,a.created_by_user_id,a.uploader_username,a.created_at,
+       source.name,COALESCE(lifecycle.event_type,'active'),
 	   COALESCE(c.cost_basis_minor,0),
 	   LEAST(COALESCE(c.cost_basis_minor,0),
 	     LEAST(COALESCE(recognized.recognized_minor,0),GREATEST(COALESCE(c.cost_basis_minor,0)-COALESCE(c.refund_minor,0)-COALESCE(c.transferred_minor,0)-COALESCE(c.written_off_minor,0),0))+
@@ -1391,7 +1394,7 @@ ORDER BY a.id DESC`, end)
 	items := make([]service.AccountRecovery, 0)
 	for rows.Next() {
 		var item service.AccountRecovery
-		if err := rows.Scan(&item.AccountID, &item.AccountName, &item.ProviderIdentity, &item.PurchaseSource, &item.LifecycleStatus, &item.NetCostMinor, &item.ValueMinor, &item.AverageDailyTokens, &item.PurchasedAt, &item.BannedAt, &item.Refunded, &item.EffectiveUsageDays, &item.ObservationDays, &item.BannedLossMinor, &item.FirstRecoveryAt, &item.LatestRecoveryAt, &item.CurrentlyRecovered, &item.ExpectedTokens, &item.UsedTokens, &item.RemainingTokens); err != nil {
+		if err := rows.Scan(&item.AccountID, &item.AccountName, &item.ProviderIdentity, &item.UploaderUserID, &item.UploaderUsername, &item.UploadedAt, &item.PurchaseSource, &item.LifecycleStatus, &item.NetCostMinor, &item.ValueMinor, &item.AverageDailyTokens, &item.PurchasedAt, &item.BannedAt, &item.Refunded, &item.EffectiveUsageDays, &item.ObservationDays, &item.BannedLossMinor, &item.FirstRecoveryAt, &item.LatestRecoveryAt, &item.CurrentlyRecovered, &item.ExpectedTokens, &item.UsedTokens, &item.RemainingTokens); err != nil {
 			return nil, err
 		}
 		finalizeAccountRecovery(&item, end)

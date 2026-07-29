@@ -1078,6 +1078,7 @@ export interface Account {
   created_by_user_id?: number | null
   cost_sharing_enabled: boolean
   uploader_email?: string | null
+  uploader_username?: string | null
   expected_token_count?: number | null
   pool_total_usage_tokens?: number
   pool_net_cost_minor?: number
@@ -1344,6 +1345,7 @@ export interface CreateAccountRequest {
   expires_at?: number | null
   auto_pause_on_expired?: boolean
   upstream_billing_probe_enabled?: boolean
+  import_batch_id?: string
   confirm_mixed_channel_risk?: boolean
 }
 

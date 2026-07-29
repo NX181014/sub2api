@@ -498,17 +498,18 @@ func buildAccountForCreate(input *CreateAccountInput, accountExtra map[string]an
 	delete(accountExtra, OllamaCloudUsageAutoRefreshExtraKey)
 	delete(accountExtra, OllamaCloudUsageSnapshotExtraKey)
 	account := &Account{
-		Name:        input.Name,
-		Notes:       normalizeAccountNotes(input.Notes),
-		Platform:    input.Platform,
-		Type:        input.Type,
-		Credentials: input.Credentials,
-		Extra:       accountExtra,
-		ProxyID:     input.ProxyID,
-		Concurrency: normalizeAccountConcurrency(input.Platform, input.Type, input.Concurrency),
-		Priority:    input.Priority,
-		Status:      StatusActive,
-		Schedulable: true,
+		Name:            input.Name,
+		Notes:           normalizeAccountNotes(input.Notes),
+		Platform:        input.Platform,
+		Type:            input.Type,
+		Credentials:     input.Credentials,
+		Extra:           accountExtra,
+		ProxyID:         input.ProxyID,
+		Concurrency:     normalizeAccountConcurrency(input.Platform, input.Type, input.Concurrency),
+		Priority:        input.Priority,
+		Status:          StatusActive,
+		Schedulable:     true,
+		CreatedByUserID: input.CreatedByUserID,
 	}
 	if input.ProbeEnabled != nil && *input.ProbeEnabled {
 		if !isUpstreamBillingProbeAccount(account) {
@@ -1223,21 +1224,10 @@ func (s *adminServiceImpl) deleteAccountLegacy(ctx context.Context, id int64) er
 }
 
 type AccountDeleteOptions struct {
-	ActorUserID          int64
-	CostDisposition      string
-	ReplacementAccountID *int64
-	RefundAmountMinor    *int64
-	Reason               string
 }
 
 type AccountDeleteResult struct {
 	AccountID          int64   `json:"account_id"`
-	Archived           bool    `json:"archived"`
-	AlreadyDeleted     bool    `json:"already_deleted"`
-	RemainingCostMinor int64   `json:"remaining_cost_minor"`
-	CostDisposition    string  `json:"cost_disposition,omitempty"`
-	RefundAmountMinor  int64   `json:"refund_amount_minor,omitempty"`
-	WrittenOffMinor    int64   `json:"written_off_minor,omitempty"`
 	AffectedAccountIDs []int64 `json:"affected_account_ids"`
 }
 

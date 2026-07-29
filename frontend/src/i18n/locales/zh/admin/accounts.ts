@@ -119,6 +119,7 @@ export default {
         expiresAt: '过期时间',
         actions: '操作'
       },
+		importBatchSummary: '批量导入 {count} 个账号 · {time}',
       schedulerScore: {
         baseShort: '普通',
         stickyShort: '粘性',

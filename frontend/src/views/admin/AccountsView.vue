@@ -206,10 +206,45 @@
           @toggle-schedulable="handleBulkToggleSchedulable"
         />
         <div ref="accountTableRef" class="flex min-h-0 flex-1 flex-col overflow-hidden">
+        <div v-if="importBatchGroups.length" class="mb-3 grid shrink-0 gap-3 px-1 sm:grid-cols-2 xl:grid-cols-3">
+          <article
+            v-for="batch in importBatchGroups"
+            :key="batch.id"
+            class="overflow-hidden rounded-xl border border-emerald-200 bg-white shadow-sm dark:border-emerald-800/60 dark:bg-dark-900"
+          >
+            <button type="button" class="flex w-full items-start justify-between gap-3 p-4 text-left" @click="toggleImportBatch(batch.id)">
+              <div class="min-w-0">
+                <p class="truncate font-semibold text-gray-900 dark:text-white" :title="batch.uploader">
+                  {{ batch.uploader }}
+                </p>
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                  {{ t('admin.accounts.importBatchSummary', { count: batch.accounts.length, time: formatDateTime(batch.createdAt) }) }}
+                </p>
+                <p class="mt-2 truncate text-sm text-gray-600 dark:text-gray-300" :title="batch.names">
+                  {{ batch.names }}
+                </p>
+              </div>
+              <Icon :name="expandedImportBatches.has(batch.id) ? 'chevronDown' : 'chevronRight'" size="sm" class="mt-1 shrink-0 text-gray-400" />
+            </button>
+            <div v-if="expandedImportBatches.has(batch.id)" class="space-y-2 border-t border-gray-100 p-3 dark:border-dark-700">
+              <div v-for="account in batch.accounts" :key="account.id" class="flex items-center justify-between gap-3 rounded-lg bg-gray-50 px-3 py-2 dark:bg-dark-800">
+                <div class="min-w-0">
+                  <p class="max-w-56 truncate text-sm font-medium text-gray-900 dark:text-white" :title="account.name">{{ account.name }}</p>
+                  <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">#{{ account.id }} · {{ account.platform }} · {{ formatDateTime(account.created_at) }}</p>
+                </div>
+                <div class="flex shrink-0 items-center gap-1">
+                  <button type="button" class="btn btn-secondary min-h-9 px-2 text-xs" @click.stop="emit('pool-record', account)">{{ t('admin.sharedPool.actions.poolRecord') }}</button>
+                  <button type="button" class="btn btn-secondary min-h-9 px-2 text-xs" @click.stop="handleEdit(account)">{{ t('common.edit') }}</button>
+                </div>
+              </div>
+            </div>
+          </article>
+        </div>
         <DataTable
+          v-if="loading || ungroupedAccounts.length || !importBatchGroups.length"
           ref="dataTableRef"
           :columns="cols"
-          :data="accounts"
+          :data="ungroupedAccounts"
           :loading="loading"
           row-key="id"
           :server-side-sort="true"
@@ -268,8 +303,8 @@
           </template>
           <template #cell-uploader="{ row }">
             <div class="min-w-0">
-              <p class="max-w-52 truncate font-medium text-gray-900 dark:text-white" :title="row.uploader_email || ''">
-                {{ row.uploader_email || '-' }}
+              <p class="max-w-52 truncate font-medium text-gray-900 dark:text-white" :title="accountUploader(row)">
+                {{ accountUploader(row) }}
               </p>
               <p class="max-w-52 truncate text-xs text-gray-500 dark:text-gray-400 md:hidden" :title="row.name">
                 {{ row.name }} · #{{ row.id }}
@@ -511,30 +546,12 @@
     <BaseDialog :show="showDeleteDialog" :title="t('admin.accounts.deleteAccount')" width="normal" @close="closeDeleteDialog">
       <form id="account-delete-form" class="space-y-4" @submit.prevent="confirmDelete">
         <p class="text-sm text-gray-600 dark:text-gray-400">{{ t('admin.accounts.deleteConfirm', { name: deletingAcc?.name }) }}</p>
-        <div>
-          <label for="account-delete-disposition" class="input-label">{{ t('admin.sharedPool.delete.costDisposition') }}</label>
-          <Select id="account-delete-disposition" v-model="deleteForm.cost_disposition" :options="deleteDispositionOptions" />
-          <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.delete.costDispositionHint') }}</p>
-        </div>
-        <div v-if="deleteForm.cost_disposition === 'transfer'">
-          <label for="account-delete-replacement" class="input-label">{{ t('admin.sharedPool.delete.replacementAccount') }}</label>
-          <Select id="account-delete-replacement" v-model="deleteForm.replacement_account_id" :options="deleteReplacementOptions" searchable />
-        </div>
-		<div v-if="deleteForm.cost_disposition === 'refund'">
-		  <label for="account-delete-refund" class="input-label">{{ t('admin.sharedPool.delete.refundAmount') }} *</label>
-		  <input id="account-delete-refund" v-model.number="deleteForm.refund_amount" class="input" type="number" inputmode="decimal" min="0.01" step="0.01" required />
-		  <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.delete.refundAmountHint') }}</p>
-		</div>
-        <div>
-          <label for="account-delete-reason" class="input-label">{{ t('admin.sharedPool.delete.reason') }}</label>
-          <textarea id="account-delete-reason" v-model.trim="deleteForm.reason" class="input min-h-24 w-full resize-y" maxlength="1000" :placeholder="t('admin.sharedPool.delete.reasonHint')"></textarea>
-        </div>
-        <p class="rounded-md bg-amber-50 p-3 text-sm text-amber-700 dark:bg-amber-900/20 dark:text-amber-300">{{ t('admin.sharedPool.delete.auditHint') }}</p>
+        <p class="rounded-md bg-red-50 p-3 text-sm text-red-700 dark:bg-red-900/20 dark:text-red-300">{{ t('admin.sharedPool.delete.hardDeleteHint') }}</p>
       </form>
       <template #footer>
         <div class="flex w-full flex-col-reverse gap-2 sm:flex-row sm:justify-end sm:gap-3">
           <button type="button" class="btn btn-secondary" :disabled="deleteSubmitting" @click="closeDeleteDialog">{{ t('common.cancel') }}</button>
-          <button type="submit" form="account-delete-form" class="btn btn-danger" :disabled="deleteSubmitting || (!authStore.user?.is_primary_admin && !deleteForm.reason.trim()) || (deleteForm.cost_disposition === 'transfer' && !deleteForm.replacement_account_id) || (deleteForm.cost_disposition === 'refund' && !(Number(deleteForm.refund_amount) > 0))">
+          <button type="submit" form="account-delete-form" class="btn btn-danger" :disabled="deleteSubmitting">
             <LoadingSpinner v-if="deleteSubmitting" size="sm" />
             {{ t('common.delete') }}
           </button>
@@ -701,7 +718,7 @@
           <pre class="max-h-80 overflow-auto rounded-lg bg-gray-950 p-4 text-xs leading-5 text-gray-100">{{ credentialRevealJSON }}</pre>
         </template>
         <template v-else>
-          <p class="text-sm text-gray-500 dark:text-gray-400">{{ t(authStore.user?.is_primary_admin ? 'admin.sharedPool.approval.primaryDirectHint' : 'admin.sharedPool.approval.credentialHint') }}</p>
+          <p v-if="!authStore.user?.is_primary_admin" class="text-sm text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.approval.credentialHint') }}</p>
           <label v-if="!authStore.user?.is_primary_admin" for="credential-purpose" class="block text-sm font-medium text-gray-700 dark:text-gray-300">
             {{ t('admin.sharedPool.approval.purpose') }}
           </label>
@@ -754,7 +771,6 @@ import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import StatusBadge from '@/components/common/StatusBadge.vue'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
 import FormDialogActions from '@/components/common/FormDialogActions.vue'
-import Select from '@/components/common/Select.vue'
 import { CreateAccountModal, EditAccountModal, BulkEditAccountModal, SyncFromCrsModal, TempUnschedStatusModal } from '@/components/account'
 import AccountTableActions from '@/components/admin/account/AccountTableActions.vue'
 import AccountTableFilters from '@/components/admin/account/AccountTableFilters.vue'
@@ -805,6 +821,7 @@ const authStore = useAuthStore()
 const proxies = ref<AccountProxy[]>([])
 const groups = ref<AdminGroup[]>([])
 const uploaderOptions = ref<Array<{ value: number; label: string }>>([])
+const expandedImportBatches = ref(new Set<string>())
 const accountTableRef = ref<HTMLElement | null>(null)
 const dataTableRef = ref<InstanceType<typeof DataTable> | null>(null)
 type AccountBulkEditTarget =
@@ -884,13 +901,6 @@ const edAcc = ref<Account | null>(null)
 const tempUnschedAcc = ref<Account | null>(null)
 const deletingAcc = ref<Account | null>(null)
 const deleteSubmitting = ref(false)
-const deleteReplacementAccounts = ref<Account[]>([])
-const deleteForm = reactive({
-  cost_disposition: 'write_off' as 'write_off' | 'refund' | 'transfer',
-  replacement_account_id: 0,
-	refund_amount: '' as number | '',
-  reason: ''
-})
 const creatingShadowAcc = ref<Account | null>(null)
 const reAuthAcc = ref<Account | null>(null)
 const testingAcc = ref<Account | null>(null)
@@ -917,13 +927,6 @@ const approvalColumns = computed(() => [
 ])
 
 const credentialRevealJSON = computed(() => JSON.stringify(credentialReveal.value?.credentials ?? {}, null, 2))
-const deleteDispositionOptions = computed(() => [
-  { value: 'write_off', label: t('admin.sharedPool.delete.writeOff') },
-  { value: 'refund', label: t('admin.sharedPool.delete.refund') },
-  { value: 'transfer', label: t('admin.sharedPool.delete.transfer') }
-])
-const deleteReplacementOptions = computed(() => deleteReplacementAccounts.value.map(account => ({ value: account.id, label: `${account.name} (#${account.id})` })))
-
 const SENSITIVE_APPROVAL_FIELD = /(credential|token|secret|password|api[_-]?key|cookie|authorization)/i
 const formatApprovalValue = (value: unknown, field: string): string => {
   if (value === undefined || value === null || value === '') return '-'
@@ -1296,6 +1299,39 @@ const {
     sort_order: sortState.sort_order
   }
 })
+
+const importBatchID = (account: Account): string => {
+  const value = account.extra?.import_batch_id
+  return typeof value === 'string' ? value : ''
+}
+const accountUploader = (account: Account): string => account.uploader_username || account.uploader_email || '-'
+const importBatchAccountGroups = computed(() => {
+  const groups = new Map<string, Account[]>()
+  for (const account of accounts.value) {
+    const id = importBatchID(account)
+    if (!id) continue
+    const items = groups.get(id) || []
+    items.push(account)
+    groups.set(id, items)
+  }
+  return groups
+})
+const importBatchGroups = computed(() => [...importBatchAccountGroups.value.entries()].filter(([, items]) => items.length > 1).map(([id, items]) => ({
+    id,
+    accounts: items,
+    uploader: accountUploader(items[0]!),
+    createdAt: items[0]!.created_at,
+    names: items.map(item => item.name).join('、')
+  })))
+const ungroupedAccounts = computed(() => accounts.value.filter(account => {
+  const id = importBatchID(account)
+  return !id || (importBatchAccountGroups.value.get(id)?.length || 0) < 2
+}))
+const toggleImportBatch = (id: string) => {
+  const next = new Set(expandedImportBatches.value)
+  next.has(id) ? next.delete(id) : next.add(id)
+  expandedImportBatches.value = next
+}
 
 const {
   selectedIds: selIds,
@@ -2412,6 +2448,7 @@ const mergeRuntimeFields = (oldAccount: Account, updatedAccount: Account): Accou
   current_window_cost: updatedAccount.current_window_cost ?? oldAccount.current_window_cost,
   active_sessions: updatedAccount.active_sessions ?? oldAccount.active_sessions,
   uploader_email: updatedAccount.uploader_email ?? oldAccount.uploader_email,
+  uploader_username: updatedAccount.uploader_username ?? oldAccount.uploader_username,
   expected_token_count: updatedAccount.expected_token_count ?? oldAccount.expected_token_count,
   pool_total_usage_tokens: updatedAccount.pool_total_usage_tokens ?? oldAccount.pool_total_usage_tokens,
   pool_net_cost_minor: updatedAccount.pool_net_cost_minor ?? oldAccount.pool_net_cost_minor,
@@ -2675,27 +2712,14 @@ const closeDeleteDialog = () => {
 }
 const handleDelete = async (account: Account) => {
   deletingAcc.value = account
-	Object.assign(deleteForm, { cost_disposition: 'write_off', replacement_account_id: 0, refund_amount: '', reason: '' })
   showDeleteDialog.value = true
-  try {
-    const response = await adminAPI.accounts.list(1, 200, { lite: 'true', status: 'active', sort_by: 'name', sort_order: 'asc' })
-    deleteReplacementAccounts.value = response.items.filter(item => item.id !== account.id)
-  } catch (error) {
-    deleteReplacementAccounts.value = []
-    appStore.showError(extractApiErrorMessage(error, t('admin.sharedPool.delete.loadAccountsFailed')))
-  }
 }
 const confirmDelete = async () => {
   const account = deletingAcc.value
-	if (!account || (!authStore.user?.is_primary_admin && !deleteForm.reason.trim()) || (deleteForm.cost_disposition === 'transfer' && !deleteForm.replacement_account_id) || (deleteForm.cost_disposition === 'refund' && !(Number(deleteForm.refund_amount) > 0))) return
+	if (!account) return
   deleteSubmitting.value = true
   try {
-		const result = await adminAPI.accounts.delete(account.id, {
-		  cost_disposition: deleteForm.cost_disposition,
-		  replacement_account_id: deleteForm.cost_disposition === 'transfer' ? deleteForm.replacement_account_id : undefined,
-		  refund_amount_minor: deleteForm.cost_disposition === 'refund' ? Math.round(Number(deleteForm.refund_amount) * 100) : undefined,
-		  reason: deleteForm.reason || undefined
-		})
+		const result = await adminAPI.accounts.delete(account.id)
     showDeleteDialog.value = false
     deletingAcc.value = null
 		appStore.showSuccess(t(result.approval ? 'admin.sharedPool.delete.approvalSubmitted' : 'admin.sharedPool.delete.success'))

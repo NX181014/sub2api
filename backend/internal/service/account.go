@@ -48,6 +48,7 @@ type Account struct {
 	CostSharingEnabled bool
 	// Pool list metrics are populated for paginated admin account listings only.
 	UploaderEmail          *string
+	UploaderUsername       *string
 	ExpectedTokenCount     *int64
 	PoolTotalUsageTokens   int64
 	PoolNetCostMinor       int64

@@ -17,6 +17,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 )
 
 const codexImportClockSkewSeconds int64 = 120
@@ -39,6 +40,8 @@ type CodexSessionImportRequest struct {
 	UpdateExisting          *bool          `json:"update_existing"`
 	SkipDefaultGroupBind    *bool          `json:"skip_default_group_bind"`
 	ConfirmMixedChannelRisk *bool          `json:"confirm_mixed_channel_risk"`
+	uploaderUserID          *int64
+	importBatchID           string
 }
 
 type CodexSessionImportResult struct {
@@ -154,6 +157,9 @@ func (h *AccountHandler) ImportCodexSession(c *gin.Context) {
 		response.BadRequest(c, "请输入 accessToken 或 Codex session JSON")
 		return
 	}
+	actorID, _ := optionalPoolActorID(c)
+	req.uploaderUserID = optionalPositiveInt64(actorID)
+	req.importBatchID = uuid.NewString()
 
 	executeAdminIdempotentJSON(c, "admin.accounts.import_codex_session", req, service.DefaultWriteIdempotencyTTL(), func(ctx context.Context) (any, error) {
 		return h.importCodexSessions(ctx, req, entries)
@@ -331,6 +337,7 @@ func (h *AccountHandler) importCodexSessions(ctx context.Context, req CodexSessi
 			continue
 		}
 
+		extra["import_batch_id"] = req.importBatchID
 		account, createErr := h.adminService.CreateAccount(ctx, &service.CreateAccountInput{
 			Name:                  accountName,
 			Notes:                 req.Notes,
@@ -348,6 +355,7 @@ func (h *AccountHandler) importCodexSessions(ctx context.Context, req CodexSessi
 			AutoPauseOnExpired:    autoPauseOnExpired,
 			SkipDefaultGroupBind:  skipDefaultGroupBind,
 			SkipMixedChannelCheck: skipMixedChannelCheck,
+			CreatedByUserID:       req.uploaderUserID,
 		})
 		if createErr != nil {
 			result.Failed++

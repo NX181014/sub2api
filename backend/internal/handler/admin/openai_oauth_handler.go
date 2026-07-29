@@ -277,16 +277,18 @@ func (h *OpenAIOAuthHandler) CreateAccountFromOAuth(c *gin.Context) {
 	}
 
 	// Create account
+	actorID, _ := optionalPoolActorID(c)
 	account, err := h.adminService.CreateAccount(c.Request.Context(), &service.CreateAccountInput{
-		Name:        name,
-		Platform:    platform,
-		Type:        "oauth",
-		Credentials: credentials,
-		Extra:       nil,
-		ProxyID:     req.ProxyID,
-		Concurrency: req.Concurrency,
-		Priority:    req.Priority,
-		GroupIDs:    req.GroupIDs,
+		Name:            name,
+		Platform:        platform,
+		Type:            "oauth",
+		Credentials:     credentials,
+		Extra:           nil,
+		ProxyID:         req.ProxyID,
+		Concurrency:     req.Concurrency,
+		Priority:        req.Priority,
+		GroupIDs:        req.GroupIDs,
+		CreatedByUserID: optionalPositiveInt64(actorID),
 	})
 	if err != nil {
 		response.ErrorFrom(c, err)
@@ -367,6 +369,7 @@ func (h *OpenAIOAuthHandler) CreateAccountFromCodexPAT(c *gin.Context) {
 		skipDefaultGroupBind = *req.SkipDefaultGroupBind
 	}
 
+	actorID, _ := optionalPoolActorID(c)
 	account, err := h.adminService.CreateAccount(c.Request.Context(), &service.CreateAccountInput{
 		Name:                  buildOpenAICodexPATAccountName(req.Name, tokenInfo),
 		Notes:                 req.Notes,
@@ -382,6 +385,7 @@ func (h *OpenAIOAuthHandler) CreateAccountFromCodexPAT(c *gin.Context) {
 		GroupIDs:              req.GroupIDs,
 		ExpiresAt:             req.ExpiresAt,
 		AutoPauseOnExpired:    req.AutoPauseOnExpired,
+		CreatedByUserID:       optionalPositiveInt64(actorID),
 		SkipDefaultGroupBind:  skipDefaultGroupBind,
 		SkipMixedChannelCheck: req.ConfirmMixedChannelRisk != nil && *req.ConfirmMixedChannelRisk,
 	})

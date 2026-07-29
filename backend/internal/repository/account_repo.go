@@ -122,6 +122,9 @@ func createAccountRecord(ctx context.Context, client *dbent.Client, account *ser
 	if account.LoadFactor != nil {
 		builder.SetLoadFactor(*account.LoadFactor)
 	}
+	if account.CreatedByUserID != nil {
+		builder.SetCreatedByUserID(*account.CreatedByUserID)
+	}
 
 	if account.ProxyID != nil {
 		builder.SetProxyID(*account.ProxyID)
@@ -981,7 +984,7 @@ func (r *accountRepository) enrichAccountListPoolMetrics(ctx context.Context, ac
 	}
 
 	rows, err := r.sql.QueryContext(ctx, `
-SELECT a.id,uploader.email,a.expected_token_count,
+SELECT a.id,uploader.email,uploader.username,a.expected_token_count,
        COALESCE(costs.cost_basis_minor,0)::bigint,
        COALESCE(costs.refund_minor,0)::bigint,
        COALESCE(costs.transferred_out_minor,0)::bigint,
@@ -1029,14 +1032,14 @@ WHERE a.id IN (`+strings.Join(placeholders, ",")+`)`, args...)
 	for rows.Next() {
 		var (
 			accountID                                  int64
-			uploaderEmail                              sql.NullString
+			uploaderEmail, uploaderUsername            sql.NullString
 			expectedTokens                             sql.NullInt64
 			costBasis, refund, transferred, writtenOff int64
 			netCost, totalUsage                        int64
 			trancheJSON                                []byte
 			lifecycleStatus                            string
 		)
-		if err := rows.Scan(&accountID, &uploaderEmail, &expectedTokens, &costBasis, &refund, &transferred, &writtenOff, &netCost, &trancheJSON, &totalUsage, &lifecycleStatus); err != nil {
+		if err := rows.Scan(&accountID, &uploaderEmail, &uploaderUsername, &expectedTokens, &costBasis, &refund, &transferred, &writtenOff, &netCost, &trancheJSON, &totalUsage, &lifecycleStatus); err != nil {
 			return err
 		}
 		tranches, err := decodePoolCostTranches(trancheJSON)
@@ -1049,6 +1052,9 @@ WHERE a.id IN (`+strings.Join(placeholders, ",")+`)`, args...)
 		}
 		if uploaderEmail.Valid {
 			account.UploaderEmail = &uploaderEmail.String
+		}
+		if uploaderUsername.Valid {
+			account.UploaderUsername = &uploaderUsername.String
 		}
 		if expectedTokens.Valid {
 			account.ExpectedTokenCount = &expectedTokens.Int64

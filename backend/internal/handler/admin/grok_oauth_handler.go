@@ -15,6 +15,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/xai"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 )
 
 const grokSSOImportConcurrency = 3
@@ -245,15 +246,17 @@ func (h *GrokOAuthHandler) CreateAccountFromOAuth(c *gin.Context) {
 		name = "Grok OAuth Account"
 	}
 
+	actorID, _ := optionalPoolActorID(c)
 	account, err := h.adminService.CreateAccount(c.Request.Context(), &service.CreateAccountInput{
-		Name:        name,
-		Platform:    service.PlatformGrok,
-		Type:        service.AccountTypeOAuth,
-		Credentials: credentials,
-		ProxyID:     req.ProxyID,
-		Concurrency: req.Concurrency,
-		Priority:    req.Priority,
-		GroupIDs:    req.GroupIDs,
+		Name:            name,
+		Platform:        service.PlatformGrok,
+		Type:            service.AccountTypeOAuth,
+		Credentials:     credentials,
+		ProxyID:         req.ProxyID,
+		Concurrency:     req.Concurrency,
+		Priority:        req.Priority,
+		GroupIDs:        req.GroupIDs,
+		CreatedByUserID: optionalPositiveInt64(actorID),
 	})
 	if err != nil {
 		response.ErrorFrom(c, err)
@@ -278,6 +281,8 @@ type GrokSSOToOAuthRequest struct {
 	RateMultiplier     *float64       `json:"rate_multiplier"`
 	ExpiresAt          *int64         `json:"expires_at"`
 	AutoPauseOnExpired *bool          `json:"auto_pause_on_expired"`
+	uploaderUserID     *int64
+	importBatchID      string
 }
 
 type GrokSSOToOAuthItemResult struct {
@@ -316,6 +321,9 @@ func (h *GrokOAuthHandler) CreateAccountsFromSSO(c *gin.Context) {
 	}
 
 	ctx := c.Request.Context()
+	actorID, _ := optionalPoolActorID(c)
+	req.uploaderUserID = optionalPositiveInt64(actorID)
+	req.importBatchID = uuid.NewString()
 	workerCount := grokSSOImportConcurrency
 	if len(tokens) < workerCount {
 		workerCount = len(tokens)
@@ -376,13 +384,18 @@ func (h *GrokOAuthHandler) createAccountFromSSOToken(ctx context.Context, req Gr
 	credentials := grokSSOImportCredentials(h.grokOAuthService.BuildAccountCredentials(tokenInfo), req.Credentials)
 	name := grokSSOImportAccountName(req.Name, tokenInfo, index, total)
 	expiresAt, autoPauseOnExpired := grokSSOImportExpiry(req.ExpiresAt, req.AutoPauseOnExpired, tokenInfo)
+	extra := cloneGrokSSOMap(req.Extra)
+	if extra == nil {
+		extra = make(map[string]any)
+	}
+	extra["import_batch_id"] = req.importBatchID
 	account, err := h.adminService.CreateAccount(ctx, &service.CreateAccountInput{
 		Name:               name,
 		Notes:              req.Notes,
 		Platform:           service.PlatformGrok,
 		Type:               service.AccountTypeOAuth,
 		Credentials:        credentials,
-		Extra:              cloneGrokSSOMap(req.Extra),
+		Extra:              extra,
 		ProxyID:            req.ProxyID,
 		Concurrency:        req.Concurrency,
 		LoadFactor:         req.LoadFactor,
@@ -391,6 +404,7 @@ func (h *GrokOAuthHandler) createAccountFromSSOToken(ctx context.Context, req Gr
 		GroupIDs:           append([]int64(nil), req.GroupIDs...),
 		ExpiresAt:          expiresAt,
 		AutoPauseOnExpired: autoPauseOnExpired,
+		CreatedByUserID:    req.uploaderUserID,
 	})
 	if err != nil {
 		return grokSSOImportWorkerResult{item: GrokSSOToOAuthItemResult{Index: index, Name: name, Email: tokenInfo.Email, Error: grokSSOImportErrorMessage(err)}}

@@ -75,8 +75,7 @@ func newApprovalGateHandler(actorID int64) (*gin.Engine, *stubAdminService, *app
 func TestAccountDeleteUsesApprovalExceptForPrimaryAdmin(t *testing.T) {
 	router, adminSvc, repo := newApprovalGateHandler(2)
 	w := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodDelete, "/accounts/7", strings.NewReader(`{"cost_disposition":"write_off","reason":"banned"}`))
-	req.Header.Set("Content-Type", "application/json")
+	req := httptest.NewRequest(http.MethodDelete, "/accounts/7", nil)
 	router.ServeHTTP(w, req)
 	if w.Code != http.StatusAccepted || repo.created == nil || repo.created.ActionType != service.PoolApprovalDeleteAccount {
 		t.Fatalf("non-primary delete status=%d body=%s approval=%+v", w.Code, w.Body.String(), repo.created)
@@ -87,8 +86,7 @@ func TestAccountDeleteUsesApprovalExceptForPrimaryAdmin(t *testing.T) {
 
 	router, adminSvc, repo = newApprovalGateHandler(1)
 	w = httptest.NewRecorder()
-	req = httptest.NewRequest(http.MethodDelete, "/accounts/7", strings.NewReader(`{"cost_disposition":"write_off","reason":"banned"}`))
-	req.Header.Set("Content-Type", "application/json")
+	req = httptest.NewRequest(http.MethodDelete, "/accounts/7", nil)
 	router.ServeHTTP(w, req)
 	if w.Code != http.StatusOK || adminSvc.deleteAccountCalls != 1 || repo.created != nil {
 		t.Fatalf("primary delete status=%d body=%s calls=%d approval=%+v", w.Code, w.Body.String(), adminSvc.deleteAccountCalls, repo.created)

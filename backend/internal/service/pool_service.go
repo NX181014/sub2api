@@ -30,6 +30,7 @@ type PoolAccount struct {
 	ContributorEmail      *string    `json:"contributor_email"`
 	CreatedByUserID       *int64     `json:"created_by_user_id"`
 	CreatedByEmail        *string    `json:"created_by_email"`
+	CreatedByUsername     *string    `json:"created_by_username"`
 	CostSharingEnabled    bool       `json:"cost_sharing_enabled"`
 	LatestLifecycleStatus string     `json:"latest_lifecycle_status"`
 	LatestLifecycleAt     *time.Time `json:"latest_lifecycle_at"`
@@ -117,6 +118,7 @@ type AccountCostSummary struct {
 	AccountStatus           string               `json:"account_status"`
 	UploaderUserID          *int64               `json:"uploader_user_id"`
 	UploaderEmail           *string              `json:"uploader_email"`
+	UploaderUsername        *string              `json:"uploader_username"`
 	ContributorUserID       *int64               `json:"contributor_user_id"`
 	ContributorEmail        *string              `json:"contributor_email"`
 	ExpectedTokenCount      *int64               `json:"expected_token_count"`
@@ -353,6 +355,9 @@ type AccountRecovery struct {
 	AccountID              int64      `json:"account_id"`
 	AccountName            string     `json:"account_name"`
 	ProviderIdentity       *string    `json:"provider_identity"`
+	UploaderUserID         *int64     `json:"uploader_user_id"`
+	UploaderUsername       *string    `json:"uploader_username"`
+	UploadedAt             time.Time  `json:"uploaded_at"`
 	PurchaseSource         *string    `json:"purchase_source"`
 	LifecycleStatus        string     `json:"lifecycle_status"`
 	NetCostMinor           int64      `json:"net_cost_minor"`

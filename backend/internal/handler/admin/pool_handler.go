@@ -53,6 +53,21 @@ func poolActorID(c *gin.Context) (int64, bool) {
 	return subject.UserID, true
 }
 
+func optionalPoolActorID(c *gin.Context) (int64, bool) {
+	if c.GetString("auth_method") == service.AuditAuthMethodAdminAPIKey {
+		return 0, false
+	}
+	subject, ok := middleware.GetAuthSubjectFromContext(c)
+	return subject.UserID, ok && subject.UserID > 0
+}
+
+func optionalPositiveInt64(value int64) *int64 {
+	if value <= 0 {
+		return nil
+	}
+	return &value
+}
+
 func poolPathID(c *gin.Context) (int64, bool) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil || id <= 0 {

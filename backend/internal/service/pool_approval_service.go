@@ -412,11 +412,19 @@ func (s *PoolService) decideApproval(ctx context.Context, id, actorID int64, rea
 		if !ok || payload.DeleteOptions == nil {
 			return nil, fmt.Errorf("account lifecycle deletion service is not configured")
 		}
-		options := *payload.DeleteOptions
-		options.ActorUserID = actorID
-		if _, err = deleter.DeleteAccountWithOptions(txCtx, item.AccountID, options); err != nil {
+		if err := s.approvalRepo.SetDecision(txCtx, id, PoolApprovalApproved, actorID, decisionReason, nil); err != nil {
 			return nil, err
 		}
+		if _, err = deleter.DeleteAccountWithOptions(txCtx, item.AccountID, *payload.DeleteOptions); err != nil {
+			return nil, err
+		}
+		if err := tx.Commit(); err != nil {
+			return nil, err
+		}
+		now := time.Now().UTC()
+		item.Status, item.DecidedByUserID, item.DecisionReason, item.DecidedAt = PoolApprovalApproved, &actorID, decisionReason, &now
+		item.Payload = nil
+		return item, nil
 	default:
 		return nil, infraerrors.BadRequest("INVALID_APPROVAL_ACTION", "invalid stored approval action")
 	}
@@ -673,13 +681,6 @@ func buildPoolApprovalSummary(account *Account, pool *PoolApprovalAccountState, 
 	}
 	if u := payload.DeleteOptions; u != nil {
 		add("delete_account", false, true)
-		add("cost_disposition", nil, u.CostDisposition)
-		if u.ReplacementAccountID != nil {
-			add("replacement_account_id", nil, *u.ReplacementAccountID)
-		}
-		if u.RefundAmountMinor != nil {
-			add("refund_amount_minor", nil, *u.RefundAmountMinor)
-		}
 	}
 	if len(payload.ExtraMerge) > 0 {
 		result.ExtraKeys = mergeSortedKeys(result.ExtraKeys, payload.ExtraMerge)

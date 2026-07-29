@@ -46,56 +46,34 @@
         <Select v-model="summaryFilters.has_cost" :options="hasCostFilterOptions" :aria-label="t('admin.sharedPool.ledger.costState')" @change="applySummaryFilters" />
       </div>
 
-      <div class="hidden md:block">
-        <DataTable :columns="summaryColumns" :data="summaries" row-key="account_id" :loading="loading">
-          <template #cell-account_name="{ row }">
-            <div class="min-w-0">
-              <p class="max-w-56 truncate font-medium text-gray-900 dark:text-white" :title="row.account_name">{{ row.account_name }}</p>
-              <p class="max-w-56 truncate text-xs text-gray-500 dark:text-gray-400" :title="row.provider_identity || ''">{{ row.provider_identity || '-' }}</p>
-            </div>
-          </template>
-          <template #cell-uploader_email="{ row }">{{ row.uploader_email || '-' }}</template>
-          <template #cell-net_cost_minor="{ row }"><span class="tabular-nums">{{ formatMinor(row.net_cost_minor) }}</span></template>
-          <template #cell-written_off_minor="{ row }"><span class="tabular-nums text-red-600 dark:text-red-400">{{ formatMinor(row.written_off_minor || 0) }}</span></template>
-          <template #cell-usage="{ row }">
-            <div class="whitespace-nowrap">
-              <span class="font-medium tabular-nums">{{ formatTokens(row.total_usage_tokens) }}</span>
-              <span class="text-xs text-gray-500 dark:text-gray-400"> / {{ formatTokens(row.expected_token_count || 0) }}</span>
-            </div>
-          </template>
-          <template #cell-recognized_cost_minor="{ row }"><span class="tabular-nums">{{ formatMinor(row.recognized_cost_minor) }}</span></template>
-          <template #cell-remaining_cost_minor="{ row }"><span class="tabular-nums text-amber-600 dark:text-amber-400">{{ formatMinor(row.remaining_cost_minor) }}</span></template>
-          <template #cell-cost_progress="{ row }"><span class="font-medium tabular-nums">{{ formatProgress(row.cost_progress) }}</span></template>
-          <template #cell-latest_lifecycle_status="{ row }">
-            <StatusBadge :status="statusPresentation(row.latest_lifecycle_status).badge" :label="t(`admin.sharedPool.status.${statusPresentation(row.latest_lifecycle_status).key}`)" />
-          </template>
-          <template #cell-actions="{ row }">
-            <div class="flex items-center gap-2">
-              <button type="button" class="btn btn-secondary min-h-9 whitespace-nowrap px-2 text-xs" @click="emit('open-account', row.account_id)">{{ t('admin.sharedPool.actions.poolRecord') }}</button>
-              <button type="button" class="btn btn-secondary min-h-9 whitespace-nowrap px-2 text-xs" @click="showAccountEntries(row.account_id)">{{ t('admin.sharedPool.ledger.viewEntries') }}</button>
-            </div>
-          </template>
-        </DataTable>
-      </div>
-
-      <div class="space-y-3 p-3 md:hidden">
-        <article v-for="row in summaries" :key="row.account_id" class="rounded-md border border-gray-200 p-3 dark:border-dark-700">
-          <div class="flex min-w-0 items-start justify-between gap-3">
-            <div class="min-w-0">
-              <p class="truncate text-sm font-semibold text-gray-900 dark:text-white">{{ row.uploader_email || '-' }}</p>
-              <p class="truncate text-xs text-gray-500 dark:text-gray-400">{{ row.account_name }}</p>
-            </div>
-            <StatusBadge :status="statusPresentation(row.latest_lifecycle_status).badge" :label="t(`admin.sharedPool.status.${statusPresentation(row.latest_lifecycle_status).key}`)" />
-          </div>
-          <dl class="mt-3 grid grid-cols-2 gap-2 text-xs">
-            <div><dt class="text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.ledger.netCost') }}</dt><dd class="mt-1 font-medium tabular-nums">{{ formatMinor(row.net_cost_minor) }}</dd></div>
-            <div><dt class="text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.ledger.writtenOffLoss') }}</dt><dd class="mt-1 font-medium tabular-nums text-red-600 dark:text-red-400">{{ formatMinor(row.written_off_minor || 0) }}</dd></div>
-            <div><dt class="text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.ledger.recognizedCost') }}</dt><dd class="mt-1 font-medium tabular-nums">{{ formatMinor(row.recognized_cost_minor) }}</dd></div>
-            <div><dt class="text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.columns.remaining') }}</dt><dd class="mt-1 font-medium tabular-nums text-amber-600 dark:text-amber-400">{{ formatMinor(row.remaining_cost_minor) }}</dd></div>
+      <div class="space-y-3 p-3 sm:p-4">
+        <article v-for="group in summaryUploaderGroups" :key="group.key" class="overflow-hidden rounded-lg border border-gray-200 dark:border-dark-700">
+          <button type="button" class="flex min-h-14 w-full items-center justify-between gap-3 px-3 py-2 text-left sm:px-4" @click="toggleUploaderGroup(group.key)">
+            <span class="min-w-0"><span class="block truncate font-semibold text-gray-900 dark:text-white">{{ group.name }}</span><span class="block text-xs text-gray-500 dark:text-gray-400">{{ group.items.length }} {{ t('admin.sharedPool.columns.accounts') }}</span></span>
+            <span class="shrink-0 text-xs font-medium text-primary-600 dark:text-primary-400">{{ expandedUploaderGroups.has(group.key) ? t('common.collapse') : t('common.expand') }}</span>
+          </button>
+          <dl class="grid grid-cols-3 gap-2 border-t border-gray-100 bg-gray-50 px-3 py-2 text-xs dark:border-dark-700 dark:bg-dark-800/60 sm:px-4">
+            <div><dt class="text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.ledger.netCost') }}</dt><dd class="mt-1 font-medium tabular-nums">{{ formatMinor(group.netCost) }}</dd></div>
+            <div><dt class="text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.ledger.recognizedCost') }}</dt><dd class="mt-1 font-medium tabular-nums">{{ formatMinor(group.recognizedCost) }}</dd></div>
+            <div><dt class="text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.columns.remaining') }}</dt><dd class="mt-1 font-medium tabular-nums text-amber-600 dark:text-amber-400">{{ formatMinor(group.remainingCost) }}</dd></div>
           </dl>
-          <div class="mt-3 grid grid-cols-2 border-t border-gray-100 pt-2 dark:border-dark-700">
-            <button type="button" class="min-h-11 text-sm font-medium text-primary-600 dark:text-primary-400" @click="emit('open-account', row.account_id)">{{ t('admin.sharedPool.actions.poolRecord') }}</button>
-            <button type="button" class="min-h-11 border-l border-gray-100 text-sm font-medium text-primary-600 dark:border-dark-700 dark:text-primary-400" @click="showAccountEntries(row.account_id)">{{ t('admin.sharedPool.ledger.viewEntries') }}</button>
+          <div v-if="expandedUploaderGroups.has(group.key)" class="divide-y divide-gray-100 border-t border-gray-100 dark:divide-dark-700 dark:border-dark-700">
+            <article v-for="row in group.items" :key="row.account_id" class="p-3 sm:p-4">
+              <div class="flex min-w-0 items-start justify-between gap-3">
+                <div class="min-w-0"><p class="truncate text-sm font-semibold" :title="row.account_name">{{ row.account_name }}</p><p class="truncate text-xs text-gray-500 dark:text-gray-400" :title="row.provider_identity || ''">{{ row.provider_identity || '-' }}</p></div>
+                <StatusBadge :status="statusPresentation(row.latest_lifecycle_status).badge" :label="t(`admin.sharedPool.status.${statusPresentation(row.latest_lifecycle_status).key}`)" />
+              </div>
+              <dl class="mt-3 grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
+                <div><dt class="text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.ledger.netCost') }}</dt><dd class="mt-1 font-medium tabular-nums">{{ formatMinor(row.net_cost_minor) }}</dd></div>
+                <div><dt class="text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.ledger.usageExpected') }}</dt><dd class="mt-1 font-medium tabular-nums">{{ formatTokens(row.total_usage_tokens) }} / {{ formatTokens(row.expected_token_count || 0) }}</dd></div>
+                <div><dt class="text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.ledger.recognizedCost') }}</dt><dd class="mt-1 font-medium tabular-nums">{{ formatMinor(row.recognized_cost_minor) }}</dd></div>
+                <div><dt class="text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.columns.remaining') }}</dt><dd class="mt-1 font-medium tabular-nums text-amber-600 dark:text-amber-400">{{ formatMinor(row.remaining_cost_minor) }}</dd></div>
+              </dl>
+              <div class="mt-3 grid grid-cols-2 border-t border-gray-100 pt-2 dark:border-dark-700">
+                <button type="button" class="min-h-11 text-sm font-medium text-primary-600 dark:text-primary-400" @click="emit('open-account', row.account_id)">{{ t('admin.sharedPool.actions.poolRecord') }}</button>
+                <button type="button" class="min-h-11 border-l border-gray-100 text-sm font-medium text-primary-600 dark:border-dark-700 dark:text-primary-400" @click="showAccountEntries(row.account_id)">{{ t('admin.sharedPool.ledger.viewEntries') }}</button>
+              </div>
+            </article>
           </div>
         </article>
         <EmptyState v-if="!loading && !summaries.length" :title="t('admin.sharedPool.ledger.emptySummary')" />
@@ -289,6 +267,7 @@ const sources = ref<SharedPoolPurchaseSource[]>([])
 const accountChoices = ref<AccountChoice[]>([])
 const batchAccounts = ref<AccountChoice[]>([])
 const selectedAccounts = ref<AccountChoice[]>([])
+const expandedUploaderGroups = ref(new Set<string>())
 const accountSearch = ref('')
 const showBatchDialog = ref(false)
 const batchStep = ref(1)
@@ -360,18 +339,6 @@ const hasCostFilterOptions = computed(() => [
   { value: 'false', label: t('admin.sharedPool.ledger.withoutCost') }
 ])
 
-const summaryColumns = computed<Column[]>(() => [
-  { key: 'account_name', label: t('admin.sharedPool.columns.account') },
-  { key: 'uploader_email', label: t('admin.sharedPool.columns.uploader') },
-  { key: 'net_cost_minor', label: t('admin.sharedPool.ledger.netCost') },
-  { key: 'written_off_minor', label: t('admin.sharedPool.ledger.writtenOffLoss') },
-  { key: 'usage', label: t('admin.sharedPool.ledger.usageExpected') },
-  { key: 'recognized_cost_minor', label: t('admin.sharedPool.ledger.recognizedCost') },
-  { key: 'remaining_cost_minor', label: t('admin.sharedPool.columns.remaining') },
-  { key: 'cost_progress', label: t('admin.sharedPool.ledger.costProgress') },
-  { key: 'latest_lifecycle_status', label: t('admin.sharedPool.columns.status') },
-  { key: 'actions', label: t('admin.sharedPool.columns.actions') }
-])
 const entryColumns = computed<Column[]>(() => [
   { key: 'account_name', label: t('admin.sharedPool.columns.account') },
   { key: 'entry_type', label: t('admin.sharedPool.columns.costType') },
@@ -384,6 +351,28 @@ const entryColumns = computed<Column[]>(() => [
   { key: 'created_at', label: t('admin.sharedPool.ledger.recordedAt') },
 	{ key: 'actions', label: t('admin.sharedPool.columns.actions') }
 ])
+
+const summaryUploaderGroups = computed(() => {
+  const groups = new Map<string, { key: string; name: string; items: SharedPoolCostSummary[]; netCost: number; recognizedCost: number; remainingCost: number }>()
+  for (const item of summaries.value) {
+    const name = item.uploader_username || item.uploader_email || '-'
+    const key = String(item.uploader_user_id || `name:${name}`)
+    const group = groups.get(key) || { key, name, items: [], netCost: 0, recognizedCost: 0, remainingCost: 0 }
+    group.items.push(item)
+    group.netCost += item.net_cost_minor || 0
+    group.recognizedCost += item.recognized_cost_minor || 0
+    group.remainingCost += item.remaining_cost_minor || 0
+    groups.set(key, group)
+  }
+  return [...groups.values()]
+})
+
+function toggleUploaderGroup(key: string) {
+  const next = new Set(expandedUploaderGroups.value)
+  if (next.has(key)) next.delete(key)
+  else next.add(key)
+  expandedUploaderGroups.value = next
+}
 
 const isEditableEntry = (entry: SharedPoolLedgerEntry) => ['purchase', 'renewal', 'topup', 'price_version', 'adjustment'].includes(entry.entry_type)
 
@@ -403,7 +392,6 @@ const allVisibleSelected = computed(() => batchAccounts.value.length > 0 && batc
 const formatMoney = (amount: number, currency = 'CNY') => formatPoolMoney(Number.isFinite(amount) ? amount : 0, currency, locale.value)
 const formatMinor = (minor: number) => formatMoney((minor || 0) / 100)
 const formatTokens = (tokens: number) => new Intl.NumberFormat(locale.value, { notation: 'compact', maximumFractionDigits: 1 }).format(tokens || 0)
-const formatProgress = (progress?: string | null) => `${(Number(progress || 0) * 100).toFixed(1)}%`
 const dateOnly = (value?: string | null) => value ? value.slice(0, 10) : '-'
 const statusPresentation = (status: string) => accountStatusPresentation(status === 'banned_confirmed' ? 'banned' : status === 'retired' || status === 'replaced' ? 'inactive' : status === 'refund' ? 'warning' : 'active')
 const selectedOptionLabel = (options: Array<{ value: number; label: string }>, value: number) => options.find((item) => item.value === value)?.label || '-'

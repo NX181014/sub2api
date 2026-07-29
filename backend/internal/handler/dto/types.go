@@ -210,6 +210,7 @@ type Account struct {
 	CreatedByUserID         *int64                         `json:"created_by_user_id,omitempty"`
 	CostSharingEnabled      bool                           `json:"cost_sharing_enabled"`
 	UploaderEmail           *string                        `json:"uploader_email,omitempty"`
+	UploaderUsername        *string                        `json:"uploader_username,omitempty"`
 	ExpectedTokenCount      *int64                         `json:"expected_token_count,omitempty"`
 	PoolTotalUsageTokens    int64                          `json:"pool_total_usage_tokens,omitempty"`
 	PoolNetCostMinor        int64                          `json:"pool_net_cost_minor,omitempty"`

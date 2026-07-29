@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log"
 	"log/slog"
+	"maps"
 	"net/http"
 	"sort"
 	"strconv"
@@ -30,6 +31,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/service"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -153,6 +155,7 @@ type CreateAccountRequest struct {
 	ExpiresAt               *int64         `json:"expires_at"`
 	AutoPauseOnExpired      *bool          `json:"auto_pause_on_expired"`
 	ProbeEnabled            *bool          `json:"upstream_billing_probe_enabled"`
+	ImportBatchID           string         `json:"import_batch_id"`
 	ConfirmMixedChannelRisk *bool          `json:"confirm_mixed_channel_risk"` // 用户确认混合渠道风险
 }
 
@@ -179,13 +182,6 @@ type UpdateAccountRequest struct {
 	ContributorUserID       *int64         `json:"contributor_user_id"`
 	CreatedByUserID         *int64         `json:"created_by_user_id"`
 	CostSharingEnabled      *bool          `json:"cost_sharing_enabled"`
-}
-
-type DeleteAccountRequest struct {
-	CostDisposition      string `json:"cost_disposition"`
-	ReplacementAccountID *int64 `json:"replacement_account_id"`
-	RefundAmountMinor    *int64 `json:"refund_amount_minor"`
-	Reason               string `json:"reason"`
 }
 
 type accountLifecycleDeletionService interface {
@@ -934,6 +930,18 @@ func (h *AccountHandler) Create(c *gin.Context) {
 	}
 	// base_rpm 输入校验：负值归零，超过 10000 截断
 	sanitizeExtraBaseRPM(req.Extra)
+	actorID, _ := optionalPoolActorID(c)
+	extra := maps.Clone(req.Extra)
+	if batchID := strings.TrimSpace(req.ImportBatchID); batchID != "" {
+		if _, err := uuid.Parse(batchID); err != nil {
+			response.BadRequest(c, "import_batch_id must be a UUID")
+			return
+		}
+		if extra == nil {
+			extra = make(map[string]any)
+		}
+		extra["import_batch_id"] = batchID
+	}
 
 	// 确定是否跳过混合渠道检查
 	skipCheck := req.ConfirmMixedChannelRisk != nil && *req.ConfirmMixedChannelRisk
@@ -949,7 +957,7 @@ func (h *AccountHandler) Create(c *gin.Context) {
 			Platform:              req.Platform,
 			Type:                  req.Type,
 			Credentials:           req.Credentials,
-			Extra:                 req.Extra,
+			Extra:                 extra,
 			ProxyID:               req.ProxyID,
 			Concurrency:           req.Concurrency,
 			Priority:              req.Priority,
@@ -960,6 +968,7 @@ func (h *AccountHandler) Create(c *gin.Context) {
 			AutoPauseOnExpired:    req.AutoPauseOnExpired,
 			ProbeEnabled:          req.ProbeEnabled,
 			SkipMixedChannelCheck: skipCheck,
+			CreatedByUserID:       optionalPositiveInt64(actorID),
 		})
 		if execErr != nil {
 			return nil, execErr
@@ -1192,25 +1201,12 @@ func (h *AccountHandler) Delete(c *gin.Context) {
 		if !actorOK {
 			return
 		}
-		var req DeleteAccountRequest
-		if c.Request.ContentLength > 0 {
-			if bindErr := c.ShouldBindJSON(&req); bindErr != nil {
-				response.BadRequest(c, "Invalid request: "+bindErr.Error())
-				return
-			}
-		}
-		options := service.AccountDeleteOptions{
-			ActorUserID:          actorID,
-			CostDisposition:      req.CostDisposition,
-			ReplacementAccountID: req.ReplacementAccountID,
-			RefundAmountMinor:    req.RefundAmountMinor,
-			Reason:               req.Reason,
-		}
+		options := service.AccountDeleteOptions{}
 		if h.poolService != nil && !h.poolService.IsPrimaryAdmin(c.Request.Context(), actorID) {
 			approval, approvalErr := h.poolService.CreateApproval(c.Request.Context(), service.CreatePoolApprovalInput{
 				ActionType:  service.PoolApprovalDeleteAccount,
 				AccountID:   accountID,
-				Reason:      req.Reason,
+				Reason:      "delete account",
 				RequesterID: actorID,
 				Payload:     service.PoolApprovalPayload{DeleteOptions: &options},
 			})
@@ -1923,6 +1919,8 @@ func (h *AccountHandler) BatchCreate(c *gin.Context) {
 		response.BadRequest(c, "Invalid request: "+err.Error())
 		return
 	}
+	actorID, _ := optionalPoolActorID(c)
+	batchID := uuid.NewString()
 	for _, item := range req.Accounts {
 		if err := service.ValidateOpenAILongContextBillingExtra(item.Platform, item.Extra); err != nil {
 			response.ErrorFrom(c, err)
@@ -1954,13 +1952,18 @@ func (h *AccountHandler) BatchCreate(c *gin.Context) {
 
 			skipCheck := item.ConfirmMixedChannelRisk != nil && *item.ConfirmMixedChannelRisk
 
+			extra := maps.Clone(item.Extra)
+			if extra == nil {
+				extra = make(map[string]any)
+			}
+			extra["import_batch_id"] = batchID
 			account, err := h.adminService.CreateAccount(ctx, &service.CreateAccountInput{
 				Name:                  item.Name,
 				Notes:                 item.Notes,
 				Platform:              item.Platform,
 				Type:                  item.Type,
 				Credentials:           item.Credentials,
-				Extra:                 item.Extra,
+				Extra:                 extra,
 				ProxyID:               item.ProxyID,
 				Concurrency:           item.Concurrency,
 				Priority:              item.Priority,
@@ -1969,6 +1972,7 @@ func (h *AccountHandler) BatchCreate(c *gin.Context) {
 				ExpiresAt:             item.ExpiresAt,
 				AutoPauseOnExpired:    item.AutoPauseOnExpired,
 				SkipMixedChannelCheck: skipCheck,
+				CreatedByUserID:       optionalPositiveInt64(actorID),
 			})
 			if err != nil {
 				failed++

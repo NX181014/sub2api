@@ -31,16 +31,14 @@ export default {
       }
     },
     entryTypes: { purchase: '首次采购', renewal: '续费', topup: '充值', price_version: '价格变更', refund: '退款', adjustment: '成本调整', replacement_in: '补号转入', replacement_out: '补号转出', write_off: '核销损失' },
-    settlement: { title: '本期 AA 结算', formula: '成员分摊 = 本期成本 x 个人用量占比 - 个人垫付', usageWeight: '计价用量', totalCost: '本期成本', carryForward: '结转', coverage: '计价覆盖率', unpricedWarning: '存在 {count} 条未计价用量，计价覆盖率达到 99% 后才可锁定。', payable: '应付', receivable: '应收', lock: '锁定结算', lockTitle: '锁定本期结算', lockMessage: '锁定后金额和计算快照保持不变，请确认本期数据已经核对。', lockedSuccess: '结算已锁定', pendingConfirmations: '还有 {count} 名成员待确认', pendingForYou: '待确认的共享号池账单', pendingForYouHint: '核对周期和金额后确认，全部成员确认后管理员才能结清。', confirmationNotRequired: '无需确认', pending: '待确认', confirmed: '已确认', confirmMine: '确认本人账单', resolveMember: '管理员代确认', confirmedSuccess: '账单已确认', markPaid: '确认结清', markPaidTitle: '确认本期已结清', markPaidMessage: '所有非零账单均已由成员本人或第一管理员确认，确定标记为已结清吗？', markedPaidSuccess: '本期结算已结清' },
+    settlement: { title: '本期 AA 结算', formula: '成员分摊 = 本期成本 x 个人用量占比 - 个人垫付', usageWeight: '计价用量', totalCost: '本期成本', carryForward: '结转', coverage: '计价覆盖率', unpricedWarning: '存在 {count} 条未计价用量，计价覆盖率达到 99% 后才可锁定。', payable: '应付', receivable: '应收', lock: '锁定结算', lockTitle: '锁定本期结算', lockMessage: '锁定后金额和计算快照保持不变，请确认本期数据已经核对。', lockedSuccess: '结算已锁定', pendingConfirmations: '还有 {count} 名成员待确认', pendingForYou: '待确认的共享号池账单', pendingForYouHint: '核对周期和金额后确认，全部成员确认后管理员才能结清。', confirmationNotRequired: '无需确认', pending: '待确认', confirmed: '已确认', confirmMine: '确认本人账单', resolveMember: '确认该成员', confirmedSuccess: '账单已确认', markPaid: '确认结清', markPaidTitle: '确认本期已结清', markPaidMessage: '所有非零账单均已确认，确定标记为已结清吗？', markedPaidSuccess: '本期结算已结清' },
     sources: { title: '采购来源质量', chartTitle: '来源回本率与 30 天封禁率', sampleHint: '按购买批次统计，可按上传人追溯到账号资料；样本较少时仅作参考', smallSample: '小样本', locateRecords: '定位号池资料' },
-    columns: { account: '账号', accounts: '账号数', contributor: '贡献人', uploader: '上传人', source: '采购来源', costType: '成本类型', cost: '成本', servicePeriod: '服务期', warranty: '质保截止', status: '状态', roi: '回本率', remaining: '待回本', netProfit: '当前盈亏', recoveredAt: '首次回本时间', member: '成员', usageWeight: '计价用量', share: '用量占比', allocated: '分摊成本', credit: '垫付抵扣', net: '净额', confirmation: '成员确认', ban30: '30 天封禁率', survival: '平均存活天数', actions: '操作' },
+    columns: { account: '账号', accounts: '账号数', contributor: '贡献人', uploader: '上传人', uploadedAt: '上传时间', source: '采购来源', costType: '成本类型', cost: '成本', servicePeriod: '服务期', warranty: '质保截止', status: '状态', roi: '回本率', remaining: '待回本', netProfit: '当前盈亏', recoveredAt: '首次回本时间', member: '成员', usageWeight: '计价用量', share: '用量占比', allocated: '分摊成本', credit: '垫付抵扣', net: '净额', confirmation: '成员确认', ban30: '30 天封禁率', survival: '平均存活天数', actions: '操作' },
     form: { title: '录入账号成本', account: '账号', providerIdentity: '上游账号身份', contributor: '贡献人/付款人', uploader: '实际上传人', source: '购买来源', purchaseUrl: '购买链接', orderNo: '订单号', entryType: '成本类型', cost: '实付成本', costPerAccount: '每个账号的实付成本', costPerAccountHint: '批量导入时，这个金额会分别记入每一个导入成功的账号。订单总价请先除以账号数。', currency: '币种', serviceStart: '服务开始', serviceEnd: '服务结束', warrantyEnd: '质保截止', notes: '备注', costSharingEnabled: '参与 AA 结算', costSharingEnabledHint: '关闭后该账号的成本和用量不进入后续结算周期', saved: '账号成本已保存', fxRate: 'USD/CNY 估值汇率', saveFxRate: '保存估值汇率', fxRateSaved: '估值汇率已保存' },
     actions: { poolRecord: '号池资料' },
     delete: {
-      costDisposition: '剩余成本处理', costDispositionHint: '仅处理该账号尚未回本的成本；已摊销部分不会重复计损。',
-		writeOff: '核销为损失', refund: '记录退款', transfer: '转移到补号', replacementAccount: '补号账号', refundAmount: '实际退款金额', refundAmountHint: '填写实际到账金额；未退款的待回本余额自动记为封禁损失。',
-		reason: '删除原因', reasonHint: '必填，请记录封禁、过期或换号原因', auditHint: '账号运行数据会清理；已有成本、用量、审批和结算记录将保留用于审计。',
-		loadAccountsFailed: '加载可选补号失败', bulkRequiresIndividual: '已选择 {count} 个账号。每个账号的剩余成本处理方式可能不同，请逐个删除并确认处置。', approvalSubmitted: '删除申请已提交，等待其他管理员审核', success: '账号已删除并完成关联数据处理', failed: '删除账号失败'
+      hardDeleteHint: '账号及全部关联数据将永久删除。',
+		bulkRequiresIndividual: '已选择 {count} 个账号，请逐个确认删除。', approvalSubmitted: '删除申请已提交，等待其他管理员审核', success: '账号及关联数据已删除', failed: '删除账号失败'
     },
     approval: {
       title: '审批中心', subtitle: '账号变更和凭证查看均由另一名管理员复核',
@@ -51,7 +49,7 @@ export default {
       approve: '批准', reject: '驳回', submit: '提交审核', revealOnce: '查看一次', verifyAndReveal: '验证后查看',
       selfReviewBlocked: '申请人不能审批自己的申请，请等待其他管理员处理。', rejectReasonRequired: '驳回时请填写原因',
       approveSuccess: '申请已批准', rejectSuccess: '申请已驳回', credentialSubmitted: '凭证查看申请已提交，等待其他管理员审核',
-      credentialTitle: '账号凭证 · {name}', credentialHint: '填写本次查看用途；完整用途、申请人、审批人和查看时间都会留痕。', primaryDirectHint: '第一管理员可直接查看，系统仍会记录本次访问。',
+      credentialTitle: '账号凭证 · {name}', credentialHint: '填写本次查看用途；完整用途、申请人、审批人和查看时间都会留痕。',
       purpose: '查看用途', purposeHint: '例如：排查上游认证失败', revealWarning: '凭证只显示一次，并将在 60 秒后自动清除。请勿转发或保存到公共位置。',
       loadFailed: '加载审批申请失败', decisionFailed: '处理审批申请失败', submitFailed: '提交审批申请失败', revealFailed: '查看账号凭证失败'
     },

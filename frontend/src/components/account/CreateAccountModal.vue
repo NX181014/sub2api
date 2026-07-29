@@ -5281,6 +5281,7 @@ const handleGrokValidateRT = async (refreshTokenInput: string) => {
   let failedCount = 0
   const errors: string[] = []
   const createdAccounts: CreatedAccountRef[] = []
+  const importBatchID = refreshTokens.length > 1 ? crypto.randomUUID() : undefined
 
   try {
     for (let i = 0; i < refreshTokens.length; i++) {
@@ -5320,7 +5321,8 @@ const handleGrokValidateRT = async (refreshTokenInput: string) => {
           rate_multiplier: form.rate_multiplier,
           group_ids: form.group_ids,
           expires_at: form.expires_at,
-          auto_pause_on_expired: autoPauseOnExpired.value
+          auto_pause_on_expired: autoPauseOnExpired.value,
+          import_batch_id: importBatchID
         })
         createdAccounts.push(account)
         successCount++
@@ -5719,6 +5721,7 @@ const handleOpenAIBatchRT = async (refreshTokenInput: string, clientId?: string)
   const errors: string[] = []
   const shouldCreateOpenAI = form.platform === 'openai'
   const createdAccounts: CreatedAccountRef[] = []
+  const importBatchID = refreshTokens.length > 1 ? crypto.randomUUID() : undefined
 
   try {
     for (let i = 0; i < refreshTokens.length; i++) {
@@ -5775,7 +5778,8 @@ const handleOpenAIBatchRT = async (refreshTokenInput: string, clientId?: string)
             rate_multiplier: form.rate_multiplier,
             group_ids: form.group_ids,
             expires_at: form.expires_at,
-            auto_pause_on_expired: autoPauseOnExpired.value
+            auto_pause_on_expired: autoPauseOnExpired.value,
+            import_batch_id: importBatchID
           })
           createdAccounts.push(account)
         }
@@ -5840,6 +5844,7 @@ const handleAntigravityValidateRT = async (refreshTokenInput: string) => {
   let failedCount = 0
   const errors: string[] = []
   const createdAccounts: CreatedAccountRef[] = []
+  const importBatchID = refreshTokens.length > 1 ? crypto.randomUUID() : undefined
 
   try {
     for (let i = 0; i < refreshTokens.length; i++) {
@@ -5876,7 +5881,8 @@ const handleAntigravityValidateRT = async (refreshTokenInput: string) => {
           rate_multiplier: form.rate_multiplier,
           group_ids: form.group_ids,
           expires_at: form.expires_at,
-          auto_pause_on_expired: autoPauseOnExpired.value
+          auto_pause_on_expired: autoPauseOnExpired.value,
+          import_batch_id: importBatchID
         })
         const account = await adminAPI.accounts.create(createPayload)
         createdAccounts.push(account)
@@ -6169,6 +6175,7 @@ const handleCookieAuth = async (sessionKey: string) => {
     let failedCount = 0
     const errors: string[] = []
     const createdAccounts: CreatedAccountRef[] = []
+    const importBatchID = keys.length > 1 ? crypto.randomUUID() : undefined
 
     for (let i = 0; i < keys.length; i++) {
       try {
@@ -6259,7 +6266,8 @@ const handleCookieAuth = async (sessionKey: string) => {
           rate_multiplier: form.rate_multiplier,
           group_ids: form.group_ids,
           expires_at: form.expires_at,
-          auto_pause_on_expired: autoPauseOnExpired.value
+          auto_pause_on_expired: autoPauseOnExpired.value,
+          import_batch_id: importBatchID
         })
         createdAccounts.push(account)
 

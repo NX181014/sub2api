@@ -150,7 +150,7 @@ func TestValidatePoolApprovalPayload(t *testing.T) {
 	if err := validateApprovalPayload(PoolApprovalViewCredential, PoolApprovalPayload{Reauthorize: true}); infraerrors.Reason(err) != "INVALID_CREDENTIAL_APPROVAL_PAYLOAD" {
 		t.Fatalf("unexpected reauthorization credential payload result: %v", err)
 	}
-	deleteOptions := &AccountDeleteOptions{CostDisposition: "write_off"}
+	deleteOptions := &AccountDeleteOptions{}
 	if err := validateApprovalPayload(PoolApprovalDeleteAccount, PoolApprovalPayload{DeleteOptions: deleteOptions}); err != nil {
 		t.Fatalf("valid delete payload rejected: %v", err)
 	}
