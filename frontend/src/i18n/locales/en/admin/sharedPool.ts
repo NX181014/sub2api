@@ -18,7 +18,7 @@ export default {
       emptySummary: 'No account cost summaries', emptyEntries: 'No cost entries', batchTitle: 'Add Account Costs in Batch',
       steps: { accounts: 'Accounts', common: 'Common Details', overrides: 'Per-account Overrides', preview: 'Review' },
       amountMode: 'Amount Mode', perAccountAmount: 'Cost per Account', perAccountHint: 'The amount applies to each selected account', orderTotal: 'Order Total', orderTotalHint: 'Allocate one order total across selected accounts',
-      allocationMode: 'Allocation Mode', equalAllocation: 'Equal', manualAllocation: 'Manual', expectedTokens: 'Expected Tokens Added', paidAt: 'Paid At',
+      allocationMode: 'Allocation Mode', equalAllocation: 'Equal', manualAllocation: 'Manual', expectedTokens: 'Expected Tokens Added (M)', paidAt: 'Paid At',
       perAccountPreview: '{price} each × {count} accounts = {total} batch total', orderTotalPreview: '{total} order total allocated across {count} accounts',
       overrideHint: 'Leave blank to use the common value. Equal allocation also supports fixed amounts for selected accounts.', accountAmount: 'Account Amount', accountCount: 'Account Count',
       originalAmount: 'Original Amount', cnyAmount: 'CNY Amount', recordedAt: 'Recorded At', duplicateHint: 'The server rechecks duplicate orders, accounts, and idempotency before committing the entire batch.',

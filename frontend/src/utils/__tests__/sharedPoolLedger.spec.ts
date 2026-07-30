@@ -1,5 +1,18 @@
 import { describe, expect, it } from 'vitest'
-import { calculateBatchCostAllocations } from '@/utils/sharedPoolLedger'
+import {
+  calculateBatchCostAllocations,
+  DEFAULT_EXPECTED_TOKEN_COUNT,
+  millionsToTokens,
+  tokensToMillions
+} from '@/utils/sharedPoolLedger'
+
+describe('shared-pool expected token input', () => {
+  it('uses millions in the UI while preserving raw token counts', () => {
+    expect(tokensToMillions(DEFAULT_EXPECTED_TOKEN_COUNT)).toBe(20)
+    expect(millionsToTokens(20)).toBe(20_000_000)
+    expect(millionsToTokens(1.5)).toBe(1_500_000)
+  })
+})
 
 describe('shared-pool batch cost allocation', () => {
   it('treats the default amount as a per-account price', () => {

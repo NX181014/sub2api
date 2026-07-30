@@ -19,8 +19,38 @@ func setupAccountListRouter() (*gin.Engine, *stubAdminService) {
 	adminSvc := newStubAdminService()
 	handler := NewAccountHandler(adminSvc, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	router.GET("/api/v1/admin/accounts", handler.List)
+	router.GET("/api/v1/admin/accounts/rows", handler.ListRows)
 	router.GET("/api/v1/admin/accounts/selection-summary", handler.SelectionSummary)
 	return router, adminSvc
+}
+
+func TestAccountHandlerListRowsPaginatesImportBatchAsOneRow(t *testing.T) {
+	router, adminSvc := setupAccountListRouter()
+	now := time.Date(2026, 7, 30, 12, 0, 0, 0, time.UTC)
+	adminSvc.accounts = []service.Account{
+		{ID: 1, Name: "older", Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, CreatedAt: now.Add(-time.Hour)},
+		{ID: 2, Name: "batch-a", Status: service.StatusActive, Schedulable: true, CreatedAt: now.Add(-time.Minute), Extra: map[string]any{"import_batch_id": "batch"}},
+		{ID: 3, Name: "batch-b", Status: service.StatusError, CreatedAt: now, Extra: map[string]any{"import_batch_id": "batch"}},
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/accounts/rows?page=1&page_size=2&include_scheduler_score=1", nil)
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	var payload struct {
+		Data struct {
+			Items []accountLogicalRow `json:"items"`
+			Total int64               `json:"total"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &payload))
+	require.Equal(t, int64(2), payload.Data.Total)
+	require.Len(t, payload.Data.Items, 2)
+	require.Equal(t, "import_batch", payload.Data.Items[0].Kind)
+	require.Equal(t, 2, payload.Data.Items[0].Batch.TotalCount)
+	require.Equal(t, "account", payload.Data.Items[1].Kind)
+	require.NotNil(t, payload.Data.Items[1].Account.SchedulerScore)
 }
 
 func TestAccountHandlerListFiltersCompleteImportBatch(t *testing.T) {

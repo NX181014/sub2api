@@ -511,7 +511,7 @@
         </div>
         <div>
           <label for="pool-expected-tokens" class="input-label">{{ t('admin.sharedPool.ledger.expectedTokens') }} *</label>
-          <input id="pool-expected-tokens" v-model.number="costForm.expected_token_count" class="input" type="number" inputmode="numeric" min="1" step="1" required />
+          <input id="pool-expected-tokens" v-model.number="expectedTokenMillions" class="input" type="number" inputmode="decimal" min="0.1" step="0.1" required />
         </div>
         <div>
           <label for="pool-currency" class="input-label">{{ t('admin.sharedPool.form.currency') }}</label>
@@ -668,6 +668,11 @@ import {
   resolvePoolPeriod,
   settlementStatusPresentation
 } from '@/utils/sharedPool'
+import {
+  DEFAULT_EXPECTED_TOKEN_COUNT,
+  millionsToTokens,
+  tokensToMillions
+} from '@/utils/sharedPoolLedger'
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, Tooltip, Legend)
 
@@ -892,7 +897,7 @@ const emptyCostForm = (): CreateSharedPoolCostRequest => ({
   purchase_url: '',
   order_no: '',
   purchase_cost: 0,
-  expected_token_count: 0,
+  expected_token_count: DEFAULT_EXPECTED_TOKEN_COUNT,
   cost_sharing_enabled: true,
   entry_type: 'purchase',
   currency: 'CNY',
@@ -904,6 +909,10 @@ const emptyCostForm = (): CreateSharedPoolCostRequest => ({
 })
 
 const costForm = reactive<CreateSharedPoolCostRequest>(emptyCostForm())
+const expectedTokenMillions = computed({
+  get: () => tokensToMillions(costForm.expected_token_count),
+  set: (value: number) => { costForm.expected_token_count = millionsToTokens(Number(value)) }
+})
 const emptyEventForm = () => ({
   event_type: 'banned_confirmed' as PoolLifecycleEventType,
   date: shanghaiToday(),
@@ -1082,7 +1091,7 @@ async function openAccountPoolRecord(account: Pick<Account, 'id' | 'name'>, reco
     purchase_url: existing?.purchase_url || '',
     order_no: existing?.order_no || '',
     purchase_cost: existing?.purchase_cost || 0,
-    expected_token_count: existing?.expected_token_count || 0,
+    expected_token_count: existing?.expected_token_count || DEFAULT_EXPECTED_TOKEN_COUNT,
     cost_sharing_enabled: existing?.cost_sharing_enabled ?? true,
     entry_type: existing?.entry_type || 'purchase',
     currency: existing?.currency || 'CNY',
@@ -1117,7 +1126,7 @@ async function openLedgerEntry(entry: SharedPoolLedgerEntry) {
 			purchase_url: entry.purchase_url || '',
 			order_no: entry.order_no || '',
 			purchase_cost: Number(entry.original_amount),
-			expected_token_count: entry.expected_token_count || 0,
+			expected_token_count: entry.expected_token_count || DEFAULT_EXPECTED_TOKEN_COUNT,
 			cost_sharing_enabled: account.cost_sharing_enabled ?? true,
 			entry_type: entry.entry_type,
 			currency: entry.currency,

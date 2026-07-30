@@ -440,10 +440,24 @@ func (s *stubAdminService) ListAccountsByUploader(ctx context.Context, page, pag
 	return s.ListAccounts(ctx, page, pageSize, platform, accountType, status, search, groupID, privacyMode, sortBy, sortOrder)
 }
 
+func (s *stubAdminService) ListAccountsWithPoolMetrics(ctx context.Context, page, pageSize int, platform, accountType, status, search string, groupID int64, privacyMode string, sortBy, sortOrder string) ([]service.Account, int64, error) {
+	return s.ListAccounts(ctx, page, pageSize, platform, accountType, status, search, groupID, privacyMode, sortBy, sortOrder)
+}
+
 func (s *stubAdminService) ListAccountsBySelection(ctx context.Context, page, pageSize int, filters service.AccountSelectionFilters, _ bool, sortBy, sortOrder string) ([]service.Account, int64, error) {
 	s.lastListAccounts.uploaderID = filters.UploaderUserID
 	s.lastListAccounts.uploaderUnassigned = filters.UploaderUnassigned
 	s.lastListAccounts.batchID = filters.ImportBatchID
+	if filters.ImportBatchID != "" {
+		original := s.accounts
+		s.accounts = nil
+		for _, account := range original {
+			if importBatchID(&account) == filters.ImportBatchID {
+				s.accounts = append(s.accounts, account)
+			}
+		}
+		defer func() { s.accounts = original }()
+	}
 	return s.ListAccounts(ctx, page, pageSize, filters.Platform, filters.Type, filters.Status, filters.Search, filters.GroupID, filters.PrivacyMode, sortBy, sortOrder)
 }
 

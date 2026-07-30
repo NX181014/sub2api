@@ -173,7 +173,7 @@
       <div><label for="ledger-source" class="input-label">{{ t('admin.sharedPool.columns.source') }} *</label><Select id="ledger-source" v-model="batchForm.purchase_source_id" :options="sourceOptions" searchable /></div>
       <div><label for="ledger-entry-type" class="input-label">{{ t('admin.sharedPool.form.entryType') }} *</label><Select id="ledger-entry-type" v-model="batchForm.entry_type" :options="entryTypeOptions" /></div>
       <div><label for="ledger-amount" class="input-label">{{ batchForm.amount_mode === 'per_account' ? t('admin.sharedPool.ledger.perAccountAmount') : t('admin.sharedPool.ledger.orderTotal') }} *</label><input id="ledger-amount" v-model.number="batchForm.amount" class="input" type="number" inputmode="decimal" min="0.01" step="0.01" required /></div>
-      <div><label for="ledger-expected" class="input-label">{{ t('admin.sharedPool.ledger.expectedTokens') }} *</label><input id="ledger-expected" v-model.number="batchForm.expected_token_count" class="input" type="number" inputmode="numeric" min="1" step="1" required /></div>
+      <div><label for="ledger-expected" class="input-label">{{ t('admin.sharedPool.ledger.expectedTokens') }} *</label><input id="ledger-expected" v-model.number="batchExpectedTokenMillions" class="input" type="number" inputmode="decimal" min="0.1" step="0.1" required /></div>
       <div><label for="ledger-currency" class="input-label">{{ t('admin.sharedPool.form.currency') }}</label><Select id="ledger-currency" v-model="batchForm.currency" :options="currencyOptions" /></div>
       <div><label for="ledger-service-start" class="input-label">{{ t('admin.sharedPool.form.serviceStart') }} *</label><input id="ledger-service-start" v-model="batchForm.service_start" class="input" type="date" required /></div>
       <div><label for="ledger-service-end" class="input-label">{{ t('admin.sharedPool.form.serviceEnd') }} *</label><input id="ledger-service-end" v-model="batchForm.service_end" class="input" type="date" :min="batchForm.service_start" required /></div>
@@ -193,7 +193,7 @@
         <div v-for="account in selectedAccounts" :key="account.id" class="grid grid-cols-1 gap-3 rounded-md border border-gray-200 p-3 dark:border-dark-700 md:grid-cols-[minmax(0,1fr)_180px_220px] md:items-end">
           <div class="min-w-0"><p class="truncate text-sm font-medium">{{ account.name }}</p><p class="text-xs text-gray-500 dark:text-gray-400">#{{ account.id }}</p></div>
           <div><label :for="`ledger-override-amount-${account.id}`" class="input-label">{{ t('admin.sharedPool.ledger.accountAmount') }}</label><input :id="`ledger-override-amount-${account.id}`" v-model.number="overrides[account.id].originalAmount" class="input" type="number" inputmode="decimal" min="0.01" step="0.01" :placeholder="overrideAmountPlaceholder(account.id)" /></div>
-          <div><label :for="`ledger-override-token-${account.id}`" class="input-label">{{ t('admin.sharedPool.ledger.expectedTokens') }}</label><input :id="`ledger-override-token-${account.id}`" v-model.number="overrides[account.id].expectedTokenCount" class="input" type="number" inputmode="numeric" min="1" step="1" :placeholder="String(batchForm.expected_token_count || '')" /></div>
+          <div><label :for="`ledger-override-token-${account.id}`" class="input-label">{{ t('admin.sharedPool.ledger.expectedTokens') }}</label><input :id="`ledger-override-token-${account.id}`" :value="overrideTokenMillions(account.id)" class="input" type="number" inputmode="decimal" min="0.1" step="0.1" :placeholder="String(batchExpectedTokenMillions || '')" @input="setOverrideTokenMillions(account.id, $event)" /></div>
         </div>
       </div>
     </div>
@@ -248,7 +248,14 @@ import Icon from '@/components/icons/Icon.vue'
 import type { Column } from '@/components/common/types'
 import { useAppStore } from '@/stores'
 import { accountStatusPresentation, formatPoolMoney } from '@/utils/sharedPool'
-import { calculateBatchCostAllocations, type BatchAllocationMode, type BatchCostOverride } from '@/utils/sharedPoolLedger'
+import {
+  calculateBatchCostAllocations,
+  DEFAULT_EXPECTED_TOKEN_COUNT,
+  millionsToTokens,
+  tokensToMillions,
+  type BatchAllocationMode,
+  type BatchCostOverride
+} from '@/utils/sharedPoolLedger'
 import { formatDateLocalInput } from '@/utils/format'
 
 type LedgerView = 'summary' | 'entries'
@@ -304,7 +311,7 @@ const emptyBatchForm = () => ({
   purchase_source_id: 0,
   entry_type: 'purchase' as PoolCostEntryType,
   amount: 0,
-  expected_token_count: 0,
+  expected_token_count: DEFAULT_EXPECTED_TOKEN_COUNT,
   currency: 'CNY',
   service_start: today(),
   service_end: nextMonth(),
@@ -315,6 +322,10 @@ const emptyBatchForm = () => ({
   notes: ''
 })
 const batchForm = reactive(emptyBatchForm())
+const batchExpectedTokenMillions = computed({
+  get: () => tokensToMillions(batchForm.expected_token_count),
+  set: (value: number) => { batchForm.expected_token_count = millionsToTokens(Number(value)) }
+})
 
 const ledgerViews = computed(() => [
   { value: 'summary' as const, label: t('admin.sharedPool.ledger.summaryView') },
@@ -537,6 +548,14 @@ function setAmountMode(mode: SharedPoolBatchAmountMode) {
   batchForm.amount_mode = mode
   batchForm.allocation_mode = 'equal'
   Object.values(overrides).forEach((item) => { item.originalAmount = null })
+}
+function overrideTokenMillions(accountId: number) {
+  const value = overrides[accountId]?.expectedTokenCount
+  return typeof value === 'number' ? tokensToMillions(value) : ''
+}
+function setOverrideTokenMillions(accountId: number, event: Event) {
+  const value = (event.target as HTMLInputElement).value
+  overrides[accountId].expectedTokenCount = value === '' ? null : millionsToTokens(Number(value))
 }
 function validateStep(step: number): string[] {
   if (step === 1) return selectedAccounts.value.length ? [] : ['accounts_required']

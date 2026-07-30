@@ -82,4 +82,18 @@ describe('PlatformTypeBadge OpenAI authentication modes', () => {
     await wrapper.setProps({ authMode: undefined })
     expect(wrapper.text()).toContain('OAuth')
   })
+
+  it('shows an unset privacy state only for supported OAuth platforms', async () => {
+    const wrapper = mount(PlatformTypeBadge, {
+      props: { platform: 'openai', type: 'oauth' },
+    })
+
+    expect(wrapper.text()).toContain('admin.accounts.privacyUnset')
+
+    await wrapper.setProps({ platform: 'antigravity' })
+    expect(wrapper.text()).toContain('admin.accounts.privacyUnset')
+
+    await wrapper.setProps({ platform: 'anthropic' })
+    expect(wrapper.text()).not.toContain('admin.accounts.privacyUnset')
+  })
 })

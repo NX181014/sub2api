@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const { get } = vi.hoisted(() => ({ get: vi.fn() }))
 vi.mock('@/api/client', () => ({ apiClient: { get } }))
 
-import { exportData, getSelectionSummary, listImportBatch } from '@/api/admin/accounts'
+import { exportData, getSelectionSummary, listImportBatch, listRows } from '@/api/admin/accounts'
 
 describe('admin account selection API', () => {
   beforeEach(() => get.mockReset())
@@ -25,6 +25,17 @@ describe('admin account selection API', () => {
     await expect(listImportBatch('668f52b3-14af-4a5a-bde0-e923ed69299a', 2, 100)).resolves.toEqual(page)
     expect(get).toHaveBeenCalledWith('/admin/accounts', {
       params: { page: 2, page_size: 100, import_batch_id: '668f52b3-14af-4a5a-bde0-e923ed69299a' },
+      signal: undefined
+    })
+  })
+
+  it('requests logical rows with the active sort and filters', async () => {
+    const page = { items: [], total: 0, page: 1, page_size: 20, pages: 0 }
+    get.mockResolvedValueOnce({ data: page })
+
+    await expect(listRows(1, 20, { status: 'active', sort_by: 'created_at', sort_order: 'desc' })).resolves.toEqual(page)
+    expect(get).toHaveBeenCalledWith('/admin/accounts/rows', {
+      params: { page: 1, page_size: 20, status: 'active', sort_by: 'created_at', sort_order: 'desc' },
       signal: undefined
     })
   })

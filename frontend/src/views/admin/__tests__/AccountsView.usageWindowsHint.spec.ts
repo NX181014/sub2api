@@ -5,12 +5,14 @@ import AccountsView from '../AccountsView.vue'
 
 const {
   listAccounts,
+  listRows,
   listWithEtag,
   getBatchTodayStats,
   getAllProxies,
   getAllGroups
 } = vi.hoisted(() => ({
   listAccounts: vi.fn(),
+  listRows: vi.fn(),
   listWithEtag: vi.fn(),
   getBatchTodayStats: vi.fn(),
   getAllProxies: vi.fn(),
@@ -21,6 +23,7 @@ vi.mock('@/api/admin', () => ({
   adminAPI: {
     accounts: {
       list: listAccounts,
+      listRows,
       listWithEtag,
       getBatchTodayStats,
       getUpstreamBillingProbeSettings: vi.fn().mockResolvedValue({ enabled: true, interval_minutes: 30 }),
@@ -130,6 +133,7 @@ describe('admin AccountsView usage windows hint', () => {
     localStorage.clear()
 
     listAccounts.mockReset()
+    listRows.mockReset()
     listWithEtag.mockReset()
     getBatchTodayStats.mockReset()
     getAllProxies.mockReset()
@@ -141,6 +145,10 @@ describe('admin AccountsView usage windows hint', () => {
       page: 1,
       page_size: 20,
       pages: 0
+    })
+    listRows.mockImplementation(async (...args) => {
+      const result = await listAccounts(...args)
+      return { ...result, items: result.items.map((account: unknown) => ({ kind: 'account', account })) }
     })
     listWithEtag.mockResolvedValue({
       notModified: true,
@@ -187,6 +195,6 @@ describe('admin AccountsView usage windows hint', () => {
       node.text() === 'admin.accounts.upstreamBilling.trustWarning'
     )).toBe(true)
     const columns = wrapper.getComponent(DataTableStub).props('columns') as Array<{ key: string; sortable: boolean }>
-    expect(columns.find(column => column.key === 'upstream_billing_rate')?.sortable).toBe(true)
+    expect(columns.find(column => column.key === 'upstream_billing_rate')?.sortable).toBe(false)
   })
 })

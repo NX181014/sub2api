@@ -201,7 +201,7 @@
           :hidden-selected-count="hiddenSelectedCount"
           :all-page-selected="allVisibleSelected"
           :page-selected-count="visibleSelectedCount"
-          :busy="loading || bulkActionInProgress"
+          :busy="loading || pageBatchLoading || bulkActionInProgress"
           @delete="handleBulkDelete"
           @reset-status="handleBulkResetStatus"
           @refresh-token="handleBulkRefreshToken"
@@ -221,8 +221,8 @@
           row-key="id"
           :server-side-sort="true"
           @sort="handleSort"
-          default-sort-key="name"
-          default-sort-order="asc"
+          default-sort-key="created_at"
+          default-sort-order="desc"
           :sort-storage-key="ACCOUNT_SORT_STORAGE_KEY"
           :estimate-row-height="156"
           :overscan="5"
@@ -235,6 +235,7 @@
               class="h-4 w-4 cursor-pointer rounded border-gray-300 text-primary-600 focus:ring-primary-500"
               :checked="allVisibleSelected"
               :indeterminate="someVisibleSelected"
+              :disabled="pageBatchLoading"
               :aria-label="allVisibleSelected ? t('admin.accounts.bulkActions.clearCurrentPage') : t('admin.accounts.bulkActions.selectCurrentPage')"
               @click.stop
               @change="toggleSelectAllVisible($event)"
@@ -247,13 +248,13 @@
               :checked="isImportBatchRow(row) ? isImportBatchSelected(row) : isSelected(row.id)"
               :indeterminate="isImportBatchRow(row) && isImportBatchPartiallySelected(row)"
               :disabled="isImportBatchRow(row) && isImportBatchLoading(row.batchID)"
-              :aria-label="isImportBatchRow(row) ? t('admin.accounts.selectImportBatch', { count: row.accounts.length }) : t('common.selectOption')"
+              :aria-label="isImportBatchRow(row) ? t('admin.accounts.selectImportBatch', { count: row.matchedCount }) : t('common.selectOption')"
               @change="isImportBatchRow(row) ? toggleImportBatchSelection(row, ($event.target as HTMLInputElement).checked) : toggleSel(row.id)"
             />
           </template>
           <template #cell-id="{ row, value }">
             <span v-if="isImportBatchRow(row)" class="text-xs tabular-nums text-gray-500 dark:text-gray-400">
-              {{ t('admin.accounts.importBatchCount', { count: row.accounts.length }) }}
+              {{ row.matchedCount === row.totalCount ? t('admin.accounts.importBatchCount', { count: row.totalCount }) : `${row.matchedCount}/${row.totalCount}` }}
             </span>
             <span v-else class="font-mono text-xs text-gray-500 dark:text-gray-400">#{{ value }}</span>
           </template>
@@ -312,7 +313,7 @@
               <Icon :name="expandedImportBatches.has(row.batchID) ? 'chevronDown' : 'chevronRight'" size="sm" class="shrink-0 text-emerald-600 md:hidden" />
               <span class="min-w-0">
                 <span class="block truncate font-semibold text-gray-900 dark:text-white" :title="row.uploader">{{ row.uploader }}</span>
-                <span class="block text-xs text-gray-500 dark:text-gray-400">{{ t('admin.accounts.importBatchSummary', { count: row.accounts.length, time: formatDateTime(row.createdAt) }) }}</span>
+                <span class="block text-xs text-gray-500 dark:text-gray-400">{{ t('admin.accounts.importBatchSummary', { count: row.matchedCount, time: formatDateTime(row.createdAt) }) }}</span>
                 <span class="mt-1 block max-w-56 truncate text-xs text-gray-500 dark:text-gray-400 md:hidden" :title="row.names">{{ row.names }}</span>
               </span>
             </button>
@@ -363,12 +364,24 @@
             <AccountCapacityCell v-if="!isImportBatchRow(row)" :account="row" />
           </template>
           <template #cell-status="{ row }">
-            <div v-if="!isImportBatchRow(row)" class="flex items-center gap-1.5">
+            <div v-if="isImportBatchRow(row)" class="flex max-w-64 flex-wrap gap-1">
+              <span
+                v-for="item in importBatchStatusItems(row)"
+                :key="item.key"
+                :class="['inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium', item.className]"
+              >
+                {{ item.label }} {{ item.count }}
+              </span>
+            </div>
+            <div v-else class="flex items-center gap-1.5">
               <AccountStatusIndicator :account="row" @show-temp-unsched="handleShowTempUnsched" />
             </div>
           </template>
           <template #cell-schedulable="{ row }">
-            <button v-if="!isImportBatchRow(row)" @click="handleToggleSchedulable(row)" :disabled="togglingSchedulable === row.id" class="relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 dark:focus:ring-offset-dark-800" :class="[row.schedulable ? 'bg-primary-500 hover:bg-primary-600' : 'bg-gray-200 hover:bg-gray-300 dark:bg-dark-600 dark:hover:bg-dark-500']" :title="row.schedulable ? t('admin.accounts.schedulableEnabled') : t('admin.accounts.schedulableDisabled')">
+            <span v-if="isImportBatchRow(row)" class="text-xs font-medium tabular-nums text-gray-600 dark:text-gray-300">
+              {{ row.schedulableCount }}/{{ row.matchedCount }}
+            </span>
+            <button v-else @click="handleToggleSchedulable(row)" :disabled="togglingSchedulable === row.id" class="relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 dark:focus:ring-offset-dark-800" :class="[row.schedulable ? 'bg-primary-500 hover:bg-primary-600' : 'bg-gray-200 hover:bg-gray-300 dark:bg-dark-600 dark:hover:bg-dark-500']" :title="row.schedulable ? t('admin.accounts.schedulableEnabled') : t('admin.accounts.schedulableDisabled')">
               <span class="pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out" :class="[row.schedulable ? 'translate-x-4' : 'translate-x-0']" />
             </button>
           </template>
@@ -834,13 +847,13 @@ import PlatformTypeBadge from '@/components/common/PlatformTypeBadge.vue'
 import Icon from '@/components/icons/Icon.vue'
 import ErrorPassthroughRulesModal from '@/components/admin/ErrorPassthroughRulesModal.vue'
 import TLSFingerprintProfilesModal from '@/components/admin/TLSFingerprintProfilesModal.vue'
-import { buildOpenAIUsageRefreshKey } from '@/utils/accountUsageRefresh'
 import { formatDateTime, formatRelativeTime } from '@/utils/format'
 import { proxyExpiryBadgeClass, proxyExpiryLabelKey } from '@/utils/proxyExpiry'
 import { extractApiErrorMessage } from '@/utils/apiError'
 import { sanitizeUrl } from '@/utils/url'
 import { getFloatingPanelPosition } from '@/utils/floatingPanel'
 import type { Account, AccountPlatform, AccountSchedulerGroupScore, AccountType, Proxy as AccountProxy, AdminGroup, WindowStats, ClaudeModel, UpstreamBillingProbeSnapshot } from '@/types'
+import type { AccountBatchStatusSummary, AccountImportBatchSummary, AccountListRow } from '@/api/admin/accounts'
 import type { PoolApproval, PoolApprovalStatus, PoolCredentialReveal, SharedPoolAccountCost } from '@/api/admin/sharedPool'
 
 const props = withDefaults(defineProps<{
@@ -1100,26 +1113,20 @@ const HIDDEN_COLUMNS_VERSION_KEY = 'account-hidden-columns-version'
 const HIDDEN_COLUMNS_CURRENT_VERSION = 'scheduler-score-hidden-by-default'
 
 // Sorting settings
-const ACCOUNT_SORT_STORAGE_KEY = 'account-table-sort'
+const ACCOUNT_SORT_STORAGE_KEY = 'account-table-sort-v2'
 type AccountSortOrder = 'asc' | 'desc'
 type AccountSortState = {
   sort_by: string
   sort_order: AccountSortOrder
 }
 const ACCOUNT_SORTABLE_KEYS = new Set([
-  'id',
   'name',
   'status',
   'schedulable',
-  'priority',
-  'rate_multiplier',
-  'upstream_billing_rate',
-  'last_used_at',
-  'created_at',
-  'expires_at'
+  'created_at'
 ])
 const loadInitialAccountSortState = (): AccountSortState => {
-  const fallback: AccountSortState = { sort_by: 'name', sort_order: 'asc' }
+  const fallback: AccountSortState = { sort_by: 'created_at', sort_order: 'desc' }
   try {
     const raw = localStorage.getItem(ACCOUNT_SORT_STORAGE_KEY)
     if (!raw) return fallback
@@ -1144,8 +1151,8 @@ const autoRefreshIntervals = [5, 10, 15, 30] as const
 const autoRefreshEnabled = ref(false)
 const autoRefreshIntervalSeconds = ref<(typeof autoRefreshIntervals)[number]>(30)
 const autoRefreshCountdown = ref(0)
-const autoRefreshETag = ref<string | null>(null)
 const autoRefreshFetching = ref(false)
+let autoRefreshRequestRevision = 0
 const AUTO_REFRESH_SILENT_WINDOW_MS = 15000
 const autoRefreshSilentUntil = ref(0)
 const hasPendingListSync = ref(false)
@@ -1368,7 +1375,7 @@ const syncAccountListDerivedParams = () => {
 }
 
 const {
-  items: accounts,
+  items: accountListRows,
   loading,
   params,
   pagination,
@@ -1377,8 +1384,8 @@ const {
   debouncedReload: baseDebouncedReload,
   handlePageChange: baseHandlePageChange,
   handlePageSizeChange: baseHandlePageSizeChange
-} = useTableLoader<Account, any>({
-  fetchFn: adminAPI.accounts.list,
+} = useTableLoader<AccountListRow, any>({
+  fetchFn: adminAPI.accounts.listRows,
   initialParams: {
     platform: '',
     type: '',
@@ -1394,31 +1401,22 @@ const {
   }
 })
 
+const accounts = ref<Account[]>([])
+const accountUploader = (account: Account): string => account.uploader_username || account.uploader_email || '-'
 const importBatchID = (account: Account): string => {
   const value = account.extra?.import_batch_id
   return typeof value === 'string' ? value : ''
 }
-const accountUploader = (account: Account): string => account.uploader_username || account.uploader_email || '-'
-const visibleImportBatchAccountGroups = computed(() => {
-  const groups = new Map<string, Account[]>()
-  for (const account of accounts.value) {
-    const id = importBatchID(account)
-    if (!id) continue
-    const items = groups.get(id) || []
-    items.push(account)
-    groups.set(id, items)
-  }
-  return groups
-})
 const completeImportBatchAccounts = ref(new Map<string, Account[]>())
 const importBatchLoads = new Map<string, Promise<Account[]>>()
 const loadingImportBatchKeys = ref(new Set<string>())
 const staleImportBatchRequest = new Error('stale import batch request')
 let importBatchFilterRevision = 0
 const isImportBatchLoading = (id: string) => loadingImportBatchKeys.value.has(`${importBatchFilterRevision}:${id}`)
-const invalidateImportBatchCache = () => {
+const invalidateImportBatchCache = (collapse = false) => {
   importBatchFilterRevision++
   completeImportBatchAccounts.value = new Map()
+  if (collapse) expandedImportBatches.value = new Set()
 }
 const buildImportBatchFilters = () => ({
   platform: String(params.platform || ''),
@@ -1476,16 +1474,6 @@ const loadCompleteImportBatch = (id: string): Promise<Account[]> => {
   }).catch(() => undefined)
   return request
 }
-const importBatchGroups = computed(() => [...visibleImportBatchAccountGroups.value.entries()].map(([id, visibleItems]) => {
-  const items = completeImportBatchAccounts.value.get(id) || visibleItems
-  return {
-    id,
-    accounts: items,
-    uploader: accountUploader(items[0]!),
-    createdAt: items[0]!.created_at,
-    names: items.map(item => item.name).join('、')
-  }
-}))
 type ImportBatchRow = {
   __rowKind: 'import-batch'
   id: string
@@ -1494,41 +1482,89 @@ type ImportBatchRow = {
   uploader: string
   createdAt: string
   names: string
+  matchedCount: number
+  totalCount: number
+  schedulableCount: number
+  status: AccountBatchStatusSummary
 }
 type AccountTableRow = Account | ImportBatchRow
 const isImportBatchRow = (row: AccountTableRow): row is ImportBatchRow => '__rowKind' in row && row.__rowKind === 'import-batch'
+const currentBatchIDs = computed(() => new Set(
+  accountListRows.value
+    .filter((row): row is Extract<AccountListRow, { kind: 'import_batch' }> => row.kind === 'import_batch')
+    .map(row => row.batch.id)
+))
 const isImportBatchChild = (row: AccountTableRow): row is Account => {
   if (isImportBatchRow(row)) return false
   const id = importBatchID(row)
-  return Boolean(id && (visibleImportBatchAccountGroups.value.has(id) || completeImportBatchAccounts.value.has(id)))
+  return Boolean(id && currentBatchIDs.value.has(id))
 }
+const accountByID = computed(() => new Map(accounts.value.map(account => [account.id, account])))
+const importBatchRow = (batch: AccountImportBatchSummary): ImportBatchRow => ({
+  __rowKind: 'import-batch',
+  id: `import-batch:${batch.id}`,
+  batchID: batch.id,
+  accounts: completeImportBatchAccounts.value.get(batch.id) || [],
+  uploader: batch.uploader_username || batch.uploader_email || '-',
+  createdAt: batch.created_at,
+  names: batch.names.join('、'),
+  matchedCount: batch.matched_count,
+  totalCount: batch.total_count,
+  schedulableCount: batch.schedulable_count,
+  status: batch.status
+})
 const accountTableRows = computed<AccountTableRow[]>(() => {
-  const batchRows = new Map(importBatchGroups.value.map(batch => [batch.id, batch]))
-  const emitted = new Set<string>()
   const rows: AccountTableRow[] = []
-
-  for (const account of accounts.value) {
-    const batchID = importBatchID(account)
-    const batch = batchRows.get(batchID)
-    if (!batch) {
-      rows.push(account)
+  for (const logicalRow of accountListRows.value) {
+    if (logicalRow.kind === 'account') {
+      rows.push(accountByID.value.get(logicalRow.account.id) || logicalRow.account)
       continue
     }
-    if (emitted.has(batchID)) continue
-    emitted.add(batchID)
-    rows.push({
-      __rowKind: 'import-batch',
-      id: `import-batch:${batchID}`,
-      batchID,
-      accounts: batch.accounts,
-      uploader: batch.uploader,
-      createdAt: batch.createdAt,
-      names: batch.names
-    })
-    if (expandedImportBatches.value.has(batchID)) rows.push(...batch.accounts)
+    const batch = importBatchRow(logicalRow.batch)
+    rows.push(batch)
+    if (expandedImportBatches.value.has(batch.batchID)) rows.push(...batch.accounts)
   }
   return rows
 })
+const syncPageAccounts = () => {
+  const next = new Map<number, Account>()
+  for (const logicalRow of accountListRows.value) {
+    if (logicalRow.kind === 'account') {
+      next.set(logicalRow.account.id, logicalRow.account)
+      continue
+    }
+    for (const account of completeImportBatchAccounts.value.get(logicalRow.batch.id) || []) {
+      next.set(account.id, account)
+    }
+  }
+  accounts.value = [...next.values()]
+}
+watch([accountListRows, completeImportBatchAccounts], syncPageAccounts, { immediate: true })
+watch(accountListRows, rows => {
+  for (const row of rows) {
+    if (row.kind !== 'import_batch') continue
+    void loadCompleteImportBatch(row.batch.id).catch(error => {
+      if (error !== staleImportBatchRequest) console.error('Failed to load complete import batch:', error)
+    })
+  }
+}, { immediate: true })
+const pageBatchLoading = computed(() => [...currentBatchIDs.value].some(id => (
+  isImportBatchLoading(id) || !completeImportBatchAccounts.value.has(id)
+)))
+const importBatchStatusItems = (batch: ImportBatchRow) => {
+  const definitions: Array<{ key: keyof AccountBatchStatusSummary; label: string; className: string }> = [
+    { key: 'normal', label: t('admin.accounts.status.active'), className: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' },
+    { key: 'error', label: t('admin.accounts.status.error'), className: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300' },
+    { key: 'inactive', label: t('admin.accounts.status.inactive'), className: 'bg-gray-100 text-gray-600 dark:bg-dark-700 dark:text-gray-300' },
+    { key: 'rate_limited', label: t('admin.accounts.status.rateLimited'), className: 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-300' },
+    { key: 'overloaded', label: t('admin.accounts.status.overloaded'), className: 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-300' },
+    { key: 'temp_unschedulable', label: t('admin.accounts.status.tempUnschedulable'), className: 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300' },
+    { key: 'manual_unschedulable', label: t('admin.accounts.status.unschedulable'), className: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300' }
+  ]
+  return definitions
+    .map(item => ({ ...item, count: batch.status[item.key] }))
+    .filter(item => item.count > 0)
+}
 const toggleImportBatch = async (id: string) => {
   const next = new Set(expandedImportBatches.value)
   if (next.has(id)) {
@@ -1537,6 +1573,7 @@ const toggleImportBatch = async (id: string) => {
     try {
       await loadCompleteImportBatch(id)
       next.add(id)
+      void refreshTodayStatsBatch()
     } catch (error) {
       if (error !== staleImportBatchRequest) appStore.showError(extractApiErrorMessage(error, t('common.error')))
     }
@@ -1562,18 +1599,16 @@ const {
 })
 watch(accounts, rows => {
   rows.forEach(account => knownAccountsByID.set(account.id, account))
-  const batchIDs = new Set(rows.map(importBatchID).filter(Boolean))
-  batchIDs.forEach(id => {
-    void loadCompleteImportBatch(id).catch(error => {
-      if (error !== staleImportBatchRequest) console.error('Failed to load complete import batch:', error)
-    })
-  })
 }, { immediate: true })
 const visibleSelectedCount = computed(() => accounts.value.filter(account => isSelected(account.id)).length)
 const someVisibleSelected = computed(() => visibleSelectedCount.value > 0 && !allVisibleSelected.value)
 const hiddenSelectedCount = computed(() => selIds.value.length - visibleSelectedCount.value)
-const togglePageSelection = () => toggleVisible(!allVisibleSelected.value)
-const isImportBatchSelected = (batch: ImportBatchRow) => batch.accounts.every(account => isSelected(account.id))
+const togglePageSelection = () => {
+  if (!pageBatchLoading.value) toggleVisible(!allVisibleSelected.value)
+}
+const isImportBatchSelected = (batch: ImportBatchRow) => (
+  batch.accounts.length === batch.matchedCount && batch.accounts.length > 0 && batch.accounts.every(account => isSelected(account.id))
+)
 const isImportBatchPartiallySelected = (batch: ImportBatchRow) => {
   const selectedCount = batch.accounts.filter(account => isSelected(account.id)).length
   return selectedCount > 0 && selectedCount < batch.accounts.length
@@ -1603,7 +1638,7 @@ useSwipeSelect(accountTableRef, {
 }, swipeVirtualContext)
 
 const resetAutoRefreshCache = () => {
-  autoRefreshETag.value = null
+  autoRefreshRequestRevision++
 }
 
 const isFirstLoad = ref(true)
@@ -1679,13 +1714,14 @@ const resetSelectionForFilterChange = () => {
 const handleSearchChange = (value: string) => {
   params.search = value
   resetSelectionForFilterChange()
-  invalidateImportBatchCache()
+  invalidateImportBatchCache(true)
   debouncedReload()
 }
 
 const handleFiltersChange = (filters: Record<string, unknown>) => {
   Object.assign(params, filters)
   resetSelectionForFilterChange()
+  expandedImportBatches.value = new Set()
   void reload()
 }
 
@@ -1700,10 +1736,12 @@ const clearFilters = () => {
     search: ''
   })
   resetSelectionForFilterChange()
+  expandedImportBatches.value = new Set()
   void reload()
 }
 
 const handlePageChange = (page: number) => {
+  invalidateImportBatchCache(true)
   syncAccountListDerivedParams()
   hasPendingListSync.value = false
   resetAutoRefreshCache()
@@ -1712,6 +1750,7 @@ const handlePageChange = (page: number) => {
 }
 
 const handlePageSizeChange = (size: number) => {
+  invalidateImportBatchCache(true)
   syncAccountListDerivedParams()
   hasPendingListSync.value = false
   resetAutoRefreshCache()
@@ -1720,6 +1759,7 @@ const handlePageSizeChange = (size: number) => {
 }
 
 const handleSort = (key: string, order: AccountSortOrder) => {
+  invalidateImportBatchCache(true)
   sortState.sort_by = key
   sortState.sort_order = order
   const requestParams = params as any
@@ -1779,21 +1819,6 @@ const inAutoRefreshSilentWindow = () => {
   return Date.now() < autoRefreshSilentUntil.value
 }
 
-const shouldReplaceAutoRefreshRow = (current: Account, next: Account) => {
-  return (
-    current.updated_at !== next.updated_at ||
-    current.current_concurrency !== next.current_concurrency ||
-    current.current_window_cost !== next.current_window_cost ||
-    current.active_sessions !== next.active_sessions ||
-    current.schedulable !== next.schedulable ||
-    current.status !== next.status ||
-    current.rate_limit_reset_at !== next.rate_limit_reset_at ||
-    current.overload_until !== next.overload_until ||
-    current.temp_unschedulable_until !== next.temp_unschedulable_until ||
-    buildOpenAIUsageRefreshKey(current) !== buildOpenAIUsageRefreshKey(next)
-  )
-}
-
 const syncAccountRefs = (nextAccount: Account) => {
   if (edAcc.value?.id === nextAccount.id) edAcc.value = nextAccount
   if (reAuthAcc.value?.id === nextAccount.id) reAuthAcc.value = nextAccount
@@ -1802,42 +1827,13 @@ const syncAccountRefs = (nextAccount: Account) => {
   if (menu.acc?.id === nextAccount.id) menu.acc = nextAccount
 }
 
-const mergeAccountsIncrementally = (nextRows: Account[]) => {
-  const currentRows = accounts.value
-  const currentByID = new Map(currentRows.map(row => [row.id, row]))
-  let changed = nextRows.length !== currentRows.length
-  const mergedRows = nextRows.map((nextRow) => {
-    const currentRow = currentByID.get(nextRow.id)
-    if (!currentRow) {
-      changed = true
-      return nextRow
-    }
-    if (shouldReplaceAutoRefreshRow(currentRow, nextRow)) {
-      changed = true
-      syncAccountRefs(nextRow)
-      return nextRow
-    }
-    return currentRow
-  })
-  if (!changed) {
-    for (let i = 0; i < mergedRows.length; i += 1) {
-      if (mergedRows[i].id !== currentRows[i]?.id) {
-        changed = true
-        break
-      }
-    }
-  }
-  if (changed) {
-    accounts.value = mergedRows
-  }
-}
-
 const refreshAccountsIncrementally = async () => {
   if (autoRefreshFetching.value) return
   syncAccountListDerivedParams()
+  const revision = autoRefreshRequestRevision
   autoRefreshFetching.value = true
   try {
-    const result = await adminAPI.accounts.listWithEtag(
+    const result = await adminAPI.accounts.listRows(
       pagination.page,
       pagination.page_size,
       toRaw(params) as {
@@ -1851,20 +1847,18 @@ const refreshAccountsIncrementally = async () => {
         include_pool_metrics?: string
         sort_by?: string
         sort_order?: AccountSortOrder
-      },
-      { etag: autoRefreshETag.value }
+      }
     )
-
-    if (result.etag) {
-      autoRefreshETag.value = result.etag
+    if (revision !== autoRefreshRequestRevision) return
+    for (const row of result.items) {
+      if (row.kind === 'account') syncAccountRefs(row.account)
     }
-    if (!result.notModified && result.data) {
-      pagination.total = result.data.total || 0
-      pagination.pages = result.data.pages || 0
-      mergeAccountsIncrementally(result.data.items || [])
-      hasPendingListSync.value = false
-      markUpstreamBillingSortRefresh()
-    }
+    invalidateImportBatchCache()
+    accountListRows.value = result.items || []
+    pagination.total = result.total || 0
+    pagination.pages = result.pages || 0
+    hasPendingListSync.value = false
+    markUpstreamBillingSortRefresh()
     upstreamBillingNow.value = Date.now()
 
     await refreshTodayStatsBatch()
@@ -2114,7 +2108,7 @@ const allColumns = computed(() => {
     { key: 'select', label: '', sortable: false },
     { key: 'uploader', label: t('admin.sharedPool.columns.uploader'), sortable: false },
     { key: 'name', label: t('admin.accounts.columns.name'), sortable: true },
-    { key: 'id', label: t('admin.accounts.columns.id'), sortable: true },
+    { key: 'id', label: t('admin.accounts.columns.id'), sortable: false },
     { key: 'platform_type', label: t('admin.accounts.columns.platformType'), sortable: false },
     { key: 'capacity', label: t('admin.accounts.columns.capacity'), sortable: false },
     { key: 'status', label: t('admin.accounts.columns.status'), sortable: true },
@@ -2128,13 +2122,13 @@ const allColumns = computed(() => {
   c.push({ key: 'pool_record', label: t('admin.sharedPool.actions.poolRecord'), sortable: false })
   c.push(
     { key: 'proxy', label: t('admin.accounts.columns.proxy'), sortable: false },
-    { key: 'priority', label: t('admin.accounts.columns.priority'), sortable: true },
+    { key: 'priority', label: t('admin.accounts.columns.priority'), sortable: false },
     { key: 'scheduler_score', label: t('admin.accounts.columns.schedulerScore'), sortable: false },
-    { key: 'rate_multiplier', label: t('admin.accounts.columns.billingRateMultiplier'), sortable: true },
-    { key: 'upstream_billing_rate', label: t('admin.accounts.columns.upstreamBillingRate'), sortable: true },
-    { key: 'last_used_at', label: t('admin.accounts.columns.lastUsed'), sortable: true },
+    { key: 'rate_multiplier', label: t('admin.accounts.columns.billingRateMultiplier'), sortable: false },
+    { key: 'upstream_billing_rate', label: t('admin.accounts.columns.upstreamBillingRate'), sortable: false },
+    { key: 'last_used_at', label: t('admin.accounts.columns.lastUsed'), sortable: false },
     { key: 'created_at', label: t('admin.accounts.columns.createdAt'), sortable: true },
-    { key: 'expires_at', label: t('admin.accounts.columns.expiresAt'), sortable: true },
+    { key: 'expires_at', label: t('admin.accounts.columns.expiresAt'), sortable: false },
     { key: 'notes', label: t('admin.accounts.columns.notes'), sortable: false },
     { key: 'actions', label: t('admin.accounts.columns.actions'), sortable: false }
   )
@@ -2454,6 +2448,7 @@ const openMenu = (a: Account, e: MouseEvent) => {
   menu.show = true
 }
 const toggleSelectAllVisible = (event: Event) => {
+  if (pageBatchLoading.value) return
   const target = event.target as HTMLInputElement
   toggleVisible(target.checked)
 }

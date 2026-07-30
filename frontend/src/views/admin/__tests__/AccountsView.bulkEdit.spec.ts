@@ -5,6 +5,7 @@ import AccountsView from '../AccountsView.vue'
 
 const {
   listAccounts,
+  listRows,
   listWithEtag,
   getBatchTodayStats,
   getUpstreamBillingProbeSettings,
@@ -19,6 +20,7 @@ const {
   listUsers
 } = vi.hoisted(() => ({
   listAccounts: vi.fn(),
+  listRows: vi.fn(),
   listWithEtag: vi.fn(),
   getBatchTodayStats: vi.fn(),
   getUpstreamBillingProbeSettings: vi.fn(),
@@ -37,6 +39,7 @@ vi.mock('@/api/admin', () => ({
   adminAPI: {
     accounts: {
       list: listAccounts,
+      listRows,
       listWithEtag,
       getBatchTodayStats,
       getUpstreamBillingProbeSettings,
@@ -150,6 +153,25 @@ const account = (id: number) => ({
   updated_at: '2026-07-29T00:00:00Z'
 })
 
+const batchRowsResponse = (batchID: string, matchedCount: number) => ({
+  items: [{
+    kind: 'import_batch',
+    batch: {
+      id: batchID,
+      created_at: '2026-07-29T00:00:00Z',
+      matched_count: matchedCount,
+      total_count: matchedCount,
+      schedulable_count: matchedCount,
+      names: ['account-1'],
+      status: { normal: matchedCount, error: 0, inactive: 0, rate_limited: 0, overloaded: 0, temp_unschedulable: 0, manual_unschedulable: 0 }
+    }
+  }],
+  total: 1,
+  page: 1,
+  page_size: 20,
+  pages: 1
+})
+
 const mountAccountsView = (stubs: Record<string, unknown> = {}) => mount(AccountsView, {
   global: {
     stubs: {
@@ -191,6 +213,7 @@ describe('admin AccountsView bulk edit scope', () => {
     localStorage.clear()
 
     listAccounts.mockReset()
+    listRows.mockReset()
     listWithEtag.mockReset()
     getBatchTodayStats.mockReset()
     getUpstreamBillingProbeSettings.mockReset()
@@ -210,6 +233,10 @@ describe('admin AccountsView bulk edit scope', () => {
       page: 1,
       page_size: 20,
       pages: 0
+    })
+    listRows.mockImplementation(async (...args) => {
+      const result = await listAccounts(...args)
+      return { ...result, items: result.items.map((account: unknown) => ({ kind: 'account', account })) }
     })
     listWithEtag.mockResolvedValue({
       notModified: true,
@@ -362,6 +389,7 @@ describe('admin AccountsView bulk edit scope', () => {
     const batchID = 'batch-101'
     const batchAccount = (id: number) => ({ ...account(id), extra: { import_batch_id: batchID } })
     listAccounts.mockResolvedValue({ items: [batchAccount(1)], total: 1, page: 1, page_size: 20, pages: 1 })
+    listRows.mockResolvedValue(batchRowsResponse(batchID, 101))
     listImportBatch
       .mockResolvedValueOnce({ items: Array.from({ length: 100 }, (_, index) => batchAccount(index + 1)), total: 101, page: 1, page_size: 100, pages: 2 })
       .mockResolvedValueOnce({ items: [batchAccount(101)], total: 101, page: 2, page_size: 100, pages: 2 })
@@ -377,7 +405,7 @@ describe('admin AccountsView bulk edit scope', () => {
     await wrapper.get('[data-test="select-row"] input').setValue(true)
     await flushPromises()
     expect(wrapper.getComponent(AccountBulkActionsBarStub).props('selectedIds')).toHaveLength(101)
-    expect(wrapper.getComponent(AccountBulkActionsBarStub).props('hiddenSelectedCount')).toBe(100)
+    expect(wrapper.getComponent(AccountBulkActionsBarStub).props('hiddenSelectedCount')).toBe(0)
 
     await wrapper.get('[data-test="data-table"] button').trigger('click')
     await flushPromises()
@@ -390,6 +418,9 @@ describe('admin AccountsView bulk edit scope', () => {
     let finishStale!: (value: { items: ReturnType<typeof batchAccount>[]; total: number; page: number; page_size: number; pages: number }) => void
     listAccounts
       .mockResolvedValueOnce({ items: [batchAccount(1)], total: 1, page: 1, page_size: 20, pages: 1 })
+    listRows
+      .mockResolvedValueOnce(batchRowsResponse(batchID, 1))
+      .mockResolvedValueOnce(batchRowsResponse(batchID, 1))
       .mockResolvedValueOnce({ items: [batchAccount(1)], total: 1, page: 1, page_size: 20, pages: 1 })
     listImportBatch
       .mockImplementationOnce(() => new Promise(resolve => { finishStale = resolve }))
@@ -737,8 +768,7 @@ describe('admin AccountsView bulk edit scope', () => {
     expect(probeUpstreamBillingBatch).toHaveBeenCalledWith([7, 11])
   })
 
-  it('reloads the server-sorted list after a batch probe changes a snapshot', async () => {
-    localStorage.setItem('account-table-sort', JSON.stringify({ key: 'upstream_billing_rate', order: 'asc' }))
+  it('keeps the logical-row order after a batch probe changes a snapshot', async () => {
     const account = (id: number) => ({
       id,
       name: `account-${id}`,
@@ -805,6 +835,6 @@ describe('admin AccountsView bulk edit scope', () => {
     await flushPromises()
 
     expect(probeUpstreamBillingBatch).toHaveBeenCalledWith([7])
-    expect(listAccounts).toHaveBeenCalledTimes(2)
+    expect(listAccounts).toHaveBeenCalledTimes(1)
   })
 })

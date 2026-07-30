@@ -2,6 +2,12 @@ import type { SharedPoolBatchAmountMode } from '@/api/admin/sharedPool'
 
 export type BatchAllocationMode = 'equal' | 'manual'
 
+export const TOKENS_PER_MILLION = 1_000_000
+export const DEFAULT_EXPECTED_TOKEN_COUNT = 20 * TOKENS_PER_MILLION
+
+export const tokensToMillions = (tokens: number): number => tokens / TOKENS_PER_MILLION
+export const millionsToTokens = (millions: number): number => Math.round(millions * TOKENS_PER_MILLION)
+
 export interface BatchCostOverride {
   originalAmount?: number | '' | null
   expectedTokenCount?: number | '' | null

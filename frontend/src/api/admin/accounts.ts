@@ -49,6 +49,33 @@ export interface AccountSelectionSummary {
   types: string[]
 }
 
+export interface AccountBatchStatusSummary {
+  normal: number
+  error: number
+  inactive: number
+  rate_limited: number
+  overloaded: number
+  temp_unschedulable: number
+  manual_unschedulable: number
+}
+
+export interface AccountImportBatchSummary {
+  id: string
+  uploader_user_id?: number | null
+  uploader_email?: string | null
+  uploader_username?: string | null
+  created_at: string
+  matched_count: number
+  total_count: number
+  schedulable_count: number
+  names: string[]
+  status: AccountBatchStatusSummary
+}
+
+export type AccountListRow =
+  | { kind: 'account'; account: Account }
+  | { kind: 'import_batch'; batch: AccountImportBatchSummary }
+
 /**
  * List all accounts with pagination
  * @param page - Page number (default: 1)
@@ -65,6 +92,23 @@ export async function list(
   }
 ): Promise<PaginatedResponse<Account>> {
   const { data } = await apiClient.get<PaginatedResponse<Account>>('/admin/accounts', {
+    params: {
+      page,
+      page_size: pageSize,
+      ...filters
+    },
+    signal: options?.signal
+  })
+  return data
+}
+
+export async function listRows(
+  page: number = 1,
+  pageSize: number = 20,
+  filters?: AccountListFilters,
+  options?: { signal?: AbortSignal }
+): Promise<PaginatedResponse<AccountListRow>> {
+  const { data } = await apiClient.get<PaginatedResponse<AccountListRow>>('/admin/accounts/rows', {
     params: {
       page,
       page_size: pageSize,
@@ -977,6 +1021,7 @@ export async function refreshOllamaCloudUsage(id: number): Promise<OllamaCloudUs
 
 export const accountsAPI = {
   list,
+  listRows,
   listWithEtag,
   listImportBatch,
   getSelectionSummary,

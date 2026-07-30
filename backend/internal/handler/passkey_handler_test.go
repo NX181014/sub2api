@@ -1,0 +1,166 @@
+package handler
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/service"
+	"github.com/gin-gonic/gin"
+	"github.com/stretchr/testify/require"
+)
+
+type passkeySwitchSettingRepo struct {
+	value string
+	err   error
+}
+
+type primaryAdminTokenResponseCache struct {
+	service.RefreshTokenCache
+}
+
+func (primaryAdminTokenResponseCache) StoreRefreshToken(context.Context, string, *service.RefreshTokenData, time.Duration) error {
+	return nil
+}
+
+func (primaryAdminTokenResponseCache) AddToUserTokenSet(context.Context, int64, string, time.Duration) error {
+	return nil
+}
+
+func (primaryAdminTokenResponseCache) AddToFamilyTokenSet(context.Context, string, string, time.Duration) error {
+	return nil
+}
+
+func (r *passkeySwitchSettingRepo) Get(context.Context, string) (*service.Setting, error) {
+	return nil, service.ErrSettingNotFound
+}
+func (r *passkeySwitchSettingRepo) GetValue(context.Context, string) (string, error) {
+	return r.value, r.err
+}
+func (r *passkeySwitchSettingRepo) Set(context.Context, string, string) error { return nil }
+func (r *passkeySwitchSettingRepo) GetMultiple(context.Context, []string) (map[string]string, error) {
+	return map[string]string{}, nil
+}
+func (r *passkeySwitchSettingRepo) SetMultiple(context.Context, map[string]string) error {
+	return nil
+}
+func (r *passkeySwitchSettingRepo) GetAll(context.Context) (map[string]string, error) {
+	return map[string]string{}, nil
+}
+func (r *passkeySwitchSettingRepo) Delete(context.Context, string) error { return nil }
+
+func TestBindPasskeyFinishRequestRejectsOversizedBody(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(recorder)
+	context.Request = httptest.NewRequest(
+		http.MethodPost,
+		"/api/v1/auth/passkey/login/finish",
+		strings.NewReader(`{"credential":"`+strings.Repeat("x", passkeyFinishBodyMaxBytes)+`"}`),
+	)
+	context.Request.Header.Set("Content-Type", "application/json")
+
+	_, ok := bindPasskeyFinishRequest(context)
+	require.False(t, ok)
+	require.Equal(t, http.StatusBadRequest, recorder.Code)
+}
+
+func TestPasskeyBeginLoginRejectsDisabledAdminSwitch(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	repo := &passkeySwitchSettingRepo{value: "false"}
+	settings := service.NewSettingService(repo, &config.Config{
+		WebAuthn: config.WebAuthnConfig{Enabled: true},
+	})
+	handler := NewPasskeyHandler(nil, nil, settings)
+	recorder := httptest.NewRecorder()
+	ginContext, _ := gin.CreateTestContext(recorder)
+	ginContext.Request = httptest.NewRequest(http.MethodPost, "/api/v1/auth/passkey/login/begin", nil)
+
+	handler.BeginLogin(ginContext)
+
+	require.Equal(t, http.StatusForbidden, recorder.Code)
+	require.Contains(t, recorder.Body.String(), "PASSKEY_DISABLED")
+}
+
+func TestPasskeyBeginLoginReportsSettingStoreFailure(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	settings := service.NewSettingService(
+		&passkeySwitchSettingRepo{err: errors.New("database unavailable")},
+		&config.Config{WebAuthn: config.WebAuthnConfig{Enabled: true}},
+	)
+	handler := NewPasskeyHandler(nil, nil, settings)
+	recorder := httptest.NewRecorder()
+	ginContext, _ := gin.CreateTestContext(recorder)
+	ginContext.Request = httptest.NewRequest(http.MethodPost, "/api/v1/auth/passkey/login/begin", nil)
+
+	handler.BeginLogin(ginContext)
+
+	require.Equal(t, http.StatusInternalServerError, recorder.Code)
+	require.NotContains(t, recorder.Body.String(), "PASSKEY_DISABLED")
+}
+
+func TestPasskeyCredentialListRemainsAvailableWhenSignInDisabled(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	handler := NewPasskeyHandler(nil, nil, nil)
+	recorder := httptest.NewRecorder()
+	ginContext, _ := gin.CreateTestContext(recorder)
+	ginContext.Request = httptest.NewRequest(http.MethodGet, "/api/v1/user/passkeys", nil)
+
+	handler.List(ginContext)
+
+	require.Equal(t, http.StatusUnauthorized, recorder.Code)
+	require.NotContains(t, recorder.Body.String(), "PASSKEY_DISABLED")
+}
+
+func TestPrimaryAdminTokenResponseForPasswordAndPasskeyLogin(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	settings := service.NewSettingService(&passkeySwitchSettingRepo{value: "42"}, nil)
+	authService := service.NewAuthService(
+		nil, nil, nil, primaryAdminTokenResponseCache{},
+		&config.Config{JWT: config.JWTConfig{
+			Secret:                 strings.Repeat("s", 32),
+			ExpireHour:             1,
+			RefreshTokenExpireDays: 30,
+		}},
+		nil, nil, nil, nil, nil, nil, nil, nil,
+	)
+	user := &service.User{
+		ID:     42,
+		Email:  "primary@example.com",
+		Role:   service.RoleAdmin,
+		Status: service.StatusActive,
+	}
+
+	tests := []struct {
+		name    string
+		respond func(*gin.Context, *service.User)
+	}{
+		{name: "password", respond: (&AuthHandler{authService: authService, settingSvc: settings}).respondWithTokenPair},
+		{name: "passkey", respond: (&PasskeyHandler{authService: authService, settingSvc: settings}).respondWithTokenPair},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			ginContext, _ := gin.CreateTestContext(recorder)
+			ginContext.Request = httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", nil)
+
+			tt.respond(ginContext, user)
+
+			require.Equal(t, http.StatusOK, recorder.Code)
+			var payload struct {
+				Data AuthResponse `json:"data"`
+			}
+			require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &payload))
+			require.NotEmpty(t, payload.Data.AccessToken)
+			require.NotEmpty(t, payload.Data.RefreshToken)
+			require.NotNil(t, payload.Data.User)
+			require.True(t, payload.Data.User.IsPrimaryAdmin)
+		})
+	}
+}

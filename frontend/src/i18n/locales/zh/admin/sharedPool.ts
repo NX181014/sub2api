@@ -18,7 +18,7 @@ export default {
       emptySummary: '暂无账号成本汇总', emptyEntries: '暂无成本流水', batchTitle: '批量添加账号成本',
       steps: { accounts: '选择账号', common: '公共资料', overrides: '逐账号覆盖', preview: '预览提交' },
       amountMode: '金额模式', perAccountAmount: '单个账号成本', perAccountHint: '填写的是每一个账号的成本', orderTotal: '订单总成本', orderTotalHint: '填写整张订单总额，再分配到账号',
-      allocationMode: '订单分配方式', equalAllocation: '平均分配', manualAllocation: '手工分配', expectedTokens: '本次新增预期 Token', paidAt: '付款日期',
+      allocationMode: '订单分配方式', equalAllocation: '平均分配', manualAllocation: '手工分配', expectedTokens: '本次新增预期 Token（M）', paidAt: '付款日期',
       perAccountPreview: '单价 {price} × {count} 个账号 = 本批总额 {total}', orderTotalPreview: '订单总额 {total}，分配到 {count} 个账号',
       overrideHint: '留空使用公共值；订单平均分配时，可固定部分账号金额，其余金额自动均分。', accountAmount: '该账号金额', accountCount: '账号数量',
       originalAmount: '原币金额', cnyAmount: '折合人民币', recordedAt: '入账时间', duplicateHint: '提交时后端会再次校验重复订单、重复账号和幂等键，整批成功后才入账。',

@@ -98,16 +98,20 @@ func ensureLoginUserActive(user *service.User) error {
 // respondWithTokenPair 生成 Token 对并返回认证响应
 // 如果 Token 对生成失败，回退到只返回 Access Token（向后兼容）
 func (h *AuthHandler) respondWithTokenPair(c *gin.Context, user *service.User) {
+	respondWithTokenPair(c, h.authService, h.settingSvc, user)
+}
+
+func respondWithTokenPair(c *gin.Context, authService *service.AuthService, settingSvc *service.SettingService, user *service.User) {
 	if err := ensureLoginUserActive(user); err != nil {
 		response.ErrorFrom(c, err)
 		return
 	}
 
-	tokenPair, err := h.authService.GenerateTokenPair(c.Request.Context(), user, "")
+	tokenPair, err := authService.GenerateTokenPair(c.Request.Context(), user, "")
 	if err != nil {
 		slog.Error("failed to generate token pair", "error", err, "user_id", user.ID)
 		// 回退到只返回Access Token
-		token, tokenErr := h.authService.GenerateToken(c.Request.Context(), user)
+		token, tokenErr := authService.GenerateToken(c.Request.Context(), user)
 		if tokenErr != nil {
 			response.InternalError(c, "Failed to generate token")
 			return
@@ -115,7 +119,7 @@ func (h *AuthHandler) respondWithTokenPair(c *gin.Context, user *service.User) {
 		response.Success(c, AuthResponse{
 			AccessToken: token,
 			TokenType:   "Bearer",
-			User:        h.authUserResponse(c.Request.Context(), user),
+			User:        authUserResponse(c.Request.Context(), settingSvc, user),
 		})
 		return
 	}
@@ -124,14 +128,14 @@ func (h *AuthHandler) respondWithTokenPair(c *gin.Context, user *service.User) {
 		RefreshToken: tokenPair.RefreshToken,
 		ExpiresIn:    tokenPair.ExpiresIn,
 		TokenType:    "Bearer",
-		User:         h.authUserResponse(c.Request.Context(), user),
+		User:         authUserResponse(c.Request.Context(), settingSvc, user),
 	})
 }
 
-func (h *AuthHandler) authUserResponse(ctx context.Context, user *service.User) *dto.User {
+func authUserResponse(ctx context.Context, settingSvc *service.SettingService, user *service.User) *dto.User {
 	out := dto.UserFromService(user)
-	if out != nil && h.settingSvc != nil {
-		out.IsPrimaryAdmin = h.settingSvc.IsPrimaryAdmin(ctx, user.ID)
+	if out != nil && settingSvc != nil {
+		out.IsPrimaryAdmin = settingSvc.IsPrimaryAdmin(ctx, user.ID)
 	}
 	return out
 }
