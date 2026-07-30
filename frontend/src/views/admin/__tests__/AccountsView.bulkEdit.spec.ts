@@ -385,7 +385,7 @@ describe('admin AccountsView bulk edit scope', () => {
     expect(wrapper.findComponent(AccountBulkActionsBarStub).exists()).toBe(false)
   })
 
-  it('loads every import-batch page before counting, expanding or selecting the batch', async () => {
+  it('loads collapsed import batches only when the current page is selected or expanded', async () => {
     const batchID = 'batch-101'
     const batchAccount = (id: number) => ({ ...account(id), extra: { import_batch_id: batchID } })
     listAccounts.mockResolvedValue({ items: [batchAccount(1)], total: 1, page: 1, page_size: 20, pages: 1 })
@@ -397,19 +397,44 @@ describe('admin AccountsView bulk edit scope', () => {
     const wrapper = mountAccountsView()
     await flushPromises()
 
+    expect(listImportBatch).not.toHaveBeenCalled()
+    expect((wrapper.getComponent(DataTableStub).props('data') as any[])[0].accounts).toHaveLength(0)
+
+    await wrapper.get('[data-test="select-header"] input').setValue(true)
+    await flushPromises()
     expect(listImportBatch).toHaveBeenNthCalledWith(1, batchID, 1, 100, expect.any(Object))
     expect(listImportBatch).toHaveBeenNthCalledWith(2, batchID, 2, 100, expect.any(Object))
     const batchRow = (wrapper.getComponent(DataTableStub).props('data') as any[])[0]
     expect(batchRow.accounts).toHaveLength(101)
-
-    await wrapper.get('[data-test="select-row"] input').setValue(true)
-    await flushPromises()
     expect(wrapper.getComponent(AccountBulkActionsBarStub).props('selectedIds')).toHaveLength(101)
     expect(wrapper.getComponent(AccountBulkActionsBarStub).props('hiddenSelectedCount')).toBe(0)
 
     await wrapper.get('[data-test="data-table"] button').trigger('click')
     await flushPromises()
+    expect(listImportBatch).toHaveBeenCalledTimes(2)
     expect(wrapper.getComponent(DataTableStub).props('data')).toHaveLength(102)
+  })
+
+  it('restores a selected batch when returning to its page without refetching members', async () => {
+    const batchID = 'batch-page-one'
+    const member = { ...account(1), extra: { import_batch_id: batchID } }
+    listRows.mockImplementation(async (page: number) => page === 1
+      ? { ...batchRowsResponse(batchID, 1), total: 2, pages: 2 }
+      : { items: [{ kind: 'account', account: account(2) }], total: 2, page: 2, page_size: 20, pages: 2 })
+    listImportBatch.mockResolvedValue({ items: [member], total: 1, page: 1, page_size: 100, pages: 1 })
+
+    const wrapper = mountAccountsView()
+    await flushPromises()
+    await wrapper.get('[data-test="select-row"] input').setValue(true)
+    await flushPromises()
+    await wrapper.get('[data-test="next-page"]').trigger('click')
+    await flushPromises()
+    wrapper.getComponent(PaginationStub).vm.$emit('update:page', 1)
+    await flushPromises()
+
+    expect((wrapper.get('[data-test="select-row"] input').element as HTMLInputElement).checked).toBe(true)
+    expect(wrapper.getComponent(AccountBulkActionsBarStub).props('hiddenSelectedCount')).toBe(0)
+    expect(listImportBatch).toHaveBeenCalledTimes(1)
   })
 
   it('reloads batch members with current filters and ignores a stale in-flight batch response', async () => {
@@ -421,17 +446,22 @@ describe('admin AccountsView bulk edit scope', () => {
     listRows
       .mockResolvedValueOnce(batchRowsResponse(batchID, 1))
       .mockResolvedValueOnce(batchRowsResponse(batchID, 1))
-      .mockResolvedValueOnce({ items: [batchAccount(1)], total: 1, page: 1, page_size: 20, pages: 1 })
     listImportBatch
       .mockImplementationOnce(() => new Promise(resolve => { finishStale = resolve }))
       .mockResolvedValueOnce({ items: [batchAccount(2)], total: 1, page: 1, page_size: 100, pages: 1 })
 
     const wrapper = mountAccountsView()
     await flushPromises()
+    void wrapper.get('[data-test="select-row"] input').setValue(true)
+    await vi.waitFor(() => expect(listImportBatch).toHaveBeenCalledTimes(1))
     wrapper.getComponent(AccountTableFiltersStub).vm.$emit('update:filters', { platform: 'openai' })
-    await flushPromises()
+    await vi.waitFor(() => expect(listRows).toHaveBeenCalledTimes(2))
+    const refreshedBatchCheckbox = wrapper.get('[data-test="select-row"] input')
+    const refreshedBatchCheckboxElement = refreshedBatchCheckbox.element as HTMLInputElement
+    refreshedBatchCheckboxElement.checked = true
+    await refreshedBatchCheckbox.trigger('change')
+    await vi.waitFor(() => expect(listImportBatch).toHaveBeenCalledTimes(2))
 
-    expect(listImportBatch).toHaveBeenCalledTimes(2)
     expect(listImportBatch.mock.calls[1]?.[3]).toMatchObject({ platform: 'openai' })
     expect((wrapper.getComponent(DataTableStub).props('data') as any[])[0].accounts.map((item: any) => item.id)).toEqual([2])
 
@@ -835,6 +865,32 @@ describe('admin AccountsView bulk edit scope', () => {
     await flushPromises()
 
     expect(probeUpstreamBillingBatch).toHaveBeenCalledWith([7])
-    expect(listAccounts).toHaveBeenCalledTimes(1)
+    expect(listAccounts).toHaveBeenCalledTimes(2)
+  })
+
+  it('refreshes the current page after an account state operation', async () => {
+    listAccounts
+      .mockResolvedValueOnce({ items: [account(1)], total: 2, page: 1, page_size: 20, pages: 2 })
+      .mockResolvedValueOnce({ items: [account(2)], total: 2, page: 2, page_size: 20, pages: 2 })
+      .mockResolvedValueOnce({ items: [account(2)], total: 2, page: 2, page_size: 20, pages: 2 })
+    probeUpstreamBillingBatch.mockResolvedValueOnce([{
+      account_id: 2,
+      snapshot: {
+        status: 'ok',
+        data: { effective_rate_multiplier: 0.5 },
+        last_attempt_at: '2026-07-30T00:00:00Z',
+        next_probe_at: '2026-07-30T00:30:00Z'
+      }
+    }])
+
+    const wrapper = mountAccountsView()
+    await flushPromises()
+    await wrapper.get('[data-test="next-page"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-test="select-row"] input').trigger('change')
+    await wrapper.get('[data-test="probe-upstream-billing"]').trigger('click')
+    await flushPromises()
+
+    expect(listAccounts.mock.calls.at(-1)?.[0]).toBe(2)
   })
 })

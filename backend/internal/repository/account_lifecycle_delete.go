@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"strconv"
+	"time"
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -92,6 +93,18 @@ func hardDeleteAccountFamily(ctx context.Context, exec accountDeleteExecutor, id
 	for i, id := range ids {
 		textIDs[i] = strconv.FormatInt(id, 10)
 	}
+	if _, err := exec.ExecContext(ctx, `DELETE FROM ops_retry_attempts r
+		WHERE r.pinned_account_id=ANY($1) OR r.used_account_id=ANY($1)
+		OR EXISTS (SELECT 1 FROM ops_error_logs e
+			WHERE e.account_id=ANY($1) AND (e.id=r.source_error_id OR e.id=r.result_error_id))
+		OR EXISTS (SELECT 1 FROM usage_logs u
+			WHERE u.account_id=ANY($1) AND u.request_id IS NOT NULL
+			AND u.request_id IN (r.result_usage_request_id,r.upstream_request_id,r.result_request_id))`, idArray); err != nil {
+		return err
+	}
+	if err := hardDeleteAccountUsage(ctx, exec, ids); err != nil {
+		return err
+	}
 
 	queries := []struct {
 		sql  string
@@ -142,4 +155,33 @@ func hardDeleteAccountFamily(ctx context.Context, exec accountDeleteExecutor, id
 		}
 	}
 	return nil
+}
+
+func hardDeleteAccountUsage(ctx context.Context, exec accountDeleteExecutor, ids []int64) error {
+	rows, err := exec.QueryContext(ctx, `SELECT MIN(created_at),MAX(created_at) FROM usage_logs WHERE account_id=ANY($1)`, pq.Array(ids))
+	if err != nil {
+		return err
+	}
+	defer func() { _ = rows.Close() }()
+	var start, end sql.NullTime
+	if !rows.Next() {
+		return rows.Err()
+	}
+	if err := rows.Scan(&start, &end); err != nil {
+		return err
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	if !start.Valid || !end.Valid {
+		return nil
+	}
+	if _, err := exec.ExecContext(ctx, `DELETE FROM usage_logs WHERE account_id=ANY($1)`, pq.Array(ids)); err != nil {
+		return err
+	}
+	// ponytail: account deletion is rare; reuse the existing exact range rebuild instead of duplicating aggregate SQL.
+	return newDashboardAggregationRepositoryWithSQL(exec).RecomputeRange(ctx, start.Time, end.Time.Add(time.Nanosecond))
 }

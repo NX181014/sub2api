@@ -852,7 +852,7 @@ import { proxyExpiryBadgeClass, proxyExpiryLabelKey } from '@/utils/proxyExpiry'
 import { extractApiErrorMessage } from '@/utils/apiError'
 import { sanitizeUrl } from '@/utils/url'
 import { getFloatingPanelPosition } from '@/utils/floatingPanel'
-import type { Account, AccountPlatform, AccountSchedulerGroupScore, AccountType, Proxy as AccountProxy, AdminGroup, WindowStats, ClaudeModel, UpstreamBillingProbeSnapshot } from '@/types'
+import type { Account, AccountPlatform, AccountSchedulerGroupScore, AccountType, Proxy as AccountProxy, AdminGroup, WindowStats, ClaudeModel } from '@/types'
 import type { AccountBatchStatusSummary, AccountImportBatchSummary, AccountListRow } from '@/api/admin/accounts'
 import type { PoolApproval, PoolApprovalStatus, PoolCredentialReveal, SharedPoolAccountCost } from '@/api/admin/sharedPool'
 
@@ -1540,17 +1540,7 @@ const syncPageAccounts = () => {
   accounts.value = [...next.values()]
 }
 watch([accountListRows, completeImportBatchAccounts], syncPageAccounts, { immediate: true })
-watch(accountListRows, rows => {
-  for (const row of rows) {
-    if (row.kind !== 'import_batch') continue
-    void loadCompleteImportBatch(row.batch.id).catch(error => {
-      if (error !== staleImportBatchRequest) console.error('Failed to load complete import batch:', error)
-    })
-  }
-}, { immediate: true })
-const pageBatchLoading = computed(() => [...currentBatchIDs.value].some(id => (
-  isImportBatchLoading(id) || !completeImportBatchAccounts.value.has(id)
-)))
+const pageBatchLoading = computed(() => [...currentBatchIDs.value].some(isImportBatchLoading))
 const importBatchStatusItems = (batch: ImportBatchRow) => {
   const definitions: Array<{ key: keyof AccountBatchStatusSummary; label: string; className: string }> = [
     { key: 'normal', label: t('admin.accounts.status.active'), className: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' },
@@ -1583,15 +1573,12 @@ const toggleImportBatch = async (id: string) => {
 
 const {
   selectedIds: selIds,
-  allVisibleSelected,
   isSelected,
   setSelectedIds,
   select,
   deselect,
   toggle: toggleSel,
   clear: clearSelection,
-  removeMany: removeSelectedAccounts,
-  toggleVisible,
   batchUpdate
 } = useTableSelection<Account>({
   rows: accounts,
@@ -1600,18 +1587,72 @@ const {
 watch(accounts, rows => {
   rows.forEach(account => knownAccountsByID.set(account.id, account))
 }, { immediate: true })
-const visibleSelectedCount = computed(() => accounts.value.filter(account => isSelected(account.id)).length)
+const completeBatchMembersForSelection = (id: string, matchedCount: number, loaded: Account[] = []) => {
+  const members = loaded.length > 0
+    ? loaded
+    : [...knownAccountsByID.values()].filter(account => importBatchID(account) === id)
+  return members.length === matchedCount ? members : []
+}
+const allVisibleSelected = computed(() => accountListRows.value.length > 0 && accountListRows.value.every(row => {
+  if (row.kind === 'account') return isSelected(row.account.id)
+  const members = completeBatchMembersForSelection(
+    row.batch.id,
+    row.batch.matched_count,
+    completeImportBatchAccounts.value.get(row.batch.id)
+  )
+  return members.length > 0 && members.every(account => isSelected(account.id))
+}))
+const visibleSelectedCount = computed(() => {
+  const visibleIDs = new Set<number>()
+  for (const row of accountListRows.value) {
+    if (row.kind === 'account') {
+      if (isSelected(row.account.id)) visibleIDs.add(row.account.id)
+      continue
+    }
+    const members = completeBatchMembersForSelection(
+      row.batch.id,
+      row.batch.matched_count,
+      completeImportBatchAccounts.value.get(row.batch.id)
+    )
+    for (const account of members) if (isSelected(account.id)) visibleIDs.add(account.id)
+  }
+  return visibleIDs.size
+})
 const someVisibleSelected = computed(() => visibleSelectedCount.value > 0 && !allVisibleSelected.value)
 const hiddenSelectedCount = computed(() => selIds.value.length - visibleSelectedCount.value)
-const togglePageSelection = () => {
-  if (!pageBatchLoading.value) toggleVisible(!allVisibleSelected.value)
+const loadCurrentPageAccounts = async () => {
+  const pageAccounts = new Map<number, Account>()
+  for (const row of accountListRows.value) {
+    if (row.kind === 'account') {
+      pageAccounts.set(row.account.id, row.account)
+      continue
+    }
+    for (const account of await loadCompleteImportBatch(row.batch.id)) pageAccounts.set(account.id, account)
+  }
+  return [...pageAccounts.values()]
 }
-const isImportBatchSelected = (batch: ImportBatchRow) => (
-  batch.accounts.length === batch.matchedCount && batch.accounts.length > 0 && batch.accounts.every(account => isSelected(account.id))
-)
+const setCurrentPageSelected = async (checked: boolean) => {
+  const pageAccounts = await loadCurrentPageAccounts()
+  batchUpdate(selected => {
+    for (const account of pageAccounts) checked ? selected.add(account.id) : selected.delete(account.id)
+  })
+}
+const togglePageSelection = async () => {
+  if (pageBatchLoading.value) return
+  try {
+    await setCurrentPageSelected(!allVisibleSelected.value)
+  } catch (error) {
+    if (error !== staleImportBatchRequest) appStore.showError(extractApiErrorMessage(error, t('common.error')))
+  }
+}
+const isImportBatchSelected = (batch: ImportBatchRow) => {
+  const members = completeBatchMembersForSelection(batch.batchID, batch.matchedCount, batch.accounts)
+  return members.length > 0 && members.every(account => isSelected(account.id))
+}
 const isImportBatchPartiallySelected = (batch: ImportBatchRow) => {
-  const selectedCount = batch.accounts.filter(account => isSelected(account.id)).length
-  return selectedCount > 0 && selectedCount < batch.accounts.length
+  const members = completeBatchMembersForSelection(batch.batchID, batch.matchedCount, batch.accounts)
+  const selectedCount = members.filter(account => isSelected(account.id)).length
+  return selectedCount > 0 && selectedCount < members.length
 }
 const toggleImportBatchSelection = async (batch: ImportBatchRow, checked: boolean) => {
   try {
@@ -1667,16 +1708,17 @@ const load = async () => {
   await refreshTodayStatsBatch()
 }
 
-const reload = async () => {
-  invalidateImportBatchCache()
+const reload = async (resetPage = true) => {
+  invalidateImportBatchCache(true)
   markUpstreamBillingSortRefresh()
   syncAccountListDerivedParams()
   hasPendingListSync.value = false
   resetAutoRefreshCache()
   pendingTodayStatsRefresh.value = false
-  await baseReload()
+  await (resetPage ? baseReload() : baseLoad())
   await refreshTodayStatsBatch()
 }
+const refreshCurrentPage = () => reload(false)
 
 const handleAccountCreated = async (accounts: Array<Pick<Account, 'id' | 'name'>> = []) => {
   await reload()
@@ -1692,7 +1734,7 @@ const refreshUpstreamBillingSortedList = async (force = false) => {
   if (!force && lastUpstreamBillingSortRefreshMinute === minute) return
   lastUpstreamBillingSortRefreshMinute = minute
   try {
-    await reload()
+    await refreshCurrentPage()
   } catch (error) {
     console.error('Failed to refresh upstream billing sort:', error)
   }
@@ -1849,17 +1891,32 @@ const refreshAccountsIncrementally = async () => {
         sort_order?: AccountSortOrder
       }
     )
-    if (revision !== autoRefreshRequestRevision) return
+    if (revision !== autoRefreshRequestRevision || pageBatchLoading.value) return
     for (const row of result.items) {
       if (row.kind === 'account') syncAccountRefs(row.account)
     }
-    invalidateImportBatchCache()
+    const nextBatchIDs = new Set(result.items
+      .filter((row): row is Extract<AccountListRow, { kind: 'import_batch' }> => row.kind === 'import_batch')
+      .map(row => row.batch.id))
+    const expandedBatchIDs = [...expandedImportBatches.value].filter(id => nextBatchIDs.has(id))
+    importBatchFilterRevision++
+    completeImportBatchAccounts.value = new Map(
+      [...completeImportBatchAccounts.value].filter(([id]) => nextBatchIDs.has(id) && !expandedBatchIDs.includes(id))
+    )
     accountListRows.value = result.items || []
     pagination.total = result.total || 0
     pagination.pages = result.pages || 0
     hasPendingListSync.value = false
     markUpstreamBillingSortRefresh()
     upstreamBillingNow.value = Date.now()
+
+    await Promise.all(expandedBatchIDs.map(async id => {
+      try {
+        await loadCompleteImportBatch(id)
+      } catch (error) {
+        if (error !== staleImportBatchRequest) console.error('Failed to refresh expanded import batch:', error)
+      }
+    }))
 
     await refreshTodayStatsBatch()
   } catch (error) {
@@ -1959,7 +2016,7 @@ const { pause: pauseAutoRefresh, resume: resumeAutoRefresh } = useIntervalFn(
   async () => {
     if (!autoRefreshEnabled.value) return
     if (document.hidden) return
-    if (loading.value || autoRefreshFetching.value) return
+    if (loading.value || autoRefreshFetching.value || pageBatchLoading.value) return
     if (isAnyModalOpen.value) return
     if (menu.show || showAccountToolsDropdown.value || showAutoRefreshDropdown.value) return
     if (inAutoRefreshSilentWindow()) {
@@ -2447,10 +2504,14 @@ const openMenu = (a: Account, e: MouseEvent) => {
 
   menu.show = true
 }
-const toggleSelectAllVisible = (event: Event) => {
+const toggleSelectAllVisible = async (event: Event) => {
   if (pageBatchLoading.value) return
   const target = event.target as HTMLInputElement
-  toggleVisible(target.checked)
+  try {
+    await setCurrentPageSelected(target.checked)
+  } catch (error) {
+    if (error !== staleImportBatchRequest) appStore.showError(extractApiErrorMessage(error, t('common.error')))
+  }
 }
 const bulkActionInProgress = ref(false)
 const handleBulkDelete = async () => {
@@ -2513,7 +2574,7 @@ const handleBulkResetStatus = async () => {
       appStore.showSuccess(t('admin.accounts.bulkActions.resetStatusSuccess', { count: result.success }))
       clearSelection()
     }
-    await reload()
+    await refreshCurrentPage()
   } catch (error) {
     console.error('Failed to bulk reset status:', error)
     appStore.showError(String(error))
@@ -2536,7 +2597,7 @@ const handleBulkRefreshToken = async () => {
       appStore.showSuccess(t('admin.accounts.bulkActions.refreshTokenSuccess', { count: result.success }))
       clearSelection()
     }
-    await reload()
+    await refreshCurrentPage()
   } catch (error) {
     console.error('Failed to bulk refresh token:', error)
     appStore.showError(String(error))
@@ -2559,14 +2620,7 @@ const handleBulkProbeUpstreamBilling = async () => {
   accountIDs.forEach(id => probingUpstreamBilling.add(id))
   try {
     const results = await adminAPI.accounts.probeUpstreamBillingBatch(accountIDs)
-    let patched = false
-    results.forEach(result => {
-      if (result.snapshot) {
-        patchUpstreamBillingSnapshot(result.account_id, result.snapshot)
-        patched = true
-      }
-    })
-    if (patched) await refreshUpstreamBillingSortedList(true)
+    if (results.some(result => result.snapshot)) await refreshCurrentPage()
     const failed = results.filter(result => result.error).length
     if (failed > 0) {
       appStore.showError(t('admin.accounts.upstreamBilling.batchPartial', { success: results.length - failed, failed }))
@@ -2580,11 +2634,6 @@ const handleBulkProbeUpstreamBilling = async () => {
     accountIDs.forEach(id => probingUpstreamBilling.delete(id))
     bulkActionInProgress.value = false
   }
-}
-const updateSchedulableInList = (accountIds: number[], schedulable: boolean) => {
-  if (accountIds.length === 0) return
-  const idSet = new Set(accountIds)
-  accounts.value = accounts.value.map((account) => (idSet.has(account.id) ? { ...account, schedulable } : account))
 }
 const normalizeBulkSchedulableResult = (
   result: {
@@ -2653,17 +2702,12 @@ const handleBulkToggleSchedulable = async (schedulable: boolean) => {
   bulkActionInProgress.value = true
   try {
     const result = await adminAPI.accounts.bulkUpdate(accountIds, { schedulable })
-    const { successIds, failedIds, successCount, failedCount, hasIds, hasCounts } = normalizeBulkSchedulableResult(result, accountIds)
+    const { failedIds, successCount, failedCount, hasIds, hasCounts } = normalizeBulkSchedulableResult(result, accountIds)
     if (!hasIds && !hasCounts) {
       appStore.showError(t('admin.accounts.bulkSchedulableResultUnknown'))
       setSelectedIds(accountIds)
-      load().catch((error) => {
-        console.error('Failed to refresh accounts:', error)
-      })
+      await refreshCurrentPage()
       return
-    }
-    if (successIds.length > 0) {
-      updateSchedulableInList(successIds, schedulable)
     }
     if (successCount > 0 && failedCount === 0) {
       const message = schedulable
@@ -2681,6 +2725,7 @@ const handleBulkToggleSchedulable = async (schedulable: boolean) => {
       if (hasIds) clearSelection()
       else setSelectedIds(accountIds)
     }
+    await refreshCurrentPage()
   } catch (error) {
     console.error('Failed to bulk toggle schedulable:', error)
     appStore.showError(t('common.error'))
@@ -2758,15 +2803,13 @@ const handleBulkUpdated = (failedIDs: number[] = []) => {
   showBulkEdit.value = false
   bulkEditTarget.value = null
   setSelectedIds(failedIDs)
-  void reload()
+  void refreshCurrentPage()
 }
 const handleDataImported = (importedAccounts: Array<{ id: number; name: string }>) => {
   showImportData.value = false
   void reload()
   if (embedded) emit('pool-imported', importedAccounts)
 }
-const ACCOUNT_UNGROUPED_GROUP_QUERY_VALUE = 'ungrouped'
-const ACCOUNT_PRIVACY_MODE_UNSET_QUERY_VALUE = '__unset__'
 const buildAccountQueryFilters = () => ({
   platform: params.platform || '',
   type: params.type || '',
@@ -2778,120 +2821,13 @@ const buildAccountQueryFilters = () => ({
   sort_by: sortState.sort_by,
   sort_order: sortState.sort_order
 })
-const accountMatchesCurrentFilters = (account: Account) => {
-  const filters = buildAccountQueryFilters()
-  if (filters.platform && account.platform !== filters.platform) return false
-  if (filters.type && account.type !== filters.type) return false
-  if (filters.status) {
-    const now = Date.now()
-    const rateLimitResetAt = account.rate_limit_reset_at ? new Date(account.rate_limit_reset_at).getTime() : Number.NaN
-    const isRateLimited = Number.isFinite(rateLimitResetAt) && rateLimitResetAt > now
-    const tempUnschedUntil = account.temp_unschedulable_until ? new Date(account.temp_unschedulable_until).getTime() : Number.NaN
-    const isTempUnschedulable = Number.isFinite(tempUnschedUntil) && tempUnschedUntil > now
-
-    if (filters.status === 'active') {
-      if (account.status !== 'active' || isRateLimited || isTempUnschedulable || !account.schedulable) return false
-    } else if (filters.status === 'rate_limited') {
-      if (account.status !== 'active' || !isRateLimited || isTempUnschedulable) return false
-    } else if (filters.status === 'temp_unschedulable') {
-      if (account.status !== 'active' || !isTempUnschedulable) return false
-    } else if (filters.status === 'unschedulable') {
-      if (account.status !== 'active' || account.schedulable || isRateLimited || isTempUnschedulable) return false
-    } else if (account.status !== filters.status) {
-      return false
-    }
-  }
-  if (filters.group) {
-    const groupIds = account.group_ids ?? account.groups?.map((group) => group.id) ?? []
-    if (filters.group === ACCOUNT_UNGROUPED_GROUP_QUERY_VALUE) {
-      if (groupIds.length > 0) return false
-    } else if (!groupIds.includes(Number(filters.group))) {
-      return false
-    }
-  }
-  const privacyMode = typeof account.extra?.privacy_mode === 'string' ? account.extra.privacy_mode : ''
-  if (filters.privacy_mode) {
-    if (filters.privacy_mode === ACCOUNT_PRIVACY_MODE_UNSET_QUERY_VALUE) {
-      if (privacyMode.trim() !== '') return false
-    } else if (privacyMode !== filters.privacy_mode) {
-      return false
-    }
-  }
-  if (filters.uploader_user_id === 'unassigned') {
-    if (account.created_by_user_id != null) return false
-  } else if (filters.uploader_user_id && account.created_by_user_id !== Number(filters.uploader_user_id)) {
-    return false
-  }
-  const search = String(filters.search || '').trim().toLowerCase()
-  if (search && !account.name.toLowerCase().includes(search)) return false
-  return true
-}
-const mergeRuntimeFields = (oldAccount: Account, updatedAccount: Account): Account => ({
-  ...updatedAccount,
-  current_concurrency: updatedAccount.current_concurrency ?? oldAccount.current_concurrency,
-  current_window_cost: updatedAccount.current_window_cost ?? oldAccount.current_window_cost,
-  active_sessions: updatedAccount.active_sessions ?? oldAccount.active_sessions,
-  uploader_email: updatedAccount.uploader_email ?? oldAccount.uploader_email,
-  uploader_username: updatedAccount.uploader_username ?? oldAccount.uploader_username,
-  expected_token_count: updatedAccount.expected_token_count ?? oldAccount.expected_token_count,
-  pool_total_usage_tokens: updatedAccount.pool_total_usage_tokens ?? oldAccount.pool_total_usage_tokens,
-  pool_net_cost_minor: updatedAccount.pool_net_cost_minor ?? oldAccount.pool_net_cost_minor,
-  pool_remaining_cost_minor: updatedAccount.pool_remaining_cost_minor ?? oldAccount.pool_remaining_cost_minor,
-  pool_cost_progress: updatedAccount.pool_cost_progress ?? oldAccount.pool_cost_progress,
-  pool_lifecycle_status: updatedAccount.pool_lifecycle_status ?? oldAccount.pool_lifecycle_status
-})
-
-const syncPaginationAfterLocalRemoval = () => {
-  const nextTotal = Math.max(0, pagination.total - 1)
-  pagination.total = nextTotal
-  pagination.pages = nextTotal > 0 ? Math.ceil(nextTotal / pagination.page_size) : 0
-
-  const maxPage = Math.max(1, pagination.pages || 1)
-
-  if (pagination.page > maxPage) {
-    pagination.page = maxPage
-  }
-  // 行被本地移除后不立刻全量补页，改为提示用户手动同步。
-  hasPendingListSync.value = nextTotal > 0
-}
-
-const patchAccountInList = (updatedAccount: Account) => {
-  const index = accounts.value.findIndex(account => account.id === updatedAccount.id)
-  if (index === -1) return
-  const mergedAccount = mergeRuntimeFields(accounts.value[index], updatedAccount)
-  if (!accountMatchesCurrentFilters(mergedAccount)) {
-    accounts.value = accounts.value.filter(account => account.id !== mergedAccount.id)
-    syncPaginationAfterLocalRemoval()
-    removeSelectedAccounts([mergedAccount.id])
-    if (menu.acc?.id === mergedAccount.id) {
-      menu.show = false
-      menu.acc = null
-    }
-    return
-  }
-  const nextAccounts = [...accounts.value]
-  nextAccounts[index] = mergedAccount
-  accounts.value = nextAccounts
-  syncAccountRefs(mergedAccount)
-}
-const patchUpstreamBillingSnapshot = (accountID: number, snapshot: UpstreamBillingProbeSnapshot) => {
-  const account = accounts.value.find(item => item.id === accountID)
-  if (!account) return
-  markUpstreamBillingSortRefresh()
-  upstreamBillingNow.value = Date.now()
-  patchAccountInList({
-    ...account,
-    extra: { ...account.extra, upstream_billing_probe: snapshot }
-  })
-}
 const handleProbeUpstreamBilling = async (account: Account) => {
   if (probingUpstreamBilling.has(account.id)) return
   probingUpstreamBilling.add(account.id)
   try {
     const result = await adminAPI.accounts.probeUpstreamBilling(account.id)
     if (result.snapshot) {
-      patchUpstreamBillingSnapshot(account.id, result.snapshot)
-      await refreshUpstreamBillingSortedList(true)
+      await refreshCurrentPage()
     }
   } catch (error) {
     console.error('Failed to probe upstream billing:', error)
@@ -2900,8 +2836,8 @@ const handleProbeUpstreamBilling = async (account: Account) => {
     probingUpstreamBilling.delete(account.id)
   }
 }
-const handleAccountUpdated = (updatedAccount: Account) => {
-  patchAccountInList(updatedAccount)
+const handleAccountUpdated = async () => {
+  await refreshCurrentPage()
   enterAutoRefreshSilentWindow()
 }
 const formatExportTimestamp = () => {
@@ -2984,7 +2920,7 @@ const handleDuplicateAccount = async (a: Account) => {
   try {
     const duplicate = await adminAPI.accounts.duplicate(a.id)
     appStore.showSuccess(t('admin.accounts.duplicateSuccess', { name: duplicate.name }))
-    await reload()
+    await refreshCurrentPage()
     emit('pool-record', duplicate)
   } catch (error: any) {
     console.error('Failed to duplicate account:', error)
@@ -2995,8 +2931,8 @@ const handleDuplicateAccount = async (a: Account) => {
 }
 const handleRefresh = async (a: Account) => {
   try {
-    const updated = await adminAPI.accounts.refreshCredentials(a.id)
-    patchAccountInList(updated)
+    await adminAPI.accounts.refreshCredentials(a.id)
+    await refreshCurrentPage()
     enterAutoRefreshSilentWindow()
   } catch (error) {
     console.error('Failed to refresh credentials:', error)
@@ -3004,8 +2940,8 @@ const handleRefresh = async (a: Account) => {
 }
 const handleRecoverState = async (a: Account) => {
   try {
-    const updated = await adminAPI.accounts.recoverState(a.id)
-    patchAccountInList(updated)
+    await adminAPI.accounts.recoverState(a.id)
+    await refreshCurrentPage()
     enterAutoRefreshSilentWindow()
     appStore.showSuccess(t('admin.accounts.recoverStateSuccess'))
   } catch (error: any) {
@@ -3015,8 +2951,8 @@ const handleRecoverState = async (a: Account) => {
 }
 const handleResetQuota = async (a: Account) => {
   try {
-    const updated = await adminAPI.accounts.resetAccountQuota(a.id)
-    patchAccountInList(updated)
+    await adminAPI.accounts.resetAccountQuota(a.id)
+    await refreshCurrentPage()
     enterAutoRefreshSilentWindow()
     appStore.showSuccess(t('common.success'))
   } catch (error) {
@@ -3048,7 +2984,7 @@ const privacyResultMessageKey = (account: Account): { type: 'success' | 'error';
 const handleSetPrivacy = async (a: Account) => {
   try {
     const updated = await adminAPI.accounts.setPrivacy(a.id)
-    patchAccountInList(updated)
+    await refreshCurrentPage()
     enterAutoRefreshSilentWindow()
     const result = privacyResultMessageKey(updated)
     if (result.type === 'success') {
@@ -3065,7 +3001,7 @@ const onRevertFallback = async (a: Account) => {
   try {
     await adminAPI.accounts.revertProxyFallback(a.id)
     appStore.showSuccess(t('admin.accounts.revertProxySuccess'))
-    reload()
+    void refreshCurrentPage()
   } catch (error: any) {
     console.error('Failed to revert proxy fallback:', error)
     appStore.showError(error?.response?.data?.message || t('admin.accounts.revertProxyFailed'))
@@ -3083,7 +3019,7 @@ const confirmCreateSparkShadow = async () => {
     showCreateShadowDialog.value = false
     creatingShadowAcc.value = null
     appStore.showSuccess(t('admin.accounts.createSparkShadowSuccess'))
-    reload()
+    void refreshCurrentPage()
   } catch (error: any) {
     console.error('Failed to create spark shadow:', error)
     appStore.showError(error?.response?.data?.message || t('admin.accounts.createSparkShadowFailed'))
@@ -3119,8 +3055,8 @@ const handleToggleSchedulable = async (a: Account) => {
   const nextSchedulable = !a.schedulable
   togglingSchedulable.value = a.id
   try {
-    const updated = await adminAPI.accounts.setSchedulable(a.id, nextSchedulable)
-    updateSchedulableInList([a.id], updated?.schedulable ?? nextSchedulable)
+    await adminAPI.accounts.setSchedulable(a.id, nextSchedulable)
+    await refreshCurrentPage()
     enterAutoRefreshSilentWindow()
   } catch (error) {
     console.error('Failed to toggle schedulable:', error)
@@ -3130,10 +3066,10 @@ const handleToggleSchedulable = async (a: Account) => {
   }
 }
 const handleShowTempUnsched = (a: Account) => { tempUnschedAcc.value = a; showTempUnsched.value = true }
-const handleTempUnschedReset = async (updated: Account) => {
+const handleTempUnschedReset = async () => {
   showTempUnsched.value = false
   tempUnschedAcc.value = null
-  patchAccountInList(updated)
+  await refreshCurrentPage()
   enterAutoRefreshSilentWindow()
 }
 const formatExpiresAt = (value: number | null) => {

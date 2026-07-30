@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -23,6 +24,10 @@ func TestDeleteAccountWithLifecycleHardDeletesFamily(t *testing.T) {
 	mock.ExpectQuery(`SELECT id\s+FROM accounts`).WithArgs(int64(7)).WillReturnRows(
 		sqlmock.NewRows([]string{"id"}).AddRow(int64(8)).AddRow(int64(7)),
 	)
+	mock.ExpectExec(`(?s)DELETE FROM ops_retry_attempts.*pinned_account_id.*used_account_id.*source_error_id.*result_error_id.*result_usage_request_id`).
+		WillReturnResult(sqlmock.NewResult(0, 4))
+	mock.ExpectQuery(`SELECT MIN\(created_at\),MAX\(created_at\) FROM usage_logs`).
+		WillReturnRows(sqlmock.NewRows([]string{"min", "max"}).AddRow(nil, nil))
 	for _, query := range []string{
 		`DELETE FROM pool_settlements`,
 		`DELETE FROM batch_image_jobs`,
@@ -55,6 +60,9 @@ func TestDeleteAccountWithLifecycleRollsBackWhenCleanupFails(t *testing.T) {
 	mock.ExpectQuery(`SELECT id\s+FROM accounts`).WithArgs(int64(7)).WillReturnRows(
 		sqlmock.NewRows([]string{"id"}).AddRow(int64(7)),
 	)
+	mock.ExpectExec(`DELETE FROM ops_retry_attempts`).WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectQuery(`SELECT MIN\(created_at\),MAX\(created_at\) FROM usage_logs`).
+		WillReturnRows(sqlmock.NewRows([]string{"min", "max"}).AddRow(nil, nil))
 	mock.ExpectExec(`DELETE FROM pool_settlements`).WillReturnError(context.Canceled)
 	mock.ExpectRollback()
 
@@ -71,5 +79,44 @@ func TestDeleteAccountWithLifecycleReturnsNotFound(t *testing.T) {
 
 	_, err := repo.DeleteAccountWithLifecycle(context.Background(), 99, service.AccountDeleteOptions{})
 	require.ErrorIs(t, err, service.ErrAccountNotFound)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestHardDeleteAccountUsageRecomputesDashboardAggregates(t *testing.T) {
+	repo, mock := newAccountLifecycleDeleteTestRepo(t)
+	start := time.Date(2026, 7, 30, 8, 15, 0, 0, time.UTC)
+	end := start.Add(2 * time.Hour)
+	mock.ExpectQuery(`SELECT MIN\(created_at\),MAX\(created_at\) FROM usage_logs`).
+		WithArgs(sqlmock.AnyArg()).
+		WillReturnRows(sqlmock.NewRows([]string{"min", "max"}).AddRow(start, end))
+	mock.ExpectExec(`DELETE FROM usage_logs WHERE account_id=ANY`).
+		WithArgs(sqlmock.AnyArg()).WillReturnResult(sqlmock.NewResult(0, 2))
+	mock.ExpectBegin()
+	for _, query := range []string{
+		`DELETE FROM usage_dashboard_hourly WHERE`,
+		`DELETE FROM usage_dashboard_hourly_users WHERE`,
+		`DELETE FROM usage_dashboard_daily WHERE`,
+		`DELETE FROM usage_dashboard_daily_users WHERE`,
+		`INSERT INTO usage_dashboard_hourly_users`,
+		`INSERT INTO usage_dashboard_daily_users`,
+		`INSERT INTO usage_dashboard_hourly`,
+		`INSERT INTO usage_dashboard_daily`,
+	} {
+		mock.ExpectExec(query).WillReturnResult(sqlmock.NewResult(0, 1))
+	}
+	mock.ExpectCommit()
+
+	err := hardDeleteAccountUsage(context.Background(), repo.sql, []int64{7, 8})
+	require.NoError(t, err)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestHardDeleteAccountUsageDoesNotDeleteWithoutLogs(t *testing.T) {
+	repo, mock := newAccountLifecycleDeleteTestRepo(t)
+	mock.ExpectQuery(`SELECT MIN\(created_at\),MAX\(created_at\) FROM usage_logs`).
+		WillReturnRows(sqlmock.NewRows([]string{"min", "max"}).AddRow(nil, nil))
+
+	err := hardDeleteAccountUsage(context.Background(), repo.sql, []int64{7})
+	require.NoError(t, err)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
