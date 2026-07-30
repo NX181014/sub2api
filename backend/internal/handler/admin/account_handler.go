@@ -222,13 +222,14 @@ type BulkUpdateAccountsRequest struct {
 }
 
 type BulkUpdateAccountFilters struct {
-	Platform       string `json:"platform"`
-	Type           string `json:"type"`
-	Status         string `json:"status"`
-	Group          string `json:"group"`
-	Search         string `json:"search"`
-	PrivacyMode    string `json:"privacy_mode"`
-	UploaderUserID int64  `json:"uploader_user_id"`
+	Platform           string `json:"platform"`
+	Type               string `json:"type"`
+	Status             string `json:"status"`
+	Group              string `json:"group"`
+	Search             string `json:"search"`
+	PrivacyMode        string `json:"privacy_mode"`
+	UploaderUserID     int64  `json:"uploader_user_id"`
+	UploaderUnassigned bool   `json:"uploader_unassigned"`
 }
 
 // CheckMixedChannelRequest represents check mixed channel risk request
@@ -256,6 +257,93 @@ type accountUploaderListService interface {
 
 type accountPoolMetricsListService interface {
 	ListAccountsWithPoolMetrics(ctx context.Context, page, pageSize int, platform, accountType, status, search string, groupID int64, privacyMode string, sortBy, sortOrder string) ([]service.Account, int64, error)
+}
+
+type accountSelectionListService interface {
+	ListAccountsBySelection(ctx context.Context, page, pageSize int, filters service.AccountSelectionFilters, includePoolMetrics bool, sortBy, sortOrder string) ([]service.Account, int64, error)
+}
+
+type accountSelectionSummaryService interface {
+	GetAccountSelectionSummary(ctx context.Context, filters service.AccountSelectionFilters) (*service.AccountSelectionSummary, error)
+}
+
+type accountFilterQuery struct {
+	service.AccountSelectionFilters
+	SortBy    string
+	SortOrder string
+}
+
+func parseAccountFilterQuery(c *gin.Context) (accountFilterQuery, error) {
+	filters := accountFilterQuery{
+		AccountSelectionFilters: service.AccountSelectionFilters{
+			Platform:      c.Query("platform"),
+			Type:          c.Query("type"),
+			Status:        c.Query("status"),
+			Search:        strings.TrimSpace(c.Query("search")),
+			PrivacyMode:   strings.TrimSpace(c.Query("privacy_mode")),
+			ImportBatchID: strings.TrimSpace(c.Query("import_batch_id")),
+		},
+		SortBy:    c.DefaultQuery("sort_by", "name"),
+		SortOrder: c.DefaultQuery("sort_order", "asc"),
+	}
+	if len(filters.Search) > 100 {
+		filters.Search = filters.Search[:100]
+	}
+	if raw := strings.TrimSpace(c.Query("uploader_user_id")); raw != "" {
+		if raw == "unassigned" {
+			filters.UploaderUnassigned = true
+		} else {
+			parsed, err := strconv.ParseInt(raw, 10, 64)
+			if err != nil || parsed <= 0 {
+				return accountFilterQuery{}, infraerrors.BadRequest("INVALID_UPLOADER_FILTER", "invalid uploader filter")
+			}
+			filters.UploaderUserID = parsed
+		}
+	}
+	if raw := c.Query("group"); raw != "" {
+		if raw == accountListGroupUngroupedQueryValue {
+			filters.GroupID = service.AccountListGroupUngrouped
+		} else {
+			parsed, err := strconv.ParseInt(raw, 10, 64)
+			if err != nil || parsed < 0 {
+				return accountFilterQuery{}, infraerrors.BadRequest("INVALID_GROUP_FILTER", "invalid group filter")
+			}
+			filters.GroupID = parsed
+		}
+	}
+	if filters.ImportBatchID != "" {
+		parsed, err := uuid.Parse(filters.ImportBatchID)
+		if err != nil || parsed == uuid.Nil {
+			return accountFilterQuery{}, infraerrors.BadRequest("INVALID_IMPORT_BATCH_FILTER", "invalid import batch filter")
+		}
+		filters.ImportBatchID = parsed.String()
+	}
+	return filters, nil
+}
+
+func (h *AccountHandler) listAccountPage(ctx context.Context, page, pageSize int, filters accountFilterQuery, includePoolMetrics bool) ([]service.Account, int64, error) {
+	if filters.ImportBatchID != "" || filters.UploaderUnassigned {
+		selectionService, ok := h.adminService.(accountSelectionListService)
+		if !ok {
+			return nil, 0, infraerrors.InternalServer("ACCOUNT_SELECTION_FILTER_UNAVAILABLE", "account selection filter is unavailable")
+		}
+		return selectionService.ListAccountsBySelection(ctx, page, pageSize, filters.AccountSelectionFilters, includePoolMetrics, filters.SortBy, filters.SortOrder)
+	}
+	if filters.UploaderUserID > 0 {
+		filteredService, ok := h.adminService.(accountUploaderListService)
+		if !ok {
+			return nil, 0, infraerrors.InternalServer("ACCOUNT_UPLOADER_FILTER_UNAVAILABLE", "account uploader filter is unavailable")
+		}
+		return filteredService.ListAccountsByUploader(ctx, page, pageSize, filters.Platform, filters.Type, filters.Status, filters.Search, filters.GroupID, filters.PrivacyMode, filters.UploaderUserID, includePoolMetrics, filters.SortBy, filters.SortOrder)
+	}
+	if includePoolMetrics {
+		metricsService, ok := h.adminService.(accountPoolMetricsListService)
+		if !ok {
+			return nil, 0, infraerrors.InternalServer("ACCOUNT_POOL_METRICS_UNAVAILABLE", "account pool metrics are unavailable")
+		}
+		return metricsService.ListAccountsWithPoolMetrics(ctx, page, pageSize, filters.Platform, filters.Type, filters.Status, filters.Search, filters.GroupID, filters.PrivacyMode, filters.SortBy, filters.SortOrder)
+	}
+	return h.adminService.ListAccounts(ctx, page, pageSize, filters.Platform, filters.Type, filters.Status, filters.Search, filters.GroupID, filters.PrivacyMode, filters.SortBy, filters.SortOrder)
 }
 
 // accountApprovalAcceptedResponse remains Account-shaped for legacy ReAuth
@@ -566,72 +654,18 @@ func (h *AccountHandler) listAccountSchedulerScoreFilterPool(
 // GET /api/v1/admin/accounts
 func (h *AccountHandler) List(c *gin.Context) {
 	page, pageSize := response.ParsePagination(c)
-	platform := c.Query("platform")
-	accountType := c.Query("type")
-	status := c.Query("status")
-	search := c.Query("search")
-	privacyMode := strings.TrimSpace(c.Query("privacy_mode"))
-	sortBy := c.DefaultQuery("sort_by", "name")
-	sortOrder := c.DefaultQuery("sort_order", "asc")
-	// 标准化和验证 search 参数
-	search = strings.TrimSpace(search)
-	if len(search) > 100 {
-		search = search[:100]
+	filters, filterErr := parseAccountFilterQuery(c)
+	if filterErr != nil {
+		response.ErrorFrom(c, filterErr)
+		return
 	}
+	platform, accountType, status, search := filters.Platform, filters.Type, filters.Status, filters.Search
+	privacyMode, groupID, uploaderUserID := filters.PrivacyMode, filters.GroupID, filters.UploaderUserID
 	lite := parseBoolQueryWithDefault(c.Query("lite"), false)
 	// 调度分需要跨候选池批量打分并读取负载，默认列表不计算；只有前端列可见时才显式开启。
 	includeSchedulerScore := parseBoolQueryWithDefault(c.Query("include_scheduler_score"), false)
 	includePoolMetrics := parseBoolQueryWithDefault(c.Query("include_pool_metrics"), false)
-	var uploaderUserID int64
-	if raw := strings.TrimSpace(c.Query("uploader_user_id")); raw != "" {
-		parsed, err := strconv.ParseInt(raw, 10, 64)
-		if err != nil || parsed <= 0 {
-			response.ErrorFrom(c, infraerrors.BadRequest("INVALID_UPLOADER_FILTER", "invalid uploader filter"))
-			return
-		}
-		uploaderUserID = parsed
-	}
-
-	var groupID int64
-	if groupIDStr := c.Query("group"); groupIDStr != "" {
-		if groupIDStr == accountListGroupUngroupedQueryValue {
-			groupID = service.AccountListGroupUngrouped
-		} else {
-			parsedGroupID, parseErr := strconv.ParseInt(groupIDStr, 10, 64)
-			if parseErr != nil {
-				response.ErrorFrom(c, infraerrors.BadRequest("INVALID_GROUP_FILTER", "invalid group filter"))
-				return
-			}
-			if parsedGroupID < 0 {
-				response.ErrorFrom(c, infraerrors.BadRequest("INVALID_GROUP_FILTER", "invalid group filter"))
-				return
-			}
-			groupID = parsedGroupID
-		}
-	}
-
-	var (
-		accounts []service.Account
-		total    int64
-		err      error
-	)
-	if uploaderUserID > 0 {
-		filteredService, ok := h.adminService.(accountUploaderListService)
-		if !ok {
-			response.ErrorFrom(c, infraerrors.InternalServer("ACCOUNT_UPLOADER_FILTER_UNAVAILABLE", "account uploader filter is unavailable"))
-			return
-		}
-		accounts, total, err = filteredService.ListAccountsByUploader(c.Request.Context(), page, pageSize, platform, accountType, status, search, groupID, privacyMode, uploaderUserID, includePoolMetrics, sortBy, sortOrder)
-	} else if includePoolMetrics {
-		metricsService, ok := h.adminService.(accountPoolMetricsListService)
-		if !ok {
-			response.ErrorFrom(c, infraerrors.InternalServer("ACCOUNT_POOL_METRICS_UNAVAILABLE", "account pool metrics are unavailable"))
-			return
-		}
-		accounts, total, err = metricsService.ListAccountsWithPoolMetrics(c.Request.Context(), page, pageSize, platform, accountType, status, search, groupID, privacyMode, sortBy, sortOrder)
-	} else {
-		accounts, total, err = h.adminService.ListAccounts(c.Request.Context(), page, pageSize, platform, accountType, status, search, groupID, privacyMode, sortBy, sortOrder)
-	}
+	accounts, total, err := h.listAccountPage(c.Request.Context(), page, pageSize, filters, includePoolMetrics)
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
@@ -673,6 +707,24 @@ func (h *AccountHandler) List(c *gin.Context) {
 			filteredPool := schedulerFilterPool[:0]
 			for i := range schedulerFilterPool {
 				if schedulerFilterPool[i].CreatedByUserID != nil && *schedulerFilterPool[i].CreatedByUserID == uploaderUserID {
+					filteredPool = append(filteredPool, schedulerFilterPool[i])
+				}
+			}
+			schedulerFilterPool = filteredPool
+		}
+		if filters.UploaderUnassigned {
+			filteredPool := schedulerFilterPool[:0]
+			for i := range schedulerFilterPool {
+				if schedulerFilterPool[i].CreatedByUserID == nil {
+					filteredPool = append(filteredPool, schedulerFilterPool[i])
+				}
+			}
+			schedulerFilterPool = filteredPool
+		}
+		if filters.ImportBatchID != "" {
+			filteredPool := schedulerFilterPool[:0]
+			for i := range schedulerFilterPool {
+				if batchID, _ := schedulerFilterPool[i].Extra["import_batch_id"].(string); batchID == filters.ImportBatchID {
 					filteredPool = append(filteredPool, schedulerFilterPool[i])
 				}
 			}
@@ -801,6 +853,26 @@ func (h *AccountHandler) List(c *gin.Context) {
 	}
 
 	response.Paginated(c, result, total, page, pageSize)
+}
+
+// SelectionSummary returns exact cardinality and compatibility facets for the current filters.
+func (h *AccountHandler) SelectionSummary(c *gin.Context) {
+	filters, err := parseAccountFilterQuery(c)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	summaryService, ok := h.adminService.(accountSelectionSummaryService)
+	if !ok {
+		response.ErrorFrom(c, infraerrors.InternalServer("ACCOUNT_SELECTION_SUMMARY_UNAVAILABLE", "account selection summary is unavailable"))
+		return
+	}
+	summary, err := summaryService.GetAccountSelectionSummary(c.Request.Context(), filters.AccountSelectionFilters)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, summary)
 }
 
 func buildAccountsListETag(
@@ -2294,13 +2366,14 @@ func toServiceBulkUpdateAccountFilters(filters *BulkUpdateAccountFilters) *servi
 		return nil
 	}
 	return &service.BulkUpdateAccountFilters{
-		Platform:       filters.Platform,
-		Type:           filters.Type,
-		Status:         filters.Status,
-		Group:          filters.Group,
-		Search:         filters.Search,
-		PrivacyMode:    filters.PrivacyMode,
-		UploaderUserID: filters.UploaderUserID,
+		Platform:           filters.Platform,
+		Type:               filters.Type,
+		Status:             filters.Status,
+		Group:              filters.Group,
+		Search:             filters.Search,
+		PrivacyMode:        filters.PrivacyMode,
+		UploaderUserID:     filters.UploaderUserID,
+		UploaderUnassigned: filters.UploaderUnassigned,
 	}
 }
 

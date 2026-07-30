@@ -170,7 +170,11 @@ func (h *AccountHandler) importCodexSessions(ctx context.Context, req CodexSessi
 		Items: make([]CodexSessionImportItem, 0, len(entries)),
 	}
 
-	existingAccounts, err := h.listAccountsFiltered(ctx, service.PlatformOpenAI, service.AccountTypeOAuth, "", "", 0, "", "created_at", "desc")
+	existingAccounts, err := h.listAccountsFiltered(ctx, accountFilterQuery{
+		AccountSelectionFilters: service.AccountSelectionFilters{Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth},
+		SortBy:                  "created_at",
+		SortOrder:               "desc",
+	})
 	if err != nil {
 		return result, err
 	}

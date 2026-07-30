@@ -394,7 +394,10 @@ export default {
       bulkSchedulableResultUnknown: 'Bulk scheduling result incomplete. Please retry or refresh.',
       bulkActions: {
         selected: '{count} account(s) selected',
+        filtered: '{count} account(s) in the current filters',
         selectCurrentPage: 'Select this page',
+        clearCurrentPage: 'Clear this page',
+        hiddenSelected: '{count} selected account(s) are on other pages',
         clear: 'Clear selection',
         edit: 'Bulk Edit',
         delete: 'Bulk Delete',
@@ -407,6 +410,8 @@ export default {
         refreshTokenSuccess: 'Successfully refreshed {count} account(s) token',
         partialSuccess: 'Partially completed: {success} succeeded, {failed} failed'
       },
+      clearFilters: 'Clear filters ({count})',
+      unassignedUploader: 'Unassigned uploader',
       bulkEdit: {
         title: 'Bulk Edit Accounts',
         selectionInfo:

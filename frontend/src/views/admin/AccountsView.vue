@@ -4,13 +4,13 @@
       <template #filters>
         <div class="flex flex-wrap-reverse items-start justify-between gap-3">
           <AccountTableFilters
-            v-model:searchQuery="params.search"
+            :search-query="params.search"
             :filters="params"
             :groups="groups"
             :uploaders="uploaderOptions"
-            @update:filters="(newFilters) => Object.assign(params, newFilters)"
-            @change="debouncedReload"
-            @update:searchQuery="debouncedReload"
+            @update:filters="handleFiltersChange"
+            @update:search-query="handleSearchChange"
+            @clear="clearFilters"
           />
           <AccountTableActions
             :loading="loading"
@@ -194,7 +194,14 @@
       </template>
       <template #table>
         <AccountBulkActionsBar
+          v-if="selIds.length > 0 || hasEffectiveFilters"
           :selected-ids="selIds"
+          :filtered-count="pagination.total"
+          :has-active-filters="hasEffectiveFilters"
+          :hidden-selected-count="hiddenSelectedCount"
+          :all-page-selected="allVisibleSelected"
+          :page-selected-count="visibleSelectedCount"
+          :busy="loading || bulkActionInProgress"
           @delete="handleBulkDelete"
           @reset-status="handleBulkResetStatus"
           @refresh-token="handleBulkRefreshToken"
@@ -202,7 +209,7 @@
           @edit-selected="openBulkEditSelected"
           @edit-filtered="openBulkEditFiltered"
           @clear="clearSelection"
-          @select-page="selectPage"
+          @toggle-page="togglePageSelection"
           @toggle-schedulable="handleBulkToggleSchedulable"
         />
         <div ref="accountTableRef" class="flex min-h-0 flex-1 flex-col overflow-hidden">
@@ -227,6 +234,8 @@
               type="checkbox"
               class="h-4 w-4 cursor-pointer rounded border-gray-300 text-primary-600 focus:ring-primary-500"
               :checked="allVisibleSelected"
+              :indeterminate="someVisibleSelected"
+              :aria-label="allVisibleSelected ? t('admin.accounts.bulkActions.clearCurrentPage') : t('admin.accounts.bulkActions.selectCurrentPage')"
               @click.stop
               @change="toggleSelectAllVisible($event)"
             />
@@ -237,6 +246,7 @@
               class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
               :checked="isImportBatchRow(row) ? isImportBatchSelected(row) : isSelected(row.id)"
               :indeterminate="isImportBatchRow(row) && isImportBatchPartiallySelected(row)"
+              :disabled="isImportBatchRow(row) && isImportBatchLoading(row.batchID)"
               :aria-label="isImportBatchRow(row) ? t('admin.accounts.selectImportBatch', { count: row.accounts.length }) : t('common.selectOption')"
               @change="isImportBatchRow(row) ? toggleImportBatchSelection(row, ($event.target as HTMLInputElement).checked) : toggleSel(row.id)"
             />
@@ -252,6 +262,7 @@
               v-if="isImportBatchRow(row)"
               type="button"
               class="flex min-h-11 max-w-80 items-center gap-2 text-left"
+              :disabled="isImportBatchLoading(row.batchID)"
               :aria-expanded="expandedImportBatches.has(row.batchID)"
               @click="toggleImportBatch(row.batchID)"
             >
@@ -294,6 +305,7 @@
               v-if="isImportBatchRow(row)"
               type="button"
               class="flex min-h-11 max-w-64 items-center gap-2 text-left"
+              :disabled="isImportBatchLoading(row.batchID)"
               :aria-expanded="expandedImportBatches.has(row.batchID)"
               @click="toggleImportBatch(row.batchID)"
             >
@@ -506,6 +518,7 @@
               v-if="isImportBatchRow(row)"
               type="button"
               class="btn btn-secondary min-h-11 px-3 text-xs"
+              :disabled="isImportBatchLoading(row.batchID)"
               :aria-expanded="expandedImportBatches.has(row.batchID)"
               @click="toggleImportBatch(row.batchID)"
             >
@@ -870,6 +883,7 @@ type AccountBulkEditTarget =
         search?: string
         privacy_mode?: string
         uploader_user_id?: number
+        uploader_unassigned?: boolean
         sort_by?: string
         sort_order?: AccountSortOrder
       }
@@ -877,18 +891,21 @@ type AccountBulkEditTarget =
       selectedPlatforms: AccountPlatform[]
       selectedTypes: AccountType[]
     }
+const knownAccountsByID = new Map<number, Account>()
 const selPlatforms = computed<AccountPlatform[]>(() => {
   const platforms = new Set(
-    accounts.value
-      .filter(a => isSelected(a.id))
+    selIds.value
+      .map(id => knownAccountsByID.get(id))
+      .filter((account): account is Account => Boolean(account))
       .map(a => a.platform)
   )
   return [...platforms]
 })
 const selTypes = computed<AccountType[]>(() => {
   const types = new Set(
-    accounts.value
-      .filter(a => isSelected(a.id))
+    selIds.value
+      .map(id => knownAccountsByID.get(id))
+      .filter((account): account is Account => Boolean(account))
       .map(a => a.type)
   )
   return [...types]
@@ -1382,7 +1399,7 @@ const importBatchID = (account: Account): string => {
   return typeof value === 'string' ? value : ''
 }
 const accountUploader = (account: Account): string => account.uploader_username || account.uploader_email || '-'
-const importBatchAccountGroups = computed(() => {
+const visibleImportBatchAccountGroups = computed(() => {
   const groups = new Map<string, Account[]>()
   for (const account of accounts.value) {
     const id = importBatchID(account)
@@ -1393,13 +1410,82 @@ const importBatchAccountGroups = computed(() => {
   }
   return groups
 })
-const importBatchGroups = computed(() => [...importBatchAccountGroups.value.entries()].map(([id, items]) => ({
+const completeImportBatchAccounts = ref(new Map<string, Account[]>())
+const importBatchLoads = new Map<string, Promise<Account[]>>()
+const loadingImportBatchKeys = ref(new Set<string>())
+const staleImportBatchRequest = new Error('stale import batch request')
+let importBatchFilterRevision = 0
+const isImportBatchLoading = (id: string) => loadingImportBatchKeys.value.has(`${importBatchFilterRevision}:${id}`)
+const invalidateImportBatchCache = () => {
+  importBatchFilterRevision++
+  completeImportBatchAccounts.value = new Map()
+}
+const buildImportBatchFilters = () => ({
+  platform: String(params.platform || ''),
+  type: String(params.type || ''),
+  status: String(params.status || ''),
+  group: String(params.group || ''),
+  search: String(params.search || ''),
+  privacy_mode: String(params.privacy_mode || ''),
+  uploader_user_id: params.uploader_user_id || undefined,
+  include_pool_metrics: '1',
+  include_scheduler_score: shouldIncludeSchedulerScore() ? '1' : '0',
+  sort_by: String(params.sort_by || ''),
+  sort_order: params.sort_order === 'desc' ? 'desc' as const : 'asc' as const
+})
+const loadCompleteImportBatch = (id: string): Promise<Account[]> => {
+  const cached = completeImportBatchAccounts.value.get(id)
+  if (cached) return Promise.resolve(cached)
+  const revision = importBatchFilterRevision
+  const loadKey = `${revision}:${id}`
+  const active = importBatchLoads.get(loadKey)
+  if (active) return active
+  const filters = buildImportBatchFilters()
+
+  const request = (async () => {
+    const pageSize = 100
+    const members = new Map<number, Account>()
+    let page = 1
+    let pages = 1
+    do {
+      if (revision !== importBatchFilterRevision) throw staleImportBatchRequest
+      const result = await adminAPI.accounts.listImportBatch(id, page, pageSize, filters)
+      if (revision !== importBatchFilterRevision) throw staleImportBatchRequest
+      result.items.forEach(account => {
+        members.set(account.id, account)
+        knownAccountsByID.set(account.id, account)
+      })
+      pages = Math.max(result.pages || Math.ceil(result.total / pageSize), 1)
+      page++
+    } while (page <= pages)
+
+    if (revision !== importBatchFilterRevision) throw staleImportBatchRequest
+    const batchAccounts = [...members.values()]
+    const next = new Map(completeImportBatchAccounts.value)
+    next.set(id, batchAccounts)
+    completeImportBatchAccounts.value = next
+    return batchAccounts
+  })()
+  importBatchLoads.set(loadKey, request)
+  loadingImportBatchKeys.value = new Set(loadingImportBatchKeys.value).add(loadKey)
+  void request.finally(() => {
+    importBatchLoads.delete(loadKey)
+    const next = new Set(loadingImportBatchKeys.value)
+    next.delete(loadKey)
+    loadingImportBatchKeys.value = next
+  }).catch(() => undefined)
+  return request
+}
+const importBatchGroups = computed(() => [...visibleImportBatchAccountGroups.value.entries()].map(([id, visibleItems]) => {
+  const items = completeImportBatchAccounts.value.get(id) || visibleItems
+  return {
     id,
     accounts: items,
     uploader: accountUploader(items[0]!),
     createdAt: items[0]!.created_at,
     names: items.map(item => item.name).join('、')
-  })))
+  }
+}))
 type ImportBatchRow = {
   __rowKind: 'import-batch'
   id: string
@@ -1414,7 +1500,7 @@ const isImportBatchRow = (row: AccountTableRow): row is ImportBatchRow => '__row
 const isImportBatchChild = (row: AccountTableRow): row is Account => {
   if (isImportBatchRow(row)) return false
   const id = importBatchID(row)
-  return Boolean(id && importBatchAccountGroups.value.has(id))
+  return Boolean(id && (visibleImportBatchAccountGroups.value.has(id) || completeImportBatchAccounts.value.has(id)))
 }
 const accountTableRows = computed<AccountTableRow[]>(() => {
   const batchRows = new Map(importBatchGroups.value.map(batch => [batch.id, batch]))
@@ -1443,9 +1529,18 @@ const accountTableRows = computed<AccountTableRow[]>(() => {
   }
   return rows
 })
-const toggleImportBatch = (id: string) => {
+const toggleImportBatch = async (id: string) => {
   const next = new Set(expandedImportBatches.value)
-  next.has(id) ? next.delete(id) : next.add(id)
+  if (next.has(id)) {
+    next.delete(id)
+  } else {
+    try {
+      await loadCompleteImportBatch(id)
+      next.add(id)
+    } catch (error) {
+      if (error !== staleImportBatchRequest) appStore.showError(extractApiErrorMessage(error, t('common.error')))
+    }
+  }
   expandedImportBatches.value = next
 }
 
@@ -1460,19 +1555,38 @@ const {
   clear: clearSelection,
   removeMany: removeSelectedAccounts,
   toggleVisible,
-  selectVisible: selectPage,
   batchUpdate
 } = useTableSelection<Account>({
   rows: accounts,
   getId: (account) => account.id
 })
+watch(accounts, rows => {
+  rows.forEach(account => knownAccountsByID.set(account.id, account))
+  const batchIDs = new Set(rows.map(importBatchID).filter(Boolean))
+  batchIDs.forEach(id => {
+    void loadCompleteImportBatch(id).catch(error => {
+      if (error !== staleImportBatchRequest) console.error('Failed to load complete import batch:', error)
+    })
+  })
+}, { immediate: true })
+const visibleSelectedCount = computed(() => accounts.value.filter(account => isSelected(account.id)).length)
+const someVisibleSelected = computed(() => visibleSelectedCount.value > 0 && !allVisibleSelected.value)
+const hiddenSelectedCount = computed(() => selIds.value.length - visibleSelectedCount.value)
+const togglePageSelection = () => toggleVisible(!allVisibleSelected.value)
 const isImportBatchSelected = (batch: ImportBatchRow) => batch.accounts.every(account => isSelected(account.id))
 const isImportBatchPartiallySelected = (batch: ImportBatchRow) => {
   const selectedCount = batch.accounts.filter(account => isSelected(account.id)).length
   return selectedCount > 0 && selectedCount < batch.accounts.length
 }
-const toggleImportBatchSelection = (batch: ImportBatchRow, checked: boolean) => {
-  for (const account of batch.accounts) checked ? select(account.id) : deselect(account.id)
+const toggleImportBatchSelection = async (batch: ImportBatchRow, checked: boolean) => {
+  try {
+    const batchAccounts = await loadCompleteImportBatch(batch.batchID)
+    batchUpdate(selected => {
+      for (const account of batchAccounts) checked ? selected.add(account.id) : selected.delete(account.id)
+    })
+  } catch (error) {
+    if (error !== staleImportBatchRequest) appStore.showError(extractApiErrorMessage(error, t('common.error')))
+  }
 }
 
 const swipeVirtualContext: SwipeSelectVirtualContext = {
@@ -1519,6 +1633,7 @@ const load = async () => {
 }
 
 const reload = async () => {
+  invalidateImportBatchCache()
   markUpstreamBillingSortRefresh()
   syncAccountListDerivedParams()
   hasPendingListSync.value = false
@@ -1554,6 +1669,38 @@ const debouncedReload = () => {
   resetAutoRefreshCache()
   pendingTodayStatsRefresh.value = true
   baseDebouncedReload()
+}
+
+const resetSelectionForFilterChange = () => {
+  clearSelection()
+  pagination.page = 1
+}
+
+const handleSearchChange = (value: string) => {
+  params.search = value
+  resetSelectionForFilterChange()
+  invalidateImportBatchCache()
+  debouncedReload()
+}
+
+const handleFiltersChange = (filters: Record<string, unknown>) => {
+  Object.assign(params, filters)
+  resetSelectionForFilterChange()
+  void reload()
+}
+
+const clearFilters = () => {
+  Object.assign(params, {
+    platform: '',
+    type: '',
+    status: '',
+    privacy_mode: '',
+    uploader_user_id: '',
+    group: '',
+    search: ''
+  })
+  resetSelectionForFilterChange()
+  void reload()
 }
 
 const handlePageChange = (page: number) => {
@@ -2310,9 +2457,12 @@ const toggleSelectAllVisible = (event: Event) => {
   const target = event.target as HTMLInputElement
   toggleVisible(target.checked)
 }
+const bulkActionInProgress = ref(false)
 const handleBulkDelete = async () => {
+  if (bulkActionInProgress.value) return
   const accountIDs = [...selIds.value]
   if (!accountIDs.length || !confirm(t('admin.sharedPool.delete.bulkConfirm', { count: accountIDs.length }))) return
+  bulkActionInProgress.value = true
 
 	let remainingIDs = [...accountIDs]
 	let activeChunk: number[] = []
@@ -2349,41 +2499,58 @@ const handleBulkDelete = async () => {
     appStore.showError(extractApiErrorMessage(error, t('admin.sharedPool.delete.failed')))
 		await reload()
 		void loadPendingApprovalCount()
+  } finally {
+    bulkActionInProgress.value = false
   }
 }
 const handleBulkResetStatus = async () => {
+  if (bulkActionInProgress.value) return
   if (!confirm(t('common.confirm'))) return
+  bulkActionInProgress.value = true
+  const accountIDs = [...selIds.value]
   try {
-    const result = await adminAPI.accounts.batchClearError(selIds.value)
+    const result = await adminAPI.accounts.batchClearError(accountIDs)
     if (result.failed > 0) {
+      const failedIDs = (result.errors || []).map(item => item.account_id)
+      setSelectedIds(failedIDs.length ? failedIDs : accountIDs)
       appStore.showError(t('admin.accounts.bulkActions.partialSuccess', { success: result.success, failed: result.failed }))
     } else {
       appStore.showSuccess(t('admin.accounts.bulkActions.resetStatusSuccess', { count: result.success }))
       clearSelection()
     }
-    reload()
+    await reload()
   } catch (error) {
     console.error('Failed to bulk reset status:', error)
     appStore.showError(String(error))
+  } finally {
+    bulkActionInProgress.value = false
   }
 }
 const handleBulkRefreshToken = async () => {
+  if (bulkActionInProgress.value) return
   if (!confirm(t('common.confirm'))) return
+  bulkActionInProgress.value = true
+  const accountIDs = [...selIds.value]
   try {
-    const result = await adminAPI.accounts.batchRefresh(selIds.value)
+    const result = await adminAPI.accounts.batchRefresh(accountIDs)
     if (result.failed > 0) {
+      const failedIDs = (result.errors || []).map(item => item.account_id)
+      setSelectedIds(failedIDs.length ? failedIDs : accountIDs)
       appStore.showError(t('admin.accounts.bulkActions.partialSuccess', { success: result.success, failed: result.failed }))
     } else {
       appStore.showSuccess(t('admin.accounts.bulkActions.refreshTokenSuccess', { count: result.success }))
       clearSelection()
     }
-    reload()
+    await reload()
   } catch (error) {
     console.error('Failed to bulk refresh token:', error)
     appStore.showError(String(error))
+  } finally {
+    bulkActionInProgress.value = false
   }
 }
 const handleBulkProbeUpstreamBilling = async () => {
+  if (bulkActionInProgress.value) return
   const accountIDs = [...selIds.value]
   if (accountIDs.length === 0) {
     appStore.showError(t('admin.accounts.upstreamBilling.noEligibleAccounts'))
@@ -2393,6 +2560,7 @@ const handleBulkProbeUpstreamBilling = async () => {
     appStore.showError(t('admin.accounts.upstreamBilling.batchLimit'))
     return
   }
+  bulkActionInProgress.value = true
   accountIDs.forEach(id => probingUpstreamBilling.add(id))
   try {
     const results = await adminAPI.accounts.probeUpstreamBillingBatch(accountIDs)
@@ -2415,6 +2583,7 @@ const handleBulkProbeUpstreamBilling = async () => {
     appStore.showError(extractApiErrorMessage(error, t('admin.accounts.upstreamBilling.probeFailed')))
   } finally {
     accountIDs.forEach(id => probingUpstreamBilling.delete(id))
+    bulkActionInProgress.value = false
   }
 }
 const updateSchedulableInList = (accountIds: number[], schedulable: boolean) => {
@@ -2483,7 +2652,10 @@ const normalizeBulkSchedulableResult = (
   }
 }
 const handleBulkToggleSchedulable = async (schedulable: boolean) => {
+  if (bulkActionInProgress.value) return
   const accountIds = [...selIds.value]
+  if (!accountIds.length) return
+  bulkActionInProgress.value = true
   try {
     const result = await adminAPI.accounts.bulkUpdate(accountIds, { schedulable })
     const { successIds, failedIds, successCount, failedCount, hasIds, hasCounts } = normalizeBulkSchedulableResult(result, accountIds)
@@ -2517,11 +2689,17 @@ const handleBulkToggleSchedulable = async (schedulable: boolean) => {
   } catch (error) {
     console.error('Failed to bulk toggle schedulable:', error)
     appStore.showError(t('common.error'))
+  } finally {
+    bulkActionInProgress.value = false
   }
 }
 const buildBulkEditFilterSnapshot = () => {
   const rawParams = toRaw(params) as Record<string, unknown>
   const sortOrder: AccountSortOrder = rawParams.sort_order === 'desc' ? 'desc' : 'asc'
+  const rawUploaderUserID = rawParams.uploader_user_id
+  const uploaderUserID = typeof rawUploaderUserID === 'number'
+    ? (rawUploaderUserID > 0 ? rawUploaderUserID : undefined)
+    : (/^\d+$/.test(String(rawUploaderUserID || '')) ? Number(rawUploaderUserID) : undefined)
   return {
     platform: typeof rawParams.platform === 'string' ? rawParams.platform : '',
     type: typeof rawParams.type === 'string' ? rawParams.type : '',
@@ -2529,19 +2707,15 @@ const buildBulkEditFilterSnapshot = () => {
     group: typeof rawParams.group === 'string' ? rawParams.group : '',
     search: typeof rawParams.search === 'string' ? rawParams.search : '',
     privacy_mode: typeof rawParams.privacy_mode === 'string' ? rawParams.privacy_mode : '',
-    uploader_user_id: Number(rawParams.uploader_user_id) || undefined,
+    uploader_user_id: uploaderUserID,
+    uploader_unassigned: rawUploaderUserID === 'unassigned' || undefined,
     sort_by: typeof rawParams.sort_by === 'string' ? rawParams.sort_by : '',
     sort_order: sortOrder
   }
 }
 
-const collectSelectionMetadata = (rows: Account[]) => {
-  const selectedPlatforms = Array.from(new Set(rows.map(account => account.platform)))
-  const selectedTypes = Array.from(new Set(rows.map(account => account.type)))
-  return { selectedPlatforms, selectedTypes }
-}
-
 const openBulkEditSelected = () => {
+  if (!selIds.value.length) return
   bulkEditTarget.value = {
     mode: 'selected',
     accountIds: [...selIds.value],
@@ -2551,25 +2725,45 @@ const openBulkEditSelected = () => {
   showBulkEdit.value = true
 }
 
+const hasEffectiveFilters = computed(() => {
+  return Boolean(
+    params.platform || params.type || params.status || params.group ||
+    String(params.search || '').trim() || params.privacy_mode || params.uploader_user_id
+  )
+})
+
 const openBulkEditFiltered = async () => {
+  if (bulkActionInProgress.value || !hasEffectiveFilters.value || selIds.value.length > 0) return
   const filters = buildBulkEditFilterSnapshot()
-  const preview = await adminAPI.accounts.list(1, 100, filters)
-  const { selectedPlatforms, selectedTypes } = collectSelectionMetadata(preview.items)
-  bulkEditTarget.value = {
-    mode: 'filtered',
-    filters,
-    previewCount: preview.total,
-    selectedPlatforms,
-    selectedTypes
+  const filterKey = JSON.stringify(filters)
+  const { uploader_unassigned: uploaderUnassigned, ...summaryFilters } = filters
+  bulkActionInProgress.value = true
+  try {
+    const summary = await adminAPI.accounts.getSelectionSummary({
+      ...summaryFilters,
+      uploader_user_id: uploaderUnassigned ? 'unassigned' : filters.uploader_user_id
+    })
+    if (!hasEffectiveFilters.value || selIds.value.length > 0 || JSON.stringify(buildBulkEditFilterSnapshot()) !== filterKey) return
+    bulkEditTarget.value = {
+      mode: 'filtered',
+      filters,
+      previewCount: summary.total,
+      selectedPlatforms: summary.platforms as AccountPlatform[],
+      selectedTypes: summary.types as AccountType[]
+    }
+    showBulkEdit.value = true
+  } catch (error) {
+    appStore.showError(extractApiErrorMessage(error, t('admin.accounts.bulkEdit.failed')))
+  } finally {
+    bulkActionInProgress.value = false
   }
-  showBulkEdit.value = true
 }
 
-const handleBulkUpdated = () => {
+const handleBulkUpdated = (failedIDs: number[] = []) => {
   showBulkEdit.value = false
   bulkEditTarget.value = null
-  clearSelection()
-  reload()
+  setSelectedIds(failedIDs)
+  void reload()
 }
 const handleDataImported = (importedAccounts: Array<{ id: number; name: string }>) => {
   showImportData.value = false
@@ -2628,7 +2822,11 @@ const accountMatchesCurrentFilters = (account: Account) => {
       return false
     }
   }
-  if (filters.uploader_user_id && account.created_by_user_id !== Number(filters.uploader_user_id)) return false
+  if (filters.uploader_user_id === 'unassigned') {
+    if (account.created_by_user_id != null) return false
+  } else if (filters.uploader_user_id && account.created_by_user_id !== Number(filters.uploader_user_id)) {
+    return false
+  }
   const search = String(filters.search || '').trim().toLowerCase()
   if (search && !account.name.toLowerCase().includes(search)) return false
   return true

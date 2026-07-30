@@ -66,7 +66,11 @@ function mountModal(extraProps: Record<string, unknown> = {}) {
           `
         },
         ProxySelector: true,
-        GroupSelector: true,
+        GroupSelector: {
+          props: ['modelValue'],
+          emits: ['update:modelValue'],
+          template: '<button data-test="select-group" @click="$emit(\'update:modelValue\', [1])">group</button>'
+        },
         Icon: true
       }
     }
@@ -523,5 +527,41 @@ describe('BulkEditAccountModal', () => {
       },
       status: 'active'
     })
+  })
+
+  it('异步混合渠道预检期间忽略重复提交', async () => {
+    let finishPreCheck!: (value: { has_risk: boolean }) => void
+    vi.mocked(adminAPI.accounts.checkMixedChannelRisk).mockImplementationOnce(() => new Promise(resolve => { finishPreCheck = resolve }))
+    const wrapper = mountModal({
+      selectedPlatforms: ['anthropic'],
+      selectedTypes: ['oauth'],
+      groups: [{ id: 1, name: 'group-1' }]
+    })
+    await wrapper.get('#bulk-edit-groups-enabled').setValue(true)
+    await wrapper.get('[data-test="select-group"]').trigger('click')
+
+    await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
+    await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
+    expect(adminAPI.accounts.checkMixedChannelRisk).toHaveBeenCalledTimes(1)
+
+    finishPreCheck({ has_risk: false })
+    await flushPromises()
+    expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledTimes(1)
+  })
+
+  it('部分成功时向列表回传失败账号 ID', async () => {
+    vi.mocked(adminAPI.accounts.bulkUpdate).mockResolvedValueOnce({
+      success: 1,
+      failed: 1,
+      success_ids: [1],
+      failed_ids: [2],
+      results: []
+    })
+    const wrapper = mountModal()
+    await wrapper.get('#bulk-edit-status-enabled').setValue(true)
+    await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(wrapper.emitted('updated')).toEqual([[[2]]])
   })
 })

@@ -5,14 +5,16 @@
       :placeholder="t('admin.accounts.searchAccounts')"
       class="w-full sm:w-64"
       @update:model-value="$emit('update:searchQuery', $event)"
-      @search="$emit('change')"
     />
-    <Select :model-value="filters.platform" class="w-40" :options="pOpts" @update:model-value="updatePlatform" @change="$emit('change')" />
-    <Select :model-value="filters.type" class="w-40" :options="tOpts" @update:model-value="updateType" @change="$emit('change')" />
-    <Select :model-value="filters.status" class="w-40" :options="sOpts" @update:model-value="updateStatus" @change="$emit('change')" />
-    <Select :model-value="filters.privacy_mode" class="w-40" :options="privacyOpts" @update:model-value="updatePrivacyMode" @change="$emit('change')" />
-    <Select :model-value="filters.group" class="w-40" :options="gOpts" @update:model-value="updateGroup" @change="$emit('change')" />
-    <Select :model-value="filters.uploader_user_id" class="w-48" :options="uploaderOpts" searchable @update:model-value="updateUploader" @change="$emit('change')" />
+    <Select :model-value="filters.platform" class="w-40" :options="pOpts" @update:model-value="updatePlatform" />
+    <Select :model-value="filters.type" class="w-40" :options="tOpts" @update:model-value="updateType" />
+    <Select :model-value="filters.status" class="w-40" :options="sOpts" @update:model-value="updateStatus" />
+    <Select :model-value="filters.privacy_mode" class="w-40" :options="privacyOpts" @update:model-value="updatePrivacyMode" />
+    <Select :model-value="filters.group" class="w-40" :options="gOpts" @update:model-value="updateGroup" />
+    <Select :model-value="filters.uploader_user_id" class="w-48" :options="uploaderOpts" searchable @update:model-value="updateUploader" />
+    <button v-if="activeFilterCount" type="button" class="btn btn-secondary btn-sm" @click="$emit('clear')">
+      {{ t('admin.accounts.clearFilters', { count: activeFilterCount }) }}
+    </button>
   </div>
 </template>
 
@@ -20,7 +22,16 @@
 import { computed } from 'vue'; import { useI18n } from 'vue-i18n'; import Select from '@/components/common/Select.vue'; import SearchInput from '@/components/common/SearchInput.vue'
 import type { AdminGroup } from '@/types'
 const props = defineProps<{ searchQuery: string; filters: Record<string, any>; groups?: AdminGroup[]; uploaders?: Array<{ value: number; label: string }> }>()
-const emit = defineEmits(['update:searchQuery', 'update:filters', 'change']); const { t } = useI18n()
+const emit = defineEmits(['update:searchQuery', 'update:filters', 'clear']); const { t } = useI18n()
+const activeFilterCount = computed(() => [
+  props.searchQuery.trim(),
+  props.filters.platform,
+  props.filters.type,
+  props.filters.status,
+  props.filters.privacy_mode,
+  props.filters.group,
+  props.filters.uploader_user_id
+].filter(Boolean).length)
 const updatePlatform = (value: string | number | boolean | null) => { emit('update:filters', { ...props.filters, platform: value }) }
 const updateType = (value: string | number | boolean | null) => { emit('update:filters', { ...props.filters, type: value }) }
 const updateStatus = (value: string | number | boolean | null) => { emit('update:filters', { ...props.filters, status: value }) }
@@ -44,6 +55,7 @@ const gOpts = computed(() => [
 ])
 const uploaderOpts = computed(() => [
   { value: '', label: t('admin.sharedPool.ledger.allUploaders') },
+  { value: 'unassigned', label: t('admin.accounts.unassignedUploader') },
   ...(props.uploaders || [])
 ])
 </script>

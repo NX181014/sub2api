@@ -27,6 +27,28 @@ import type {
   OllamaCloudUsageState
 } from '@/types'
 
+export interface AccountListFilters {
+  platform?: string
+  type?: string
+  status?: string
+  group?: string
+  search?: string
+  privacy_mode?: string
+  lite?: string
+  include_scheduler_score?: string
+  include_pool_metrics?: string
+  uploader_user_id?: number | string
+  import_batch_id?: string
+  sort_by?: string
+  sort_order?: 'asc' | 'desc'
+}
+
+export interface AccountSelectionSummary {
+  total: number
+  platforms: string[]
+  types: string[]
+}
+
 /**
  * List all accounts with pagination
  * @param page - Page number (default: 1)
@@ -37,20 +59,7 @@ import type {
 export async function list(
   page: number = 1,
   pageSize: number = 20,
-  filters?: {
-    platform?: string
-    type?: string
-    status?: string
-    group?: string
-    search?: string
-    privacy_mode?: string
-    lite?: string
-    include_scheduler_score?: string
-    include_pool_metrics?: string
-    uploader_user_id?: number | string
-    sort_by?: string
-    sort_order?: 'asc' | 'desc'
-  },
+  filters?: AccountListFilters,
   options?: {
     signal?: AbortSignal
   }
@@ -75,20 +84,7 @@ export interface AccountListWithEtagResult {
 export async function listWithEtag(
   page: number = 1,
   pageSize: number = 20,
-  filters?: {
-    platform?: string
-    type?: string
-    status?: string
-    group?: string
-    search?: string
-    privacy_mode?: string
-    lite?: string
-    include_scheduler_score?: string
-    include_pool_metrics?: string
-    uploader_user_id?: number | string
-    sort_by?: string
-    sort_order?: 'asc' | 'desc'
-  },
+  filters?: AccountListFilters,
   options?: {
     signal?: AbortSignal
     etag?: string | null
@@ -654,6 +650,8 @@ export async function exportData(options?: {
     group?: string
     privacy_mode?: string
     search?: string
+    uploader_user_id?: number | string
+    import_batch_id?: string
     sort_by?: string
     sort_order?: 'asc' | 'desc'
   }
@@ -663,13 +661,15 @@ export async function exportData(options?: {
   if (options?.ids && options.ids.length > 0) {
     params.ids = options.ids.join(',')
   } else if (options?.filters) {
-    const { platform, type, status, group, privacy_mode, search, sort_by, sort_order } = options.filters
+    const { platform, type, status, group, privacy_mode, search, uploader_user_id, import_batch_id, sort_by, sort_order } = options.filters
     if (platform) params.platform = platform
     if (type) params.type = type
     if (status) params.status = status
     if (group) params.group = group
     if (privacy_mode) params.privacy_mode = privacy_mode
     if (search) params.search = search
+    if (uploader_user_id) params.uploader_user_id = String(uploader_user_id)
+    if (import_batch_id) params.import_batch_id = import_batch_id
     if (sort_by) params.sort_by = sort_by
     if (sort_order) params.sort_order = sort_order
   }
@@ -678,6 +678,22 @@ export async function exportData(options?: {
   }
   const { data } = await apiClient.get<AdminDataPayload>('/admin/accounts/data', { params })
   return data
+}
+
+export async function getSelectionSummary(filters?: AccountListFilters): Promise<AccountSelectionSummary> {
+  const { data } = await apiClient.get<AccountSelectionSummary>('/admin/accounts/selection-summary', {
+    params: filters
+  })
+  return data
+}
+
+export async function listImportBatch(
+  importBatchId: string,
+  page: number = 1,
+  pageSize: number = 100,
+  filters?: Omit<AccountListFilters, 'import_batch_id'>
+): Promise<PaginatedResponse<Account>> {
+  return list(page, pageSize, { ...filters, import_batch_id: importBatchId })
 }
 
 export async function importData(payload: {
@@ -962,6 +978,8 @@ export async function refreshOllamaCloudUsage(id: number): Promise<OllamaCloudUs
 export const accountsAPI = {
   list,
   listWithEtag,
+  listImportBatch,
+  getSelectionSummary,
   getById,
   create,
   duplicate,

@@ -463,7 +463,10 @@ export default {
       bulkSchedulableResultUnknown: '批量调度结果不完整，请稍后重试或刷新列表',
       bulkActions: {
         selected: '已选择 {count} 个账号',
+        filtered: '当前筛选结果共 {count} 个账号',
         selectCurrentPage: '本页全选',
+        clearCurrentPage: '取消本页选择',
+        hiddenSelected: '另有 {count} 个已选账号不在本页',
         clear: '清除选择',
         edit: '批量编辑账号',
         delete: '批量删除',
@@ -476,6 +479,8 @@ export default {
         refreshTokenSuccess: '已成功刷新 {count} 个账号令牌',
         partialSuccess: '操作部分完成：{success} 成功，{failed} 失败'
       },
+      clearFilters: '清除筛选（{count}）',
+      unassignedUploader: '未记录上传者',
       bulkEdit: {
         title: '批量编辑账号',
         selectionInfo: '已选择 {count} 个账号。只更新您勾选或填写的字段，未勾选的字段保持不变。',

@@ -46,6 +46,7 @@ type accountRepoStubForBulkUpdate struct {
 		groupID     int64
 		privacyMode string
 	}
+	selectionFilters AccountSelectionFilters
 }
 
 func (s *accountRepoStubForBulkUpdate) BulkUpdate(_ context.Context, ids []int64, _ AccountBulkUpdate) (int64, error) {
@@ -131,6 +132,11 @@ func (s *accountRepoStubForBulkUpdate) ListWithFilters(_ context.Context, params
 		return s.listData, s.listResult, nil
 	}
 	return s.listData, &pagination.PaginationResult{Total: int64(len(s.listData))}, nil
+}
+
+func (s *accountRepoStubForBulkUpdate) ListWithSelectionFilters(ctx context.Context, params pagination.PaginationParams, filters AccountSelectionFilters, _ bool) ([]Account, *pagination.PaginationResult, error) {
+	s.selectionFilters = filters
+	return s.ListWithFilters(ctx, params, filters.Platform, filters.Type, filters.Status, filters.Search, filters.GroupID, filters.PrivacyMode)
 }
 
 // TestAdminService_BulkUpdateAccounts_AllSuccessIDs 验证批量更新成功时返回 success_ids/failed_ids。
@@ -272,4 +278,23 @@ func TestAdminServiceBulkUpdateAccounts_ResolvesIDsFromFilters(t *testing.T) {
 	require.Equal(t, 2, result.Success)
 	require.Equal(t, 0, result.Failed)
 	require.Equal(t, []int64{7, 11}, result.SuccessIDs)
+}
+
+func TestAdminServiceBulkUpdateAccounts_ResolvesUnassignedUploaderFilter(t *testing.T) {
+	repo := &accountRepoStubForBulkUpdate{
+		listData:   []Account{{ID: 7}},
+		listResult: &pagination.PaginationResult{Total: 1},
+	}
+	svc := &adminServiceImpl{accountRepo: repo}
+	schedulable := true
+
+	result, err := svc.BulkUpdateAccounts(context.Background(), &BulkUpdateAccountsInput{
+		Filters:     &BulkUpdateAccountFilters{UploaderUnassigned: true},
+		Schedulable: &schedulable,
+	})
+
+	require.NoError(t, err)
+	require.True(t, repo.selectionFilters.UploaderUnassigned)
+	require.Equal(t, []int64{7}, repo.bulkUpdateIDs)
+	require.Equal(t, 1, result.Success)
 }

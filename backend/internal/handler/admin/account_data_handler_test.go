@@ -240,13 +240,39 @@ func TestExportDataPassesAccountFiltersAndSort(t *testing.T) {
 	require.Equal(t, "desc", adminSvc.lastListAccounts.sortOrder)
 }
 
+func TestExportDataPassesUploaderFilter(t *testing.T) {
+	router, adminSvc := setupAccountDataRouter()
+	adminSvc.accounts = []service.Account{{ID: 1, Name: "shared", Status: service.StatusActive}}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/accounts/data?uploader_user_id=77", nil)
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, int64(77), adminSvc.lastListAccounts.uploaderID)
+	require.Equal(t, 1, adminSvc.lastListAccounts.calls)
+}
+
+func TestExportDataPassesUnassignedUploaderFilter(t *testing.T) {
+	router, adminSvc := setupAccountDataRouter()
+	adminSvc.accounts = []service.Account{{ID: 1, Name: "legacy", Status: service.StatusActive}}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/accounts/data?uploader_user_id=unassigned", nil)
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.True(t, adminSvc.lastListAccounts.uploaderUnassigned)
+	require.Equal(t, 1, adminSvc.lastListAccounts.calls)
+}
+
 func TestExportDataSelectedIDsOverrideFilters(t *testing.T) {
 	router, adminSvc := setupAccountDataRouter()
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(
 		http.MethodGet,
-		"/api/v1/admin/accounts/data?ids=1,2&platform=openai&search=keyword&sort_by=priority&sort_order=desc",
+		"/api/v1/admin/accounts/data?ids=1,2&platform=openai&search=keyword&uploader_user_id=unassigned&sort_by=priority&sort_order=desc",
 		nil,
 	)
 	router.ServeHTTP(rec, req)

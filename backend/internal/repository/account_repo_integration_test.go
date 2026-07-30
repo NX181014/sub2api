@@ -623,6 +623,45 @@ func (s *AccountRepoSuite) TestListWithFilters() {
 
 // --- ListByGroup / ListActive / ListByPlatform ---
 
+func (s *AccountRepoSuite) TestSelectionContractsFilterCompleteImportBatch() {
+	batchID := "668f52b3-14af-4a5a-bde0-e923ed69299a"
+	mustCreateAccount(s.T(), s.client, &service.Account{Name: "batch-openai", Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth, Extra: map[string]any{"import_batch_id": batchID}})
+	mustCreateAccount(s.T(), s.client, &service.Account{Name: "batch-anthropic", Platform: service.PlatformAnthropic, Type: service.AccountTypeAPIKey, Extra: map[string]any{"import_batch_id": batchID}})
+	mustCreateAccount(s.T(), s.client, &service.Account{Name: "other-batch", Platform: service.PlatformGemini, Extra: map[string]any{"import_batch_id": "732215f9-03a1-45db-8940-50c3598b47a6"}})
+	filters := service.AccountSelectionFilters{ImportBatchID: batchID}
+
+	accounts, page, err := s.repo.ListWithSelectionFilters(s.ctx, pagination.PaginationParams{Page: 1, PageSize: 1}, filters, false)
+	s.Require().NoError(err)
+	s.Require().Len(accounts, 1)
+	s.Require().Equal(int64(2), page.Total)
+
+	summary, err := s.repo.GetSelectionSummary(s.ctx, filters)
+	s.Require().NoError(err)
+	s.Require().Equal(int64(2), summary.Total)
+	s.Require().Equal([]string{service.PlatformAnthropic, service.PlatformOpenAI}, summary.Platforms)
+	s.Require().Equal([]string{service.AccountTypeAPIKey, service.AccountTypeOAuth}, summary.Types)
+}
+
+func (s *AccountRepoSuite) TestSelectionContractsFilterUnassignedUploader() {
+	legacy := mustCreateAccount(s.T(), s.client, &service.Account{Name: "legacy-unassigned", Platform: service.PlatformOpenAI})
+	uploader := mustCreateUser(s.T(), s.client, &service.User{Email: "selection-uploader@example.com"})
+	assigned := mustCreateAccount(s.T(), s.client, &service.Account{Name: "assigned", Platform: service.PlatformAnthropic})
+	_, err := s.client.Account.UpdateOneID(assigned.ID).SetCreatedByUserID(uploader.ID).Save(s.ctx)
+	s.Require().NoError(err)
+	filters := service.AccountSelectionFilters{UploaderUnassigned: true}
+
+	accounts, page, err := s.repo.ListWithSelectionFilters(s.ctx, pagination.PaginationParams{Page: 1, PageSize: 20}, filters, false)
+	s.Require().NoError(err)
+	s.Require().Equal(int64(1), page.Total)
+	s.Require().Len(accounts, 1)
+	s.Require().Equal(legacy.ID, accounts[0].ID)
+
+	summary, err := s.repo.GetSelectionSummary(s.ctx, filters)
+	s.Require().NoError(err)
+	s.Require().Equal(int64(1), summary.Total)
+	s.Require().Equal([]string{service.PlatformOpenAI}, summary.Platforms)
+}
+
 func (s *AccountRepoSuite) TestListByGroup() {
 	group := mustCreateGroup(s.T(), s.client, &service.Group{Name: "g-list"})
 	acc1 := mustCreateAccount(s.T(), s.client, &service.Account{Name: "a1", Status: service.StatusActive})

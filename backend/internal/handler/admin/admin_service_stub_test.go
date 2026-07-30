@@ -46,17 +46,23 @@ type stubAdminService struct {
 		groupIDs  []int64
 	}
 	lastListAccounts struct {
-		platform    string
-		accountType string
-		status      string
-		search      string
-		groupID     int64
-		privacyMode string
-		sortBy      string
-		sortOrder   string
-		calls       int
+		platform           string
+		accountType        string
+		status             string
+		search             string
+		groupID            int64
+		privacyMode        string
+		sortBy             string
+		sortOrder          string
+		calls              int
+		uploaderID         int64
+		uploaderUnassigned bool
+		batchID            string
 	}
-	lastListUsers struct {
+	selectionSummary        *service.AccountSelectionSummary
+	selectionSummaryFilters service.AccountSelectionFilters
+	selectionSummaryCalls   int
+	lastListUsers           struct {
 		page      int
 		pageSize  int
 		filters   service.UserListFilters
@@ -427,6 +433,27 @@ func (s *stubAdminService) ListAccounts(ctx context.Context, page, pageSize int,
 		end = total
 	}
 	return accounts[start:end], int64(total), nil
+}
+
+func (s *stubAdminService) ListAccountsByUploader(ctx context.Context, page, pageSize int, platform, accountType, status, search string, groupID int64, privacyMode string, uploaderUserID int64, _ bool, sortBy, sortOrder string) ([]service.Account, int64, error) {
+	s.lastListAccounts.uploaderID = uploaderUserID
+	return s.ListAccounts(ctx, page, pageSize, platform, accountType, status, search, groupID, privacyMode, sortBy, sortOrder)
+}
+
+func (s *stubAdminService) ListAccountsBySelection(ctx context.Context, page, pageSize int, filters service.AccountSelectionFilters, _ bool, sortBy, sortOrder string) ([]service.Account, int64, error) {
+	s.lastListAccounts.uploaderID = filters.UploaderUserID
+	s.lastListAccounts.uploaderUnassigned = filters.UploaderUnassigned
+	s.lastListAccounts.batchID = filters.ImportBatchID
+	return s.ListAccounts(ctx, page, pageSize, filters.Platform, filters.Type, filters.Status, filters.Search, filters.GroupID, filters.PrivacyMode, sortBy, sortOrder)
+}
+
+func (s *stubAdminService) GetAccountSelectionSummary(_ context.Context, filters service.AccountSelectionFilters) (*service.AccountSelectionSummary, error) {
+	s.selectionSummaryCalls++
+	s.selectionSummaryFilters = filters
+	if s.selectionSummary != nil {
+		return s.selectionSummary, nil
+	}
+	return &service.AccountSelectionSummary{}, nil
 }
 
 func (s *stubAdminService) ListAccountsForSchedulerScoreFilter(_ context.Context, platform, accountType, status, search string, groupID int64, privacyMode string) ([]service.Account, error) {

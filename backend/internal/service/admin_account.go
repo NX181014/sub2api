@@ -67,6 +67,48 @@ func (s *adminServiceImpl) ListAccountsWithPoolMetrics(ctx context.Context, page
 	return accounts, result.Total, nil
 }
 
+type AccountSelectionFilters struct {
+	Platform           string
+	Type               string
+	Status             string
+	Search             string
+	GroupID            int64
+	PrivacyMode        string
+	UploaderUserID     int64
+	UploaderUnassigned bool
+	ImportBatchID      string
+}
+
+type AccountSelectionSummary struct {
+	Total     int64    `json:"total"`
+	Platforms []string `json:"platforms"`
+	Types     []string `json:"types"`
+}
+
+func (s *adminServiceImpl) ListAccountsBySelection(ctx context.Context, page, pageSize int, filters AccountSelectionFilters, includePoolMetrics bool, sortBy, sortOrder string) ([]Account, int64, error) {
+	repo, ok := s.accountRepo.(interface {
+		ListWithSelectionFilters(context.Context, pagination.PaginationParams, AccountSelectionFilters, bool) ([]Account, *pagination.PaginationResult, error)
+	})
+	if !ok {
+		return nil, 0, infraerrors.InternalServer("ACCOUNT_SELECTION_FILTER_UNAVAILABLE", "account selection filter is unavailable")
+	}
+	accounts, result, err := repo.ListWithSelectionFilters(ctx, pagination.PaginationParams{Page: page, PageSize: pageSize, SortBy: sortBy, SortOrder: sortOrder}, filters, includePoolMetrics)
+	if err != nil {
+		return nil, 0, err
+	}
+	return accounts, result.Total, nil
+}
+
+func (s *adminServiceImpl) GetAccountSelectionSummary(ctx context.Context, filters AccountSelectionFilters) (*AccountSelectionSummary, error) {
+	repo, ok := s.accountRepo.(interface {
+		GetSelectionSummary(context.Context, AccountSelectionFilters) (*AccountSelectionSummary, error)
+	})
+	if !ok {
+		return nil, infraerrors.InternalServer("ACCOUNT_SELECTION_SUMMARY_UNAVAILABLE", "account selection summary is unavailable")
+	}
+	return repo.GetSelectionSummary(ctx, filters)
+}
+
 func (s *adminServiceImpl) ListAccountsForSchedulerScoreFilter(ctx context.Context, platform, accountType, status, search string, groupID int64, privacyMode string) ([]Account, error) {
 	if s == nil || s.accountRepo == nil {
 		return nil, nil
@@ -1188,7 +1230,12 @@ func (s *adminServiceImpl) resolveBulkUpdateTargetIDs(ctx context.Context, filte
 			total    int64
 			err      error
 		)
-		if filters.UploaderUserID > 0 {
+		if filters.UploaderUnassigned {
+			accounts, total, err = s.ListAccountsBySelection(ctx, page, pageSize, AccountSelectionFilters{
+				Platform: filters.Platform, Type: filters.Type, Status: filters.Status, Search: filters.Search,
+				GroupID: groupID, PrivacyMode: filters.PrivacyMode, UploaderUnassigned: true,
+			}, false, "", "")
+		} else if filters.UploaderUserID > 0 {
 			accounts, total, err = s.ListAccountsByUploader(ctx, page, pageSize, filters.Platform, filters.Type, filters.Status, filters.Search, groupID, filters.PrivacyMode, filters.UploaderUserID, false, "", "")
 		} else {
 			accounts, total, err = s.ListAccounts(ctx, page, pageSize, filters.Platform, filters.Type, filters.Status, filters.Search, groupID, filters.PrivacyMode, "", "")

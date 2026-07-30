@@ -1294,7 +1294,7 @@ interface Props {
 const props = defineProps<Props>()
 const emit = defineEmits<{
   close: []
-  updated: []
+  updated: [failedIds?: number[]]
 }>()
 
 const { t } = useI18n()
@@ -1798,6 +1798,7 @@ const preCheckMixedChannelRisk = async (built: Record<string, unknown>): Promise
 }
 
 const handleSubmit = async () => {
+  if (submitting.value) return
   if (targetMode.value === 'selected' && props.accountIds.length === 0) {
     appStore.showError(t('admin.accounts.bulkEdit.noSelection'))
     return
@@ -1862,10 +1863,14 @@ const handleSubmit = async () => {
     return
   }
 
-  const canContinue = await preCheckMixedChannelRisk(built)
-  if (!canContinue) return
-
-  await submitBulkUpdate(built)
+  submitting.value = true
+  try {
+    const canContinue = await preCheckMixedChannelRisk(built)
+    if (!canContinue) return
+    await submitBulkUpdate(built)
+  } finally {
+    submitting.value = false
+  }
 }
 
 const submitBulkUpdate = async (baseUpdates: Record<string, unknown>) => {
@@ -1873,8 +1878,6 @@ const submitBulkUpdate = async (baseUpdates: Record<string, unknown>) => {
   const updates = mixedChannelConfirmed.value
     ? { ...baseUpdates, confirm_mixed_channel_risk: true }
     : baseUpdates
-
-  submitting.value = true
 
   try {
     const res = targetMode.value === 'filtered' && props.target?.filters
@@ -1885,6 +1888,12 @@ const submitBulkUpdate = async (baseUpdates: Record<string, unknown>) => {
       : await adminAPI.accounts.bulkUpdate(props.accountIds, updates)
     const success = res.success || 0
     const failed = res.failed || 0
+    const identifiedFailedIds = res.failed_ids?.length
+      ? res.failed_ids
+      : (res.results || []).filter(result => !result.success).map(result => result.account_id)
+    const failedIds = identifiedFailedIds.length || failed === 0 || targetMode.value === 'filtered'
+      ? identifiedFailedIds
+      : [...props.accountIds]
 
     if (success > 0 && failed === 0) {
       appStore.showSuccess(t('admin.accounts.bulkEdit.success', { count: success }))
@@ -1896,7 +1905,7 @@ const submitBulkUpdate = async (baseUpdates: Record<string, unknown>) => {
 
     if (success > 0) {
       pendingUpdatesForConfirm.value = null
-      emit('updated')
+      emit('updated', failedIds)
       handleClose()
     }
   } catch (error: any) {
@@ -1909,16 +1918,20 @@ const submitBulkUpdate = async (baseUpdates: Record<string, unknown>) => {
       appStore.showError(error.message || t('admin.accounts.bulkEdit.failed'))
       console.error('Error bulk updating accounts:', error)
     }
-  } finally {
-    submitting.value = false
   }
 }
 
 const handleMixedChannelConfirm = async () => {
+  if (submitting.value) return
   showMixedChannelWarning.value = false
   mixedChannelConfirmed.value = true
   if (pendingUpdatesForConfirm.value) {
-    await submitBulkUpdate(pendingUpdatesForConfirm.value)
+    submitting.value = true
+    try {
+      await submitBulkUpdate(pendingUpdatesForConfirm.value)
+    } finally {
+      submitting.value = false
+    }
   }
 }
 

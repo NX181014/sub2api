@@ -19,7 +19,69 @@ func setupAccountListRouter() (*gin.Engine, *stubAdminService) {
 	adminSvc := newStubAdminService()
 	handler := NewAccountHandler(adminSvc, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	router.GET("/api/v1/admin/accounts", handler.List)
+	router.GET("/api/v1/admin/accounts/selection-summary", handler.SelectionSummary)
 	return router, adminSvc
+}
+
+func TestAccountHandlerListFiltersCompleteImportBatch(t *testing.T) {
+	router, adminSvc := setupAccountListRouter()
+	batchID := "668f52b3-14af-4a5a-bde0-e923ed69299a"
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/accounts?page=2&page_size=20&import_batch_id="+batchID, nil)
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, batchID, adminSvc.lastListAccounts.batchID)
+	require.Equal(t, 1, adminSvc.lastListAccounts.calls)
+}
+
+func TestAccountHandlerListFiltersUnassignedUploader(t *testing.T) {
+	router, adminSvc := setupAccountListRouter()
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/accounts?uploader_user_id=unassigned", nil)
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.True(t, adminSvc.lastListAccounts.uploaderUnassigned)
+	require.Zero(t, adminSvc.lastListAccounts.uploaderID)
+}
+
+func TestAccountHandlerSelectionSummaryUsesListFilters(t *testing.T) {
+	router, adminSvc := setupAccountListRouter()
+	batchID := "668f52b3-14af-4a5a-bde0-e923ed69299a"
+	adminSvc.selectionSummary = &service.AccountSelectionSummary{Total: 3, Platforms: []string{"anthropic", "openai"}, Types: []string{"oauth"}}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/accounts/selection-summary?platform=openai&type=oauth&status=active&group=12&privacy_mode=blocked&search=%20key%20&uploader_user_id=77&import_batch_id="+batchID, nil)
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, 1, adminSvc.selectionSummaryCalls)
+	require.Equal(t, service.AccountSelectionFilters{
+		Platform: "openai", Type: "oauth", Status: "active", Search: "key", GroupID: 12,
+		PrivacyMode: "blocked", UploaderUserID: 77, ImportBatchID: batchID,
+	}, adminSvc.selectionSummaryFilters)
+	require.JSONEq(t, `{"code":0,"message":"success","data":{"total":3,"platforms":["anthropic","openai"],"types":["oauth"]}}`, rec.Body.String())
+}
+
+func TestAccountHandlerSelectionSummaryFiltersUnassignedUploader(t *testing.T) {
+	router, adminSvc := setupAccountListRouter()
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/accounts/selection-summary?uploader_user_id=unassigned", nil)
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.True(t, adminSvc.selectionSummaryFilters.UploaderUnassigned)
+	require.Zero(t, adminSvc.selectionSummaryFilters.UploaderUserID)
+}
+
+func TestBulkUpdateFilterMapsUnassignedUploader(t *testing.T) {
+	filters := toServiceBulkUpdateAccountFilters(&BulkUpdateAccountFilters{UploaderUnassigned: true})
+	require.NotNil(t, filters)
+	require.True(t, filters.UploaderUnassigned)
 }
 
 func TestAccountHandlerListIncludesCreatedAt(t *testing.T) {

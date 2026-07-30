@@ -15,6 +15,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -809,7 +810,7 @@ func (r *accountRepository) List(ctx context.Context, params pagination.Paginati
 	return r.ListWithFilters(ctx, params, "", "", "", "", 0, "")
 }
 
-func (r *accountRepository) accountListFilteredQuery(platform, accountType, status, search string, groupID int64, privacyMode string, uploaderUserID *int64) *dbent.AccountQuery {
+func (r *accountRepository) accountListFilteredQuery(platform, accountType, status, search string, groupID int64, privacyMode string, uploaderUserID *int64, uploaderUnassigned bool, importBatchID string) *dbent.AccountQuery {
 	q := r.client.Account.Query()
 
 	if platform != "" {
@@ -903,31 +904,46 @@ func (r *accountRepository) accountListFilteredQuery(platform, accountType, stat
 	}
 	if uploaderUserID != nil {
 		q = q.Where(dbaccount.CreatedByUserIDEQ(*uploaderUserID))
+	} else if uploaderUnassigned {
+		q = q.Where(dbaccount.CreatedByUserIDIsNil())
+	}
+	if importBatchID != "" {
+		q = q.Where(dbpredicate.Account(func(s *entsql.Selector) {
+			s.Where(sqljson.ValueEQ(dbaccount.FieldExtra, importBatchID, sqljson.Path("import_batch_id")))
+		}))
 	}
 
 	return q
 }
 
 func (r *accountRepository) ListWithFilters(ctx context.Context, params pagination.PaginationParams, platform, accountType, status, search string, groupID int64, privacyMode string) ([]service.Account, *pagination.PaginationResult, error) {
-	return r.listWithFilters(ctx, params, platform, accountType, status, search, groupID, privacyMode, nil, false)
+	return r.listWithFilters(ctx, params, platform, accountType, status, search, groupID, privacyMode, nil, false, "", false)
 }
 
 // ListWithFiltersByUploader keeps uploader filtering inside the database query,
 // so totals and page boundaries remain correct.
 func (r *accountRepository) ListWithFiltersByUploader(ctx context.Context, params pagination.PaginationParams, platform, accountType, status, search string, groupID int64, privacyMode string, uploaderUserID int64) ([]service.Account, *pagination.PaginationResult, error) {
-	return r.listWithFilters(ctx, params, platform, accountType, status, search, groupID, privacyMode, &uploaderUserID, false)
+	return r.listWithFilters(ctx, params, platform, accountType, status, search, groupID, privacyMode, &uploaderUserID, false, "", false)
 }
 
 func (r *accountRepository) ListWithFiltersByUploaderAndPoolMetrics(ctx context.Context, params pagination.PaginationParams, platform, accountType, status, search string, groupID int64, privacyMode string, uploaderUserID int64) ([]service.Account, *pagination.PaginationResult, error) {
-	return r.listWithFilters(ctx, params, platform, accountType, status, search, groupID, privacyMode, &uploaderUserID, true)
+	return r.listWithFilters(ctx, params, platform, accountType, status, search, groupID, privacyMode, &uploaderUserID, false, "", true)
 }
 
 func (r *accountRepository) ListWithFiltersAndPoolMetrics(ctx context.Context, params pagination.PaginationParams, platform, accountType, status, search string, groupID int64, privacyMode string) ([]service.Account, *pagination.PaginationResult, error) {
-	return r.listWithFilters(ctx, params, platform, accountType, status, search, groupID, privacyMode, nil, true)
+	return r.listWithFilters(ctx, params, platform, accountType, status, search, groupID, privacyMode, nil, false, "", true)
 }
 
-func (r *accountRepository) listWithFilters(ctx context.Context, params pagination.PaginationParams, platform, accountType, status, search string, groupID int64, privacyMode string, uploaderUserID *int64, includePoolMetrics bool) ([]service.Account, *pagination.PaginationResult, error) {
-	q := r.accountListFilteredQuery(platform, accountType, status, search, groupID, privacyMode, uploaderUserID)
+func (r *accountRepository) ListWithSelectionFilters(ctx context.Context, params pagination.PaginationParams, filters service.AccountSelectionFilters, includePoolMetrics bool) ([]service.Account, *pagination.PaginationResult, error) {
+	var uploaderUserID *int64
+	if filters.UploaderUserID > 0 {
+		uploaderUserID = &filters.UploaderUserID
+	}
+	return r.listWithFilters(ctx, params, filters.Platform, filters.Type, filters.Status, filters.Search, filters.GroupID, filters.PrivacyMode, uploaderUserID, filters.UploaderUnassigned, filters.ImportBatchID, includePoolMetrics)
+}
+
+func (r *accountRepository) listWithFilters(ctx context.Context, params pagination.PaginationParams, platform, accountType, status, search string, groupID int64, privacyMode string, uploaderUserID *int64, uploaderUnassigned bool, importBatchID string, includePoolMetrics bool) ([]service.Account, *pagination.PaginationResult, error) {
+	q := r.accountListFilteredQuery(platform, accountType, status, search, groupID, privacyMode, uploaderUserID, uploaderUnassigned, importBatchID)
 	// Clone before Count so interceptor-appended predicates (SoftDeleteMixin's
 	// deleted_at IS NULL) don't accumulate on the shared builder and pollute the
 	// subsequent list query. Same pattern used in group_repo/promo_code_repo/user_repo
@@ -962,11 +978,47 @@ func (r *accountRepository) listWithFilters(ctx context.Context, params paginati
 }
 
 func (r *accountRepository) ListAllWithFilters(ctx context.Context, platform, accountType, status, search string, groupID int64, privacyMode string) ([]service.Account, error) {
-	accounts, err := r.accountListFilteredQuery(platform, accountType, status, search, groupID, privacyMode, nil).All(ctx)
+	accounts, err := r.accountListFilteredQuery(platform, accountType, status, search, groupID, privacyMode, nil, false, "").All(ctx)
 	if err != nil {
 		return nil, err
 	}
 	return r.accountsToService(ctx, accounts)
+}
+
+func (r *accountRepository) GetSelectionSummary(ctx context.Context, filters service.AccountSelectionFilters) (*service.AccountSelectionSummary, error) {
+	var uploaderUserID *int64
+	if filters.UploaderUserID > 0 {
+		uploaderUserID = &filters.UploaderUserID
+	}
+	q := r.accountListFilteredQuery(filters.Platform, filters.Type, filters.Status, filters.Search, filters.GroupID, filters.PrivacyMode, uploaderUserID, filters.UploaderUnassigned, filters.ImportBatchID)
+	total, err := q.Clone().Count(ctx)
+	if err != nil {
+		return nil, err
+	}
+	rows := make([]struct {
+		Platform string `json:"platform"`
+		Type     string `json:"type"`
+	}, 0)
+	if err := q.Clone().GroupBy(dbaccount.FieldPlatform, dbaccount.FieldType).Scan(ctx, &rows); err != nil {
+		return nil, err
+	}
+	platformSet := make(map[string]struct{}, len(rows))
+	typeSet := make(map[string]struct{}, len(rows))
+	for _, row := range rows {
+		platformSet[row.Platform] = struct{}{}
+		typeSet[row.Type] = struct{}{}
+	}
+	platforms := make([]string, 0, len(platformSet))
+	for platform := range platformSet {
+		platforms = append(platforms, platform)
+	}
+	types := make([]string, 0, len(typeSet))
+	for accountType := range typeSet {
+		types = append(types, accountType)
+	}
+	slices.Sort(platforms)
+	slices.Sort(types)
+	return &service.AccountSelectionSummary{Total: int64(total), Platforms: platforms, Types: types}, nil
 }
 
 func (r *accountRepository) enrichAccountListPoolMetrics(ctx context.Context, accounts []service.Account) error {

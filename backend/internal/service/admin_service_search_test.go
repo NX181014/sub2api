@@ -25,6 +25,8 @@ type accountRepoStubForAdminList struct {
 	listWithFiltersErr       error
 	listWithFiltersUploader  int64
 	listWithPoolMetricsCalls int
+	selectionFilters         AccountSelectionFilters
+	selectionSummary         *AccountSelectionSummary
 }
 
 func (s *accountRepoStubForAdminList) ListWithFiltersByUploader(_ context.Context, params pagination.PaginationParams, platform, accountType, status, search string, groupID int64, privacyMode string, uploaderUserID int64) ([]Account, *pagination.PaginationResult, error) {
@@ -40,6 +42,16 @@ func (s *accountRepoStubForAdminList) ListWithFiltersByUploaderAndPoolMetrics(ct
 func (s *accountRepoStubForAdminList) ListWithFiltersAndPoolMetrics(_ context.Context, params pagination.PaginationParams, platform, accountType, status, search string, groupID int64, privacyMode string) ([]Account, *pagination.PaginationResult, error) {
 	s.listWithPoolMetricsCalls++
 	return s.ListWithFilters(context.Background(), params, platform, accountType, status, search, groupID, privacyMode)
+}
+
+func (s *accountRepoStubForAdminList) ListWithSelectionFilters(ctx context.Context, params pagination.PaginationParams, filters AccountSelectionFilters, _ bool) ([]Account, *pagination.PaginationResult, error) {
+	s.selectionFilters = filters
+	return s.ListWithFilters(ctx, params, filters.Platform, filters.Type, filters.Status, filters.Search, filters.GroupID, filters.PrivacyMode)
+}
+
+func (s *accountRepoStubForAdminList) GetSelectionSummary(_ context.Context, filters AccountSelectionFilters) (*AccountSelectionSummary, error) {
+	s.selectionFilters = filters
+	return s.selectionSummary, nil
 }
 
 func (s *accountRepoStubForAdminList) ListAllWithFilters(context.Context, string, string, string, string, int64, string) ([]Account, error) {
@@ -235,6 +247,28 @@ func TestAdminService_ListAccountsByUploader_ForwardsDatabaseFilter(t *testing.T
 	require.Equal(t, 1, repo.listWithPoolMetricsCalls)
 	require.Equal(t, 2, repo.listWithFiltersParams.Page)
 	require.Equal(t, []Account{{ID: 3, Name: "shared"}}, accounts)
+}
+
+func TestAdminService_SelectionContractsForwardFilters(t *testing.T) {
+	filters := AccountSelectionFilters{Platform: PlatformOpenAI, Type: AccountTypeOAuth, ImportBatchID: "668f52b3-14af-4a5a-bde0-e923ed69299a", UploaderUnassigned: true}
+	wantSummary := &AccountSelectionSummary{Total: 2, Platforms: []string{PlatformOpenAI}, Types: []string{AccountTypeOAuth}}
+	repo := &accountRepoStubForAdminList{
+		listWithFiltersAccounts: []Account{{ID: 3, Name: "shared"}},
+		listWithFiltersResult:   &pagination.PaginationResult{Total: 2},
+		selectionSummary:        wantSummary,
+	}
+	svc := &adminServiceImpl{accountRepo: repo}
+
+	accounts, total, err := svc.ListAccountsBySelection(context.Background(), 2, 20, filters, false, "name", "asc")
+	require.NoError(t, err)
+	require.Equal(t, int64(2), total)
+	require.Len(t, accounts, 1)
+	require.Equal(t, filters, repo.selectionFilters)
+
+	summary, err := svc.GetAccountSelectionSummary(context.Background(), filters)
+	require.NoError(t, err)
+	require.Equal(t, wantSummary, summary)
+	require.Equal(t, filters, repo.selectionFilters)
 }
 
 func TestAdminService_ListProxies_WithSearch(t *testing.T) {
