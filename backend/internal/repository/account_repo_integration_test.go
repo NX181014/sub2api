@@ -485,6 +485,31 @@ func (s *AccountRepoSuite) TestListWithFilters() {
 			},
 		},
 		{
+			name: "filter_by_status_active_tolerates_malformed_quota_extra",
+			setup: func(client *dbent.Client) {
+				mustCreateAccount(s.T(), client, &service.Account{
+					Name: "active-malformed-quota", Status: service.StatusActive, Type: service.AccountTypeAPIKey,
+					Extra: map[string]any{
+						"quota_limit":             "bad",
+						"quota_used":              "bad",
+						"quota_daily_limit":       1.0,
+						"quota_daily_used":        1.0,
+						"quota_daily_reset_mode":  "rolling",
+						"quota_daily_start":       "bad",
+						"quota_weekly_limit":      1.0,
+						"quota_weekly_used":       1.0,
+						"quota_weekly_reset_mode": "fixed",
+						"quota_weekly_reset_at":   "bad",
+					},
+				})
+			},
+			status:    service.StatusActive,
+			wantCount: 1,
+			validate: func(accounts []service.Account) {
+				s.Require().Equal("active-malformed-quota", accounts[0].Name)
+			},
+		},
+		{
 			name: "filter_by_status_unschedulable_uses_effective_state_precedence",
 			setup: func(client *dbent.Client) {
 				mustCreateAccount(s.T(), client, &service.Account{Name: "active-normal", Status: service.StatusActive, Schedulable: true})

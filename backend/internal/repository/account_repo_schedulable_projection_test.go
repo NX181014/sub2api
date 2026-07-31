@@ -120,6 +120,7 @@ func TestAccountListStatusUsesEffectiveRuntimePredicates(t *testing.T) {
 	} {
 		require.Contains(t, normalized, predicateColumn)
 	}
+	require.Contains(t, normalized, "pg_input_is_valid")
 
 	capturedSQL = ""
 	mock.ExpectQuery("overloaded account list count").

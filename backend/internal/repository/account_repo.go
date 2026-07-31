@@ -3276,11 +3276,19 @@ func accountQuotaAvailablePredicate() dbpredicate.Account {
 	return dbpredicate.Account(func(s *entsql.Selector) {
 		accountType := s.C(dbaccount.FieldType)
 		extra := s.C(dbaccount.FieldExtra)
-		value := func(key string) string {
-			return "COALESCE((" + extra + "->>'" + key + "')::numeric,0)"
+		safeValue := func(key, valueType, fallback string) string {
+			raw := extra + "->>'" + key + "'"
+			return "CASE WHEN pg_input_is_valid(" + raw + ",'" + valueType + "') THEN (" + raw + ")::" + valueType + " ELSE " + fallback + " END"
 		}
-		dailyExpired := strings.ReplaceAll(dailyExpiredExpr, "extra", extra)
-		weeklyExpired := strings.ReplaceAll(weeklyExpiredExpr, "extra", extra)
+		value := func(key string) string { return safeValue(key, "numeric", "0") }
+		expired := func(kind, interval string) string {
+			mode := "COALESCE(" + extra + "->>'quota_" + kind + "_reset_mode','rolling')"
+			resetAt := safeValue("quota_"+kind+"_reset_at", "timestamptz", "'1970-01-01'::timestamptz")
+			start := safeValue("quota_"+kind+"_start", "timestamptz", "'1970-01-01'::timestamptz")
+			return "(CASE WHEN " + mode + "='fixed' THEN NOW()>=" + resetAt + " ELSE " + start + "+'" + interval + "'::interval<=NOW() END)"
+		}
+		dailyExpired := expired("daily", "24 hours")
+		weeklyExpired := expired("weekly", "168 hours")
 		exceeded := "(" + value("quota_limit") + ">0 AND " + value("quota_used") + ">=" + value("quota_limit") + ")" +
 			" OR (" + value("quota_daily_limit") + ">0 AND NOT " + dailyExpired + " AND " + value("quota_daily_used") + ">=" + value("quota_daily_limit") + ")" +
 			" OR (" + value("quota_weekly_limit") + ">0 AND NOT " + weeklyExpired + " AND " + value("quota_weekly_used") + ">=" + value("quota_weekly_limit") + ")"
