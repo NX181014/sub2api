@@ -1,5 +1,5 @@
 <template>
-  <div class="space-y-2">
+  <div class="account-filter-controls space-y-2">
     <div class="flex flex-wrap items-start gap-3">
       <div class="w-full sm:w-64">
         <SearchInput
@@ -10,9 +10,9 @@
         />
         <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.accounts.searchAccountsHint') }}</p>
       </div>
-      <Select :model-value="filters.platform" class="w-40" :options="pOpts" @update:model-value="updatePlatform" />
-      <Select :model-value="filters.status" class="w-40" :options="sOpts" @update:model-value="updateStatus" />
-      <Select :model-value="filters.uploader_user_id" class="w-48" :options="uploaderOpts" searchable @update:model-value="updateUploader" />
+      <Select :model-value="filters.platform" class="w-40" :options="pOpts" :aria-label="t('admin.accounts.columns.platform')" @update:model-value="updatePlatform" />
+      <Select :model-value="filters.status" class="w-40" :options="sOpts" :aria-label="t('admin.accounts.columns.status')" @update:model-value="updateStatus" />
+      <Select :model-value="filters.uploader_user_id" class="w-48" :options="uploaderOpts" :aria-label="t('admin.sharedPool.columns.uploader')" searchable @update:model-value="updateUploader" />
       <button
         type="button"
         class="btn btn-secondary btn-sm"
@@ -28,9 +28,9 @@
     </div>
 
     <div v-if="showAdvanced" class="flex flex-wrap items-center gap-3 rounded-lg border border-gray-200 bg-gray-50 p-3 dark:border-dark-700 dark:bg-dark-800/60">
-      <Select :model-value="filters.type" class="w-40" :options="tOpts" @update:model-value="updateType" />
-      <Select :model-value="filters.privacy_mode" class="w-44" :options="privacyOpts" @update:model-value="updatePrivacyMode" />
-      <Select :model-value="filters.group" class="w-40" :options="gOpts" @update:model-value="updateGroup" />
+      <Select :model-value="filters.type" class="w-40" :options="tOpts" :aria-label="t('admin.accounts.columns.type')" @update:model-value="updateType" />
+      <Select :model-value="filters.privacy_mode" class="w-44" :options="privacyOpts" :aria-label="t('admin.accounts.privacyLabel')" @update:model-value="updatePrivacyMode" />
+      <Select :model-value="filters.group" class="w-40" :options="gOpts" :aria-label="t('admin.accounts.columns.groups')" @update:model-value="updateGroup" />
     </div>
 
     <div v-if="activeFilterCount || resultAccountCount || resultBatchCount" class="flex flex-wrap items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
@@ -113,7 +113,7 @@ const updateGroup = (value: string | number | boolean | null) => { emit('update:
 const updateUploader = (value: string | number | boolean | null) => { emit('update:filters', { ...props.filters, uploader_user_id: value }) }
 const pOpts = computed(() => [{ value: '', label: t('admin.accounts.allPlatforms') }, { value: 'anthropic', label: 'Anthropic' }, { value: 'openai', label: 'OpenAI' }, { value: 'gemini', label: 'Gemini' }, { value: 'antigravity', label: 'Antigravity' }, { value: 'grok', label: 'Grok' }])
 const tOpts = computed(() => [{ value: '', label: t('admin.accounts.allTypes') }, { value: 'oauth', label: t('admin.accounts.oauthType') }, { value: 'setup-token', label: t('admin.accounts.setupToken') }, { value: 'apikey', label: t('admin.accounts.apiKey') }, { value: 'bedrock', label: 'AWS Bedrock' }])
-const sOpts = computed(() => [{ value: '', label: t('admin.accounts.allStatus') }, { value: 'active', label: t('admin.accounts.status.active') }, { value: 'inactive', label: t('admin.accounts.status.inactive') }, { value: 'error', label: t('admin.accounts.status.error') }, { value: 'rate_limited', label: t('admin.accounts.status.rateLimited') }, { value: 'temp_unschedulable', label: t('admin.accounts.status.tempUnschedulable') }, { value: 'unschedulable', label: t('admin.accounts.status.unschedulable') }])
+const sOpts = computed(() => [{ value: '', label: t('admin.accounts.allStatus') }, { value: 'active', label: t('admin.accounts.status.active') }, { value: 'inactive', label: t('admin.accounts.status.inactive') }, { value: 'error', label: t('admin.accounts.status.error') }, { value: 'rate_limited', label: t('admin.accounts.status.rateLimited') }, { value: 'overloaded', label: t('admin.accounts.status.overloaded') }, { value: 'temp_unschedulable', label: t('admin.accounts.status.tempUnschedulable') }, { value: 'unschedulable', label: t('admin.accounts.status.unschedulable') }])
 const privacyOpts = computed(() => [
   { value: '', label: t('admin.accounts.allPrivacyModes') },
   { value: '__unset__', label: t('admin.accounts.privacyUnset') },
@@ -134,3 +134,11 @@ const uploaderOpts = computed(() => [
   ...(props.uploaders || [])
 ])
 </script>
+
+<style scoped>
+.account-filter-controls :deep(.select-trigger),
+.account-filter-controls :deep(.input),
+.account-filter-controls .btn {
+  min-height: 2.75rem;
+}
+</style>

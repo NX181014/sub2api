@@ -16,7 +16,7 @@ func TestBuildAccountLogicalRowsGroupsBatchesAndSummarizesStatus(t *testing.T) {
 	accounts := []service.Account{
 		{ID: 9, Name: "standalone", Status: service.StatusActive, Schedulable: true, CreatedAt: now},
 		{ID: 8, Name: "batch-b", Status: service.StatusActive, Schedulable: true, CreatedAt: now, UploaderUsername: &uploader, Extra: map[string]any{"import_batch_id": batchID}},
-		{ID: 7, Name: "batch-a", Status: service.StatusError, CreatedAt: now.Add(-time.Minute), UploaderUsername: &uploader, Extra: map[string]any{"import_batch_id": batchID}},
+		{ID: 7, Name: "batch-a", Status: service.StatusError, Schedulable: true, CreatedAt: now.Add(-time.Minute), UploaderUsername: &uploader, Extra: map[string]any{"import_batch_id": batchID}},
 	}
 
 	rows := buildAccountLogicalRows(accounts, now)

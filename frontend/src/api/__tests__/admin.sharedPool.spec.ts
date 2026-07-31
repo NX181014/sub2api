@@ -17,6 +17,7 @@ import {
   listCostUploaderSummaries,
   listLedgerEntries,
   listLifecycle,
+  listPurchaseSources,
   listSettlements,
   listSources,
   markSettlementPaid,
@@ -205,6 +206,11 @@ describe('admin shared-pool API', () => {
         id: 2, settlement_id: 9, account_id: 42, user_id: 23, user_email: 'member@example.com', username: 'member',
         account_usage_weight: '2', usage_share: '1', allocated_cost_minor: 1200, contribution_credit_minor: 0,
         adjustment_minor: 0, net_amount_minor: 1200, trace_quality: 'exact'
+      }],
+      account_contexts: [{
+        id: 42, name: 'account-42', platform: 'openai', account_status: 'error',
+        availability_status: 'error', schedulable: false, error_message: 'credential expired',
+        cost_sharing_enabled: true, latest_lifecycle_status: 'active', net_cost_minor: 1200
       }]
     } })
 
@@ -213,6 +219,9 @@ describe('admin shared-pool API', () => {
     expect(result.lines[0]).toMatchObject({ user_id: 23, allocated_cost: 12, net_amount: 12 })
     expect(result.account_costs[0]).toMatchObject({ account_id: 42, cost_entry_id: 7, amount: 12 })
     expect(result.account_lines[0]).toMatchObject({ account_id: 42, user_id: 23, allocated_cost: 12, trace_quality: 'exact' })
+    expect(result.account_contexts[0]).toMatchObject({
+      id: 42, account_status: 'error', availability_status: 'error', error_message: 'credential expired'
+    })
   })
 
   it('sends the selected settlement scope to the draft endpoint', async () => {
@@ -276,6 +285,54 @@ describe('admin shared-pool API', () => {
     })
   })
 
+  it('keeps current account status independent from lifecycle history', async () => {
+    get.mockResolvedValueOnce({
+      data: {
+        start_at: '2026-07-01T00:00:00Z',
+        end_at: '2026-08-01T00:00:00Z',
+        total_cost_minor: 1000,
+        total_value_minor: 0,
+        unrecovered_minor: 1000,
+        banned_loss_minor: 0,
+        recovery_rate: '0',
+        recovered_accounts: 0,
+        total_accounts: 1,
+        accounts: [{
+          account_id: 9,
+          account_name: 'account-9',
+          account_status: 'error',
+          availability_status: 'error',
+          schedulable: false,
+          error_message: 'credential expired',
+          lifecycle_status: 'active',
+          net_cost_minor: 1000,
+          value_minor: 0,
+          unrecovered_minor: 1000,
+          banned_loss_minor: 0,
+          current_net_loss_minor: 1000,
+          net_profit_minor: -1000,
+          recovery_rate: '0',
+          currently_recovered: false,
+          observation_days: 3
+        }]
+      }
+    })
+
+    const result = await getOverview({ start: '2026-07-01', end: '2026-08-01', account_id: 9 })
+
+    expect(result.summary.active_accounts).toBe(0)
+    expect(get).toHaveBeenCalledWith('/admin/pool/overview', {
+      params: { start_date: '2026-07-01', end_date: '2026-08-01', account_id: 9 }
+    })
+    expect(result.accounts[0]).toMatchObject({
+      status: 'warning',
+      account_status: 'error',
+      availability_status: 'error',
+      error_message: 'credential expired',
+      remaining_cost: 10
+    })
+  })
+
   it('groups source quality by uploader and keeps account details', async () => {
     get.mockResolvedValueOnce({ data: {
       end_at: '2026-08-01T00:00:00Z',
@@ -292,6 +349,14 @@ describe('admin shared-pool API', () => {
     expect(result.items[0]).toMatchObject({ uploader_name: 'alice', account_count: 2, purchase_cost: 200, usage_value: 200, roi_rate: 100, ban_rate_30d: 50 })
     expect(result.items[0].sources.map((source) => source.name)).toEqual(['shop-a', 'shop-b'])
     expect(result.items[0].sources[1].accounts[0]).toMatchObject({ account_id: 2, account_name: 'beta', purchase_cost: 100 })
+  })
+
+  it('requests only referenced purchase sources for business views', async () => {
+    get.mockResolvedValueOnce({ data: [] })
+
+    await listPurchaseSources({ referenced: true })
+
+    expect(get).toHaveBeenCalledWith('/admin/pool/sources', { params: { referenced: true } })
   })
 
   it('keeps saved pool profile fields for dialog prefill', async () => {

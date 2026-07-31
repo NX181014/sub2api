@@ -58,6 +58,7 @@ type stubAdminService struct {
 		uploaderID         int64
 		uploaderUnassigned bool
 		batchID            string
+		batchScope         string
 	}
 	selectionSummary        *service.AccountSelectionSummary
 	selectionSummaryFilters service.AccountSelectionFilters
@@ -448,11 +449,19 @@ func (s *stubAdminService) ListAccountsBySelection(ctx context.Context, page, pa
 	s.lastListAccounts.uploaderID = filters.UploaderUserID
 	s.lastListAccounts.uploaderUnassigned = filters.UploaderUnassigned
 	s.lastListAccounts.batchID = filters.ImportBatchID
-	if filters.ImportBatchID != "" {
+	s.lastListAccounts.batchScope = filters.ImportBatchScope
+	if filters.ImportBatchID != "" || filters.ImportBatchScope != "" {
 		original := s.accounts
 		s.accounts = nil
 		for _, account := range original {
-			if importBatchID(&account) == filters.ImportBatchID {
+			batchID := importBatchID(&account)
+			if filters.ImportBatchID != "" && batchID == filters.ImportBatchID {
+				s.accounts = append(s.accounts, account)
+			}
+			if filters.ImportBatchScope == "standalone" && batchID == "" {
+				s.accounts = append(s.accounts, account)
+			}
+			if filters.ImportBatchScope == "batched" && batchID != "" {
 				s.accounts = append(s.accounts, account)
 			}
 		}

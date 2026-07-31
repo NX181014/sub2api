@@ -810,7 +810,7 @@ func (r *accountRepository) List(ctx context.Context, params pagination.Paginati
 	return r.ListWithFilters(ctx, params, "", "", "", "", 0, "")
 }
 
-func (r *accountRepository) accountListFilteredQuery(platform, accountType, status, search string, groupID int64, privacyMode string, uploaderUserID *int64, uploaderUnassigned bool, importBatchID string) *dbent.AccountQuery {
+func (r *accountRepository) accountListFilteredQuery(platform, accountType, status, search string, groupID int64, privacyMode string, uploaderUserID *int64, uploaderUnassigned bool, importBatchID, importBatchScope string) *dbent.AccountQuery {
 	q := r.client.Account.Query()
 
 	if platform != "" {
@@ -820,61 +820,65 @@ func (r *accountRepository) accountListFilteredQuery(platform, accountType, stat
 		q = q.Where(dbaccount.TypeEQ(accountType))
 	}
 	if status != "" {
+		now := time.Now()
 		switch status {
 		case service.StatusActive:
 			q = q.Where(
 				dbaccount.StatusEQ(status),
 				dbaccount.SchedulableEQ(true),
-				dbaccount.Or(
-					dbaccount.RateLimitResetAtIsNil(),
-					dbaccount.RateLimitResetAtLTE(time.Now()),
-				),
-				dbpredicate.Account(func(s *entsql.Selector) {
-					col := s.C("temp_unschedulable_until")
-					s.Where(entsql.Or(
-						entsql.IsNull(col),
-						entsql.LTE(col, entsql.Expr("NOW()")),
-					))
-				}),
+				notExpiredPredicate(now),
+				notOverloadedPredicate(now),
+				notRateLimitedPredicate(now),
+				tempUnschedulablePredicate(),
+				accountQuotaAvailablePredicate(),
+			)
+		case "inactive":
+			q = q.Where(
+				dbaccount.StatusNEQ(service.StatusActive),
+				dbaccount.StatusNEQ(service.StatusError),
 			)
 		case "rate_limited":
 			q = q.Where(
 				dbaccount.StatusEQ(service.StatusActive),
-				dbaccount.RateLimitResetAtGT(time.Now()),
-				dbpredicate.Account(func(s *entsql.Selector) {
-					col := s.C("temp_unschedulable_until")
-					s.Where(entsql.Or(
-						entsql.IsNull(col),
-						entsql.LTE(col, entsql.Expr("NOW()")),
-					))
-				}),
+				dbaccount.SchedulableEQ(true),
+				notExpiredPredicate(now),
+				notOverloadedPredicate(now),
+				dbaccount.RateLimitResetAtGT(now),
+			)
+		case "overloaded":
+			q = q.Where(
+				dbaccount.StatusEQ(service.StatusActive),
+				dbaccount.SchedulableEQ(true),
+				notExpiredPredicate(now),
+				dbaccount.OverloadUntilGT(now),
 			)
 		case "temp_unschedulable":
 			q = q.Where(
 				dbaccount.StatusEQ(service.StatusActive),
-				dbpredicate.Account(func(s *entsql.Selector) {
-					col := s.C("temp_unschedulable_until")
-					s.Where(entsql.And(
-						entsql.Not(entsql.IsNull(col)),
-						entsql.GT(col, entsql.Expr("NOW()")),
-					))
-				}),
+				dbaccount.SchedulableEQ(true),
+				notExpiredPredicate(now),
+				notOverloadedPredicate(now),
+				notRateLimitedPredicate(now),
+				tempUnschedulableActivePredicate(),
 			)
 		case "unschedulable":
 			q = q.Where(
 				dbaccount.StatusEQ(service.StatusActive),
-				dbaccount.SchedulableEQ(false),
 				dbaccount.Or(
-					dbaccount.RateLimitResetAtIsNil(),
-					dbaccount.RateLimitResetAtLTE(time.Now()),
+					dbaccount.SchedulableEQ(false),
+					dbaccount.And(
+						dbaccount.SchedulableEQ(true),
+						expiredPredicate(now),
+					),
+					dbaccount.And(
+						dbaccount.SchedulableEQ(true),
+						notExpiredPredicate(now),
+						notOverloadedPredicate(now),
+						notRateLimitedPredicate(now),
+						tempUnschedulablePredicate(),
+						dbaccount.Not(accountQuotaAvailablePredicate()),
+					),
 				),
-				dbpredicate.Account(func(s *entsql.Selector) {
-					col := s.C("temp_unschedulable_until")
-					s.Where(entsql.Or(
-						entsql.IsNull(col),
-						entsql.LTE(col, entsql.Expr("NOW()")),
-					))
-				}),
 			)
 		default:
 			q = q.Where(dbaccount.StatusEQ(status))
@@ -911,27 +915,42 @@ func (r *accountRepository) accountListFilteredQuery(platform, accountType, stat
 		q = q.Where(dbpredicate.Account(func(s *entsql.Selector) {
 			s.Where(sqljson.ValueEQ(dbaccount.FieldExtra, importBatchID, sqljson.Path("import_batch_id")))
 		}))
+	} else if importBatchScope != "" {
+		q = q.Where(dbpredicate.Account(func(s *entsql.Selector) {
+			path := sqljson.Path("import_batch_id")
+			if importBatchScope == "standalone" {
+				s.Where(entsql.Or(
+					entsql.Not(sqljson.HasKey(dbaccount.FieldExtra, path)),
+					sqljson.ValueEQ(dbaccount.FieldExtra, "", path),
+				))
+				return
+			}
+			s.Where(entsql.And(
+				sqljson.HasKey(dbaccount.FieldExtra, path),
+				sqljson.ValueNEQ(dbaccount.FieldExtra, "", path),
+			))
+		}))
 	}
 
 	return q
 }
 
 func (r *accountRepository) ListWithFilters(ctx context.Context, params pagination.PaginationParams, platform, accountType, status, search string, groupID int64, privacyMode string) ([]service.Account, *pagination.PaginationResult, error) {
-	return r.listWithFilters(ctx, params, platform, accountType, status, search, groupID, privacyMode, nil, false, "", false)
+	return r.listWithFilters(ctx, params, platform, accountType, status, search, groupID, privacyMode, nil, false, "", "", false)
 }
 
 // ListWithFiltersByUploader keeps uploader filtering inside the database query,
 // so totals and page boundaries remain correct.
 func (r *accountRepository) ListWithFiltersByUploader(ctx context.Context, params pagination.PaginationParams, platform, accountType, status, search string, groupID int64, privacyMode string, uploaderUserID int64) ([]service.Account, *pagination.PaginationResult, error) {
-	return r.listWithFilters(ctx, params, platform, accountType, status, search, groupID, privacyMode, &uploaderUserID, false, "", false)
+	return r.listWithFilters(ctx, params, platform, accountType, status, search, groupID, privacyMode, &uploaderUserID, false, "", "", false)
 }
 
 func (r *accountRepository) ListWithFiltersByUploaderAndPoolMetrics(ctx context.Context, params pagination.PaginationParams, platform, accountType, status, search string, groupID int64, privacyMode string, uploaderUserID int64) ([]service.Account, *pagination.PaginationResult, error) {
-	return r.listWithFilters(ctx, params, platform, accountType, status, search, groupID, privacyMode, &uploaderUserID, false, "", true)
+	return r.listWithFilters(ctx, params, platform, accountType, status, search, groupID, privacyMode, &uploaderUserID, false, "", "", true)
 }
 
 func (r *accountRepository) ListWithFiltersAndPoolMetrics(ctx context.Context, params pagination.PaginationParams, platform, accountType, status, search string, groupID int64, privacyMode string) ([]service.Account, *pagination.PaginationResult, error) {
-	return r.listWithFilters(ctx, params, platform, accountType, status, search, groupID, privacyMode, nil, false, "", true)
+	return r.listWithFilters(ctx, params, platform, accountType, status, search, groupID, privacyMode, nil, false, "", "", true)
 }
 
 func (r *accountRepository) ListWithSelectionFilters(ctx context.Context, params pagination.PaginationParams, filters service.AccountSelectionFilters, includePoolMetrics bool) ([]service.Account, *pagination.PaginationResult, error) {
@@ -939,11 +958,11 @@ func (r *accountRepository) ListWithSelectionFilters(ctx context.Context, params
 	if filters.UploaderUserID > 0 {
 		uploaderUserID = &filters.UploaderUserID
 	}
-	return r.listWithFilters(ctx, params, filters.Platform, filters.Type, filters.Status, filters.Search, filters.GroupID, filters.PrivacyMode, uploaderUserID, filters.UploaderUnassigned, filters.ImportBatchID, includePoolMetrics)
+	return r.listWithFilters(ctx, params, filters.Platform, filters.Type, filters.Status, filters.Search, filters.GroupID, filters.PrivacyMode, uploaderUserID, filters.UploaderUnassigned, filters.ImportBatchID, filters.ImportBatchScope, includePoolMetrics)
 }
 
-func (r *accountRepository) listWithFilters(ctx context.Context, params pagination.PaginationParams, platform, accountType, status, search string, groupID int64, privacyMode string, uploaderUserID *int64, uploaderUnassigned bool, importBatchID string, includePoolMetrics bool) ([]service.Account, *pagination.PaginationResult, error) {
-	q := r.accountListFilteredQuery(platform, accountType, status, search, groupID, privacyMode, uploaderUserID, uploaderUnassigned, importBatchID)
+func (r *accountRepository) listWithFilters(ctx context.Context, params pagination.PaginationParams, platform, accountType, status, search string, groupID int64, privacyMode string, uploaderUserID *int64, uploaderUnassigned bool, importBatchID, importBatchScope string, includePoolMetrics bool) ([]service.Account, *pagination.PaginationResult, error) {
+	q := r.accountListFilteredQuery(platform, accountType, status, search, groupID, privacyMode, uploaderUserID, uploaderUnassigned, importBatchID, importBatchScope)
 	// Clone before Count so interceptor-appended predicates (SoftDeleteMixin's
 	// deleted_at IS NULL) don't accumulate on the shared builder and pollute the
 	// subsequent list query. Same pattern used in group_repo/promo_code_repo/user_repo
@@ -978,7 +997,7 @@ func (r *accountRepository) listWithFilters(ctx context.Context, params paginati
 }
 
 func (r *accountRepository) ListAllWithFilters(ctx context.Context, platform, accountType, status, search string, groupID int64, privacyMode string) ([]service.Account, error) {
-	accounts, err := r.accountListFilteredQuery(platform, accountType, status, search, groupID, privacyMode, nil, false, "").All(ctx)
+	accounts, err := r.accountListFilteredQuery(platform, accountType, status, search, groupID, privacyMode, nil, false, "", "").All(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -990,7 +1009,7 @@ func (r *accountRepository) GetSelectionSummary(ctx context.Context, filters ser
 	if filters.UploaderUserID > 0 {
 		uploaderUserID = &filters.UploaderUserID
 	}
-	q := r.accountListFilteredQuery(filters.Platform, filters.Type, filters.Status, filters.Search, filters.GroupID, filters.PrivacyMode, uploaderUserID, filters.UploaderUnassigned, filters.ImportBatchID)
+	q := r.accountListFilteredQuery(filters.Platform, filters.Type, filters.Status, filters.Search, filters.GroupID, filters.PrivacyMode, uploaderUserID, filters.UploaderUnassigned, filters.ImportBatchID, filters.ImportBatchScope)
 	total, err := q.Clone().Count(ctx)
 	if err != nil {
 		return nil, err
@@ -3219,12 +3238,62 @@ func tempUnschedulablePredicate() dbpredicate.Account {
 	})
 }
 
+func tempUnschedulableActivePredicate() dbpredicate.Account {
+	return dbpredicate.Account(func(s *entsql.Selector) {
+		col := s.C(dbaccount.FieldTempUnschedulableUntil)
+		s.Where(entsql.And(
+			entsql.Not(entsql.IsNull(col)),
+			entsql.GT(col, entsql.Expr("NOW()")),
+		))
+	})
+}
+
 func notExpiredPredicate(now time.Time) dbpredicate.Account {
 	return dbaccount.Or(
 		dbaccount.ExpiresAtIsNil(),
 		dbaccount.ExpiresAtGT(now),
 		dbaccount.AutoPauseOnExpiredEQ(false),
 	)
+}
+
+func expiredPredicate(now time.Time) dbpredicate.Account {
+	return dbaccount.And(
+		dbaccount.AutoPauseOnExpiredEQ(true),
+		dbaccount.ExpiresAtNotNil(),
+		dbaccount.ExpiresAtLTE(now),
+	)
+}
+
+func notOverloadedPredicate(now time.Time) dbpredicate.Account {
+	return dbaccount.Or(dbaccount.OverloadUntilIsNil(), dbaccount.OverloadUntilLTE(now))
+}
+
+func notRateLimitedPredicate(now time.Time) dbpredicate.Account {
+	return dbaccount.Or(dbaccount.RateLimitResetAtIsNil(), dbaccount.RateLimitResetAtLTE(now))
+}
+
+func accountQuotaAvailablePredicate() dbpredicate.Account {
+	return dbpredicate.Account(func(s *entsql.Selector) {
+		accountType := s.C(dbaccount.FieldType)
+		extra := s.C(dbaccount.FieldExtra)
+		value := func(key string) string {
+			return "COALESCE((" + extra + "->>'" + key + "')::numeric,0)"
+		}
+		dailyExpired := strings.ReplaceAll(dailyExpiredExpr, "extra", extra)
+		weeklyExpired := strings.ReplaceAll(weeklyExpiredExpr, "extra", extra)
+		exceeded := "(" + value("quota_limit") + ">0 AND " + value("quota_used") + ">=" + value("quota_limit") + ")" +
+			" OR (" + value("quota_daily_limit") + ">0 AND NOT " + dailyExpired + " AND " + value("quota_daily_used") + ">=" + value("quota_daily_limit") + ")" +
+			" OR (" + value("quota_weekly_limit") + ">0 AND NOT " + weeklyExpired + " AND " + value("quota_weekly_used") + ">=" + value("quota_weekly_limit") + ")"
+		s.Where(entsql.P(func(b *entsql.Builder) {
+			b.WriteString("NOT (").
+				Ident(accountType).
+				WriteString(" IN (").
+				Args(service.AccountTypeAPIKey, service.AccountTypeBedrock).
+				WriteString(") AND (").
+				WriteString(exceeded).
+				WriteString("))")
+		}))
+	})
 }
 
 func (r *accountRepository) loadProxies(ctx context.Context, proxyIDs []int64) (map[int64]*service.Proxy, error) {

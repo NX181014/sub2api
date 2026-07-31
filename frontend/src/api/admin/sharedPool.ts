@@ -2,12 +2,27 @@ import { apiClient } from '../client'
 
 export type PoolPeriodType = 'day' | 'week' | 'month' | 'custom'
 export type PoolAccountStatus = 'active' | 'warning' | 'banned' | 'inactive'
+export type PoolAvailabilityStatus = 'normal' | 'error' | 'rate_limited' | 'overloaded' | 'temp_unschedulable' | 'inactive' | 'manual_unschedulable'
 export type PoolSettlementStatus = 'draft' | 'locked' | 'paid'
 export type PoolLifecycleEventType = 'banned_confirmed' | 'recovered' | 'refund' | 'replaced' | 'retired'
 export type PoolCostEntryType = 'purchase' | 'renewal' | 'topup' | 'price_version' | 'refund' | 'adjustment' | 'replacement_in' | 'replacement_out' | 'write_off'
 export type PoolApprovalAction = 'UPDATE_ACCOUNT' | 'VIEW_CREDENTIAL' | 'DELETE_ACCOUNT'
 export type PoolApprovalStatus = 'pending' | 'approved' | 'rejected' | 'expired' | 'consumed'
 export type PoolApprovalScope = 'reviewable' | 'mine' | 'processed'
+
+export interface SharedPoolAccountRuntime {
+  account_status?: string | null
+  availability_status?: PoolAvailabilityStatus | null
+  schedulable?: boolean
+  error_message?: string | null
+  rate_limited_at?: string | null
+  rate_limit_reset_at?: string | null
+  overload_until?: string | null
+  temp_unschedulable_until?: string | null
+  temp_unschedulable_reason?: string | null
+  expires_at?: string | null
+  auto_pause_on_expired?: boolean
+}
 
 export interface PoolApprovalBusinessChange {
   key: string
@@ -104,7 +119,7 @@ export interface SharedPoolSummary {
   roi_rate: number
 }
 
-export interface SharedPoolAccountCost {
+export interface SharedPoolAccountCost extends SharedPoolAccountRuntime {
   id: number
   account_id: number
   account_name: string
@@ -156,11 +171,10 @@ export interface SharedPoolCostList {
   total: number
 }
 
-export interface SharedPoolCostSummary {
+export interface SharedPoolCostSummary extends SharedPoolAccountRuntime {
   account_id: number
   account_name: string
   provider_identity?: string | null
-  account_status?: string | null
   uploader_user_id?: number | null
   uploader_email?: string | null
   uploader_username?: string | null
@@ -198,6 +212,8 @@ export interface SharedPoolCostSummaryQuery {
   uploader_unassigned?: boolean
   payer_user_id?: number
   purchase_source_id?: number
+  account_status?: string
+  availability_status?: PoolAvailabilityStatus
   lifecycle_status?: string
   has_cost?: boolean
 }
@@ -212,7 +228,7 @@ export interface SharedPoolCostUploaderSummary {
   remaining_cost_minor: number
 }
 
-export interface SharedPoolLedgerEntry {
+export interface SharedPoolLedgerEntry extends SharedPoolAccountRuntime {
   id: number
   account_id: number
   account_name: string
@@ -447,6 +463,25 @@ export interface SharedPoolSettlementPreview {
   lines: SharedPoolSettlementLine[]
   account_costs: SharedPoolSettlementAccountCost[]
   account_lines: SharedPoolSettlementAccountLine[]
+  account_contexts: SharedPoolAccountContext[]
+}
+
+export interface SharedPoolAccountContext extends SharedPoolAccountRuntime {
+  id: number
+  name: string
+  platform: string
+  type?: string
+  created_at?: string
+  import_batch_id?: string
+  provider_identity?: string | null
+  contributor_user_id?: number | null
+  contributor_email?: string | null
+  created_by_user_id?: number | null
+  created_by_email?: string | null
+  created_by_username?: string | null
+  cost_sharing_enabled: boolean
+  latest_lifecycle_status: string
+  net_cost_minor: number
 }
 
 export interface SharedPoolSourceStat {
@@ -463,7 +498,7 @@ export interface SharedPoolSourceStat {
   refund_rate: number
   average_survival_days: number
   average_recovery_days?: number | null
-  accounts: Array<{
+  accounts: Array<SharedPoolAccountRuntime & {
     account_id: number
     account_name: string
     uploaded_at: string
@@ -486,7 +521,7 @@ export interface SharedPoolUploaderSourceGroup {
 
 export interface SharedPoolSourceList { items: SharedPoolUploaderSourceGroup[] }
 
-interface RawPoolAccount {
+interface RawPoolAccount extends SharedPoolAccountRuntime {
   id: number
   name: string
   platform: string
@@ -501,7 +536,7 @@ interface RawPoolAccount {
   net_cost_minor: number
 }
 
-interface RawPoolCost {
+interface RawPoolCost extends SharedPoolAccountRuntime {
   id: number
   account_id: number
   account_name: string
@@ -525,7 +560,7 @@ interface RawPoolCost {
   created_at?: string
 }
 
-interface RawRecoveryAccount {
+interface RawRecoveryAccount extends SharedPoolAccountRuntime {
   account_id: number
   account_name: string
   provider_identity?: string | null
@@ -637,6 +672,7 @@ interface RawSettlement {
   lines: RawSettlementLine[]
   account_costs?: RawSettlementAccountCost[]
   account_lines?: RawSettlementAccountLine[]
+  account_contexts?: RawPoolAccount[]
 }
 
 interface RawFXRate {
@@ -653,6 +689,13 @@ const mapLifecycleStatus = (status: string): PoolAccountStatus => {
   return 'active'
 }
 
+const mapAccountStatus = (runtime: SharedPoolAccountRuntime, lifecycleStatus: string): PoolAccountStatus => {
+  if (runtime.account_status === 'error') return 'warning'
+  if (runtime.account_status && runtime.account_status !== 'active') return 'inactive'
+  if (runtime.availability_status && runtime.availability_status !== 'normal') return 'warning'
+  return mapLifecycleStatus(lifecycleStatus)
+}
+
 const addLocalDays = (value: string, days: number): string => {
   const [year, month, day] = value.split('-').map(Number)
   const date = new Date(year, month - 1, day)
@@ -662,7 +705,8 @@ const addLocalDays = (value: string, days: number): string => {
 
 const overviewParams = (params: PoolPeriodParams) => ({
   start_date: params.start,
-  end_date: params.period_type === 'custom' ? addLocalDays(params.end, 1) : params.end
+  end_date: params.period_type === 'custom' ? addLocalDays(params.end, 1) : params.end,
+  account_id: params.account_id
 })
 
 async function getRawOverview(params: PoolPeriodParams): Promise<RawOverview> {
@@ -676,7 +720,9 @@ export async function getOverview(params: PoolPeriodParams): Promise<SharedPoolO
   return {
     summary: {
       total_accounts: raw.total_accounts,
-      active_accounts: accounts.filter((item) => mapLifecycleStatus(item.lifecycle_status) === 'active').length,
+      active_accounts: accounts.filter((item) =>
+        item.account_status ? item.account_status === 'active' : mapLifecycleStatus(item.lifecycle_status) === 'active'
+      ).length,
       recovered_accounts: raw.recovered_accounts,
       banned_accounts: accounts.filter((item) => item.lifecycle_status === 'banned_confirmed').length,
       total_purchase_cost: minorToAmount(raw.total_cost_minor),
@@ -699,7 +745,18 @@ export async function getOverview(params: PoolPeriodParams): Promise<SharedPoolO
       currency: 'CNY',
       service_start: '',
       service_end: '',
-      status: mapLifecycleStatus(item.lifecycle_status),
+      status: mapAccountStatus(item, item.lifecycle_status),
+      account_status: item.account_status,
+      availability_status: item.availability_status,
+      schedulable: item.schedulable,
+      error_message: item.error_message,
+      rate_limited_at: item.rate_limited_at,
+      rate_limit_reset_at: item.rate_limit_reset_at,
+      overload_until: item.overload_until,
+      temp_unschedulable_until: item.temp_unschedulable_until,
+      temp_unschedulable_reason: item.temp_unschedulable_reason,
+      expires_at: item.expires_at,
+      auto_pause_on_expired: item.auto_pause_on_expired,
       usage_value: minorToAmount(item.value_minor),
       roi_rate: ratioToPercent(item.recovery_rate),
       remaining_cost: minorToAmount(item.unrecovered_minor),
@@ -753,7 +810,18 @@ export async function listAccountCosts(params?: PoolPeriodParams): Promise<Share
       service_start: cost.service_start.slice(0, 10),
       service_end: cost.service_end.slice(0, 10),
       warranty_end: cost.warranty_end?.slice(0, 10),
-      status: mapLifecycleStatus(account?.latest_lifecycle_status || 'active'),
+      status: mapAccountStatus(account || {}, account?.latest_lifecycle_status || 'active'),
+      account_status: account?.account_status,
+      availability_status: account?.availability_status,
+      schedulable: account?.schedulable,
+      error_message: account?.error_message,
+      rate_limited_at: account?.rate_limited_at,
+      rate_limit_reset_at: account?.rate_limit_reset_at,
+      overload_until: account?.overload_until,
+      temp_unschedulable_until: account?.temp_unschedulable_until,
+      temp_unschedulable_reason: account?.temp_unschedulable_reason,
+      expires_at: account?.expires_at,
+      auto_pause_on_expired: account?.auto_pause_on_expired,
       usage_value: minorToAmount(recovery?.value_minor || 0),
       roi_rate: ratioToPercent(recovery?.recovery_rate || 0),
       remaining_cost: minorToAmount(recovery?.unrecovered_minor || 0),
@@ -784,8 +852,8 @@ export async function listLedgerEntries(
   return data
 }
 
-export async function listPurchaseSources(): Promise<SharedPoolPurchaseSource[]> {
-  const { data } = await apiClient.get<SharedPoolPurchaseSource[]>('/admin/pool/sources')
+export async function listPurchaseSources(params?: { referenced?: boolean }): Promise<SharedPoolPurchaseSource[]> {
+  const { data } = await apiClient.get<SharedPoolPurchaseSource[]>('/admin/pool/sources', { params })
   return data
 }
 
@@ -922,7 +990,8 @@ const mapSettlement = (raw: RawSettlement): SharedPoolSettlementPreview => {
       adjustment: minorToAmount(line.adjustment_minor),
       net_amount: minorToAmount(line.net_amount_minor),
       trace_quality: line.trace_quality
-    }))
+    })),
+    account_contexts: raw.account_contexts || []
   }
 }
 
@@ -1028,7 +1097,18 @@ export async function listSources(params?: PoolPeriodParams): Promise<SharedPool
       uploaded_at: account.uploaded_at,
       purchase_cost: minorToAmount(account.net_cost_minor),
       usage_value: minorToAmount(account.value_minor),
-      roi_rate: ratioToPercent(account.recovery_rate)
+      roi_rate: ratioToPercent(account.recovery_rate),
+      account_status: account.account_status,
+      availability_status: account.availability_status,
+      schedulable: account.schedulable,
+      error_message: account.error_message,
+      rate_limited_at: account.rate_limited_at,
+      rate_limit_reset_at: account.rate_limit_reset_at,
+      overload_until: account.overload_until,
+      temp_unschedulable_until: account.temp_unschedulable_until,
+      temp_unschedulable_reason: account.temp_unschedulable_reason,
+      expires_at: account.expires_at,
+      auto_pause_on_expired: account.auto_pause_on_expired
     })
   }
   const rate = (part: number, total: number) => total > 0 ? part / total * 100 : 0

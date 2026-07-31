@@ -298,3 +298,45 @@ func TestAdminServiceBulkUpdateAccounts_ResolvesUnassignedUploaderFilter(t *test
 	require.Equal(t, []int64{7}, repo.bulkUpdateIDs)
 	require.Equal(t, 1, result.Success)
 }
+
+func TestAdminServiceBulkUpdateAccounts_ResolvesUploaderBatchScope(t *testing.T) {
+	repo := &accountRepoStubForBulkUpdate{
+		listData:   []Account{{ID: 7}},
+		listResult: &pagination.PaginationResult{Total: 1},
+	}
+	svc := &adminServiceImpl{accountRepo: repo}
+	schedulable := true
+
+	_, err := svc.BulkUpdateAccounts(context.Background(), &BulkUpdateAccountsInput{
+		Filters: &BulkUpdateAccountFilters{
+			UploaderUserID:   42,
+			ImportBatchScope: "batched",
+		},
+		Schedulable: &schedulable,
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, int64(42), repo.selectionFilters.UploaderUserID)
+	require.Equal(t, "batched", repo.selectionFilters.ImportBatchScope)
+	require.Equal(t, []int64{7}, repo.bulkUpdateIDs)
+}
+
+func TestAdminServiceBulkUpdateAccounts_ResolvesImportBatchID(t *testing.T) {
+	repo := &accountRepoStubForBulkUpdate{
+		listData:   []Account{{ID: 11}},
+		listResult: &pagination.PaginationResult{Total: 1},
+	}
+	svc := &adminServiceImpl{accountRepo: repo}
+	schedulable := true
+
+	_, err := svc.BulkUpdateAccounts(context.Background(), &BulkUpdateAccountsInput{
+		Filters: &BulkUpdateAccountFilters{
+			ImportBatchID: "batch-20260731",
+		},
+		Schedulable: &schedulable,
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, "batch-20260731", repo.selectionFilters.ImportBatchID)
+	require.Equal(t, []int64{11}, repo.bulkUpdateIDs)
+}

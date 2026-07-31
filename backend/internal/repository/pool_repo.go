@@ -20,11 +20,16 @@ type poolRepository struct{ db *sql.DB }
 
 func NewPoolRepository(db *sql.DB) service.PoolRepository { return &poolRepository{db: db} }
 
+const poolRuntimeColumns = `a.status,COALESCE(a.error_message,'') AS error_message,a.schedulable,
+       a.rate_limited_at,a.rate_limit_reset_at,a.overload_until,
+       a.temp_unschedulable_until,COALESCE(a.temp_unschedulable_reason,'') AS temp_unschedulable_reason,
+       a.expires_at,a.auto_pause_on_expired`
+
 const poolAccountSelect = `
-SELECT a.id, a.name, a.platform, a.provider_identity,
+SELECT a.id, a.name, a.platform, a.type, a.created_at, COALESCE(a.extra->>'import_batch_id',''), a.provider_identity,
        a.contributor_user_id, contributor.email,
        a.created_by_user_id, creator.email, COALESCE(NULLIF(creator.username,''),creator.email),
-       a.cost_sharing_enabled,
+       a.cost_sharing_enabled,` + poolRuntimeColumns + `,
        COALESCE(lifecycle.event_type, 'active'), lifecycle.occurred_at,
        COALESCE(costs.net_cost_minor, 0)
 FROM accounts a
@@ -44,11 +49,34 @@ LEFT JOIN LATERAL (
 ) costs ON TRUE
 WHERE a.deleted_at IS NULL`
 
+func poolRuntimeScanTargets(state *service.PoolAccountRuntime) []any {
+	return []any{
+		&state.AccountStatus, &state.ErrorMessage, &state.Schedulable,
+		&state.RateLimitedAt, &state.RateLimitResetAt, &state.OverloadUntil,
+		&state.TempUnschedulableUntil, &state.TempUnschedulableReason,
+		&state.ExpiresAt, &state.AutoPauseOnExpired,
+	}
+}
+
+func finalizePoolRuntime(state *service.PoolAccountRuntime) {
+	now := time.Now()
+	if state.AutoPauseOnExpired && state.ExpiresAt != nil && !now.Before(*state.ExpiresAt) {
+		state.Schedulable = false
+	}
+	state.AvailabilityStatus = service.ResolvePoolAvailability(*state, now)
+}
+
 func scanPoolAccount(scanner interface{ Scan(...any) error }) (*service.PoolAccount, error) {
 	var item service.PoolAccount
-	err := scanner.Scan(&item.ID, &item.Name, &item.Platform, &item.ProviderIdentity,
+	targets := []any{&item.ID, &item.Name, &item.Platform, &item.Type, &item.CreatedAt, &item.ImportBatchID, &item.ProviderIdentity,
 		&item.ContributorUserID, &item.ContributorEmail, &item.CreatedByUserID, &item.CreatedByEmail, &item.CreatedByUsername,
-		&item.CostSharingEnabled, &item.LatestLifecycleStatus, &item.LatestLifecycleAt, &item.NetCostMinor)
+		&item.CostSharingEnabled}
+	targets = append(targets, poolRuntimeScanTargets(&item.PoolAccountRuntime)...)
+	targets = append(targets, &item.LatestLifecycleStatus, &item.LatestLifecycleAt, &item.NetCostMinor)
+	err := scanner.Scan(targets...)
+	if err == nil {
+		finalizePoolRuntime(&item.PoolAccountRuntime)
+	}
 	return &item, err
 }
 
@@ -106,8 +134,19 @@ func int64Value(v *int64) int64 {
 }
 func boolValue(v *bool) bool { return v != nil && *v }
 
-func (r *poolRepository) ListSources(ctx context.Context) ([]service.PurchaseSource, error) {
-	rows, err := r.db.QueryContext(ctx, `SELECT id, name, website_url, notes, active, created_at, updated_at FROM purchase_sources ORDER BY active DESC, name ASC`)
+func (r *poolRepository) ListSources(ctx context.Context, referencedOnly bool) ([]service.PurchaseSource, error) {
+	query := `
+SELECT ps.id,ps.name,ps.website_url,ps.notes,ps.active,ps.created_at,ps.updated_at
+FROM purchase_sources ps`
+	if referencedOnly {
+		query += `
+WHERE EXISTS (
+	SELECT 1 FROM account_cost_entries c
+	JOIN accounts a ON a.id=c.account_id AND a.deleted_at IS NULL
+	WHERE c.purchase_source_id=ps.id
+)`
+	}
+	rows, err := r.db.QueryContext(ctx, query+` ORDER BY ps.active DESC,ps.name ASC`)
 	if err != nil {
 		return nil, fmt.Errorf("list purchase sources: %w", err)
 	}
@@ -145,7 +184,7 @@ func isPoolUniqueViolation(err error) bool {
 }
 
 const costSelect = `
-SELECT c.id, c.account_id, a.name, c.payer_user_id, u.email,
+SELECT c.id, c.account_id, a.name,` + poolRuntimeColumns + `,c.payer_user_id, u.email,
        c.purchase_source_id, ps.name, c.entry_type, c.currency,
        c.original_amount, c.cny_amount_minor, c.fx_rate,
        c.service_start, c.service_end, c.warranty_end, c.paid_at,
@@ -158,19 +197,25 @@ LEFT JOIN purchase_sources ps ON ps.id = c.purchase_source_id`
 
 func scanCost(scanner interface{ Scan(...any) error }) (*service.AccountCostEntry, error) {
 	var item service.AccountCostEntry
-	err := scanner.Scan(&item.ID, &item.AccountID, &item.AccountName, &item.PayerUserID, &item.PayerEmail,
+	targets := []any{&item.ID, &item.AccountID, &item.AccountName}
+	targets = append(targets, poolRuntimeScanTargets(&item.PoolAccountRuntime)...)
+	targets = append(targets, &item.PayerUserID, &item.PayerEmail,
 		&item.PurchaseSourceID, &item.PurchaseSource, &item.EntryType, &item.Currency,
 		&item.OriginalAmount, &item.CNYAmountMinor, &item.FXRate, &item.ServiceStart, &item.ServiceEnd,
 		&item.WarrantyEnd, &item.PaidAt, &item.OrderNo, &item.PurchaseURL, &item.Note, &item.SupersedesID,
 		&item.RelatedAccountID, &item.ExpectedTokenCount, &item.CreatedByUserID, &item.CreatedAt)
+	err := scanner.Scan(targets...)
+	if err == nil {
+		finalizePoolRuntime(&item.PoolAccountRuntime)
+	}
 	return &item, err
 }
 
 func (r *poolRepository) ListCosts(ctx context.Context, accountID *int64) ([]service.AccountCostEntry, error) {
-	query := costSelect
+	query := costSelect + ` WHERE a.deleted_at IS NULL`
 	args := []any{}
 	if accountID != nil {
-		query += ` WHERE c.account_id = $1`
+		query += ` AND c.account_id = $1`
 		args = append(args, *accountID)
 	}
 	query += ` ORDER BY c.paid_at DESC, c.id DESC`
@@ -191,7 +236,7 @@ func (r *poolRepository) ListCosts(ctx context.Context, accountID *int64) ([]ser
 }
 
 func (r *poolRepository) ListCostEntries(ctx context.Context, filter service.AccountCostEntryFilter, limit, offset int) ([]service.AccountCostEntry, int64, error) {
-	conditions := make([]string, 0, 8)
+	conditions := []string{"a.deleted_at IS NULL"}
 	args := make([]any, 0, 8)
 	arg := func(value any) string {
 		args = append(args, value)
@@ -324,7 +369,7 @@ INSERT INTO account_cost_entries(
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
-	return scanCost(r.db.QueryRowContext(ctx, costSelect+` WHERE c.id = $1`, id))
+	return scanCost(r.db.QueryRowContext(ctx, costSelect+` WHERE a.deleted_at IS NULL AND c.id = $1`, id))
 }
 
 func (r *poolRepository) ListCostSummaries(ctx context.Context, filter service.AccountCostSummaryFilter, limit, offset int) ([]service.AccountCostSummary, int64, error) {
@@ -337,13 +382,13 @@ func (r *poolRepository) ListCostSummaries(ctx context.Context, filter service.A
 	limitArg, offsetArg := len(args)+1, len(args)+2
 	rows, err := r.db.QueryContext(ctx, fmt.Sprintf(`
 WITH filtered AS (
-    SELECT a.id,a.name,a.provider_identity,a.status,a.created_by_user_id,a.contributor_user_id,a.expected_token_count
+    SELECT a.id,a.name,a.provider_identity,`+poolRuntimeColumns+`,a.created_by_user_id,a.contributor_user_id,a.expected_token_count
     FROM accounts a
     WHERE %s
     ORDER BY a.id DESC
     LIMIT $%d OFFSET $%d
 )
-SELECT a.id,a.name,a.provider_identity,a.status,
+SELECT a.id,a.name,a.provider_identity,`+poolRuntimeColumns+`,
        a.created_by_user_id,uploader.email,COALESCE(NULLIF(uploader.username,''),uploader.email),a.contributor_user_id,contributor.email,a.expected_token_count,
        COALESCE(usage.total_tokens,0)::bigint,
        COALESCE(costs.purchase_cost_minor,0)::bigint,COALESCE(costs.refund_minor,0)::bigint,
@@ -405,16 +450,19 @@ ORDER BY a.id DESC`, where, limitArg, offsetArg), queryArgs...)
 	for rows.Next() {
 		var item service.AccountCostSummary
 		var trancheJSON []byte
-		if err := rows.Scan(
-			&item.AccountID, &item.AccountName, &item.ProviderIdentity, &item.AccountStatus,
+		targets := []any{&item.AccountID, &item.AccountName, &item.ProviderIdentity}
+		targets = append(targets, poolRuntimeScanTargets(&item.PoolAccountRuntime)...)
+		targets = append(targets,
 			&item.UploaderUserID, &item.UploaderEmail, &item.UploaderUsername, &item.ContributorUserID, &item.ContributorEmail, &item.ExpectedTokenCount,
 			&item.TotalUsageTokens, &item.PurchaseCostMinor, &item.RefundMinor, &item.TransferredOutMinor, &item.WrittenOffMinor, &item.CostBasisMinor, &item.NetCostMinor, &trancheJSON, &item.EntryCount,
 			&item.LatestLifecycleStatus, &item.LatestLifecycleAt, &item.LatestPayerUserID, &item.LatestPayerEmail,
 			&item.LatestPurchaseSourceID, &item.LatestPurchaseSource, &item.LatestOrderNo,
 			&item.LatestServiceStart, &item.LatestServiceEnd, &item.PurchasedAt,
-		); err != nil {
+		)
+		if err := rows.Scan(targets...); err != nil {
 			return nil, 0, fmt.Errorf("scan account cost summary: %w", err)
 		}
+		finalizePoolRuntime(&item.PoolAccountRuntime)
 		item.CostTranches, err = decodePoolCostTranches(trancheJSON)
 		if err != nil {
 			return nil, 0, fmt.Errorf("decode account cost tranches: %w", err)
@@ -520,7 +568,10 @@ ORDER BY COALESCE(c.created_by_user_id,0),c.account_id`, where, limitArg, offset
 }
 
 func buildCostSummaryWhere(filter service.AccountCostSummaryFilter) (string, []any) {
-	conditions := []string{"(a.cost_sharing_enabled=TRUE OR EXISTS (SELECT 1 FROM account_cost_entries pc WHERE pc.account_id=a.id))"}
+	conditions := []string{
+		"a.deleted_at IS NULL",
+		"(a.cost_sharing_enabled=TRUE OR EXISTS (SELECT 1 FROM account_cost_entries pc WHERE pc.account_id=a.id))",
+	}
 	args := make([]any, 0)
 	arg := func(value any) string {
 		args = append(args, value)
@@ -534,6 +585,12 @@ func buildCostSummaryWhere(filter service.AccountCostSummaryFilter) (string, []a
 		conditions = append(conditions, "a.created_by_user_id="+arg(*filter.UploaderUserID))
 	} else if filter.UploaderUnassigned {
 		conditions = append(conditions, "a.created_by_user_id IS NULL")
+	}
+	if filter.AccountStatus != "" {
+		conditions = append(conditions, "a.status="+arg(filter.AccountStatus))
+	}
+	if filter.AvailabilityStatus != "" {
+		conditions = append(conditions, poolAvailabilitySQL("a")+"="+arg(filter.AvailabilityStatus))
 	}
 	costConditions := make([]string, 0, 3)
 	if filter.PayerUserID != nil {
@@ -559,6 +616,18 @@ func buildCostSummaryWhere(filter service.AccountCostSummaryFilter) (string, []a
 		conditions = append(conditions, prefix+"EXISTS (SELECT 1 FROM account_cost_entries hc WHERE hc.account_id=a.id)")
 	}
 	return strings.Join(conditions, " AND "), args
+}
+
+func poolAvailabilitySQL(alias string) string {
+	return `CASE
+WHEN ` + alias + `.status='error' THEN 'error'
+WHEN ` + alias + `.status<>'active' THEN 'inactive'
+WHEN NOT ` + alias + `.schedulable THEN 'manual_unschedulable'
+WHEN ` + alias + `.auto_pause_on_expired AND ` + alias + `.expires_at IS NOT NULL AND ` + alias + `.expires_at<=NOW() THEN 'manual_unschedulable'
+WHEN ` + alias + `.overload_until IS NOT NULL AND ` + alias + `.overload_until>NOW() THEN 'overloaded'
+WHEN ` + alias + `.rate_limit_reset_at IS NOT NULL AND ` + alias + `.rate_limit_reset_at>NOW() THEN 'rate_limited'
+WHEN ` + alias + `.temp_unschedulable_until IS NOT NULL AND ` + alias + `.temp_unschedulable_until>NOW() THEN 'temp_unschedulable'
+ELSE 'normal' END`
 }
 
 func (r *poolRepository) CreateCostsBatch(ctx context.Context, inputs []service.CreateAccountCostInput) ([]service.AccountCostEntry, error) {
@@ -653,7 +722,7 @@ INSERT INTO account_cost_entries(
 	}
 	items := make([]service.AccountCostEntry, 0, len(ids))
 	for _, id := range ids {
-		item, scanErr := scanCost(tx.QueryRowContext(ctx, costSelect+` WHERE c.id=$1`, id))
+		item, scanErr := scanCost(tx.QueryRowContext(ctx, costSelect+` WHERE a.deleted_at IS NULL AND c.id=$1`, id))
 		if scanErr != nil {
 			return nil, fmt.Errorf("load batch account cost: %w", scanErr)
 		}
@@ -680,10 +749,10 @@ func scanLifecycle(scanner interface{ Scan(...any) error }) (*service.AccountLif
 }
 
 func (r *poolRepository) ListLifecycle(ctx context.Context, accountID *int64) ([]service.AccountLifecycleEvent, error) {
-	query := lifecycleSelect
+	query := lifecycleSelect + ` WHERE a.deleted_at IS NULL`
 	args := []any{}
 	if accountID != nil {
-		query += ` WHERE e.account_id = $1`
+		query += ` AND e.account_id = $1`
 		args = append(args, *accountID)
 	}
 	query += ` ORDER BY e.occurred_at DESC, e.id DESC`
@@ -762,7 +831,7 @@ VALUES ($1,$2,'refund','CNY',$3,$4,'1',$5,$6,$7,'lifecycle refund',$8)`,
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
-	return scanLifecycle(r.db.QueryRowContext(ctx, lifecycleSelect+` WHERE e.id = $1`, id))
+	return scanLifecycle(r.db.QueryRowContext(ctx, lifecycleSelect+` WHERE a.deleted_at IS NULL AND e.id = $1`, id))
 }
 
 func (r *poolRepository) ListFXRates(ctx context.Context) ([]service.ValuationFXRate, error) {
@@ -824,7 +893,7 @@ func (r *poolRepository) SettlementInputs(ctx context.Context, start, end time.T
 	costRows, err := r.db.QueryContext(ctx, `
 SELECT c.id,c.account_id,c.payer_user_id,c.entry_type,c.cny_amount_minor,c.service_start,c.service_end
 FROM account_cost_entries c JOIN accounts a ON a.id=c.account_id
-WHERE a.cost_sharing_enabled=TRUE
+WHERE a.cost_sharing_enabled=TRUE AND a.deleted_at IS NULL
 	AND c.entry_type<>'write_off'
   AND c.service_start < $2::date AND c.service_end > $1::date
   AND ($3::bigint IS NULL OR c.account_id=$3)
@@ -851,7 +920,7 @@ ORDER BY c.id`, args...)
 	usageRows, err := r.db.QueryContext(ctx, `
 SELECT a.id,ul.user_id,u.email,u.username,SUM(ul.total_cost)::text
 FROM usage_logs ul
-JOIN accounts a ON a.id=ul.account_id AND a.cost_sharing_enabled=TRUE
+JOIN accounts a ON a.id=ul.account_id AND a.cost_sharing_enabled=TRUE AND a.deleted_at IS NULL
 JOIN users u ON u.id=ul.user_id AND u.deleted_at IS NULL
 WHERE ul.created_at >= $1 AND ul.created_at < $2 AND ul.total_cost > 0
   AND ($3::bigint IS NULL OR a.id=$3)
@@ -896,7 +965,7 @@ SELECT COUNT(*)::bigint,
 	         ul.cache_read_tokens::bigint+ul.image_output_tokens::bigint+ul.image_input_tokens::bigint,1))
 	         FILTER (WHERE ul.total_cost <= 0),0)::bigint
 FROM usage_logs ul
-JOIN accounts a ON a.id=ul.account_id AND a.cost_sharing_enabled=TRUE
+JOIN accounts a ON a.id=ul.account_id AND a.cost_sharing_enabled=TRUE AND a.deleted_at IS NULL
 JOIN users u ON u.id=ul.user_id AND u.deleted_at IS NULL
 WHERE ul.created_at >= $1 AND ul.created_at < $2
   AND ($3::bigint IS NULL OR a.id=$3)
@@ -1079,7 +1148,7 @@ WITH draft_cost_ids AS (
 	WHERE settlement_id=$1 AND kind='period'
 ), current_cost_ids AS (
   SELECT c.id FROM account_cost_entries c JOIN accounts a ON a.id=c.account_id
-	WHERE a.cost_sharing_enabled=TRUE AND c.entry_type<>'write_off'
+	WHERE a.cost_sharing_enabled=TRUE AND a.deleted_at IS NULL AND c.entry_type<>'write_off'
     AND c.service_start < $3::date AND c.service_end > $2::date
     AND ($4::bigint IS NULL OR c.account_id=$4)
     AND ($5::bigint IS NULL OR a.created_by_user_id=$5)
@@ -1088,7 +1157,7 @@ WITH draft_cost_ids AS (
 ), current_weights AS (
 	SELECT a.id account_id,ul.user_id,SUM(ul.total_cost)::numeric weight
   FROM usage_logs ul
-	JOIN accounts a ON a.id=ul.account_id AND a.cost_sharing_enabled=TRUE
+	JOIN accounts a ON a.id=ul.account_id AND a.cost_sharing_enabled=TRUE AND a.deleted_at IS NULL
   JOIN users u ON u.id=ul.user_id AND u.deleted_at IS NULL
   WHERE ul.created_at >= $2 AND ul.created_at < $3 AND ul.total_cost > 0
     AND ($4::bigint IS NULL OR a.id=$4)
@@ -1108,7 +1177,7 @@ WITH draft_cost_ids AS (
   SELECT COUNT(*)::bigint candidate_count,
          COUNT(*) FILTER (WHERE ul.total_cost <= 0)::bigint unpriced_count
   FROM usage_logs ul
-	JOIN accounts a ON a.id=ul.account_id AND a.cost_sharing_enabled=TRUE
+	JOIN accounts a ON a.id=ul.account_id AND a.cost_sharing_enabled=TRUE AND a.deleted_at IS NULL
   JOIN users u ON u.id=ul.user_id AND u.deleted_at IS NULL
   WHERE ul.created_at >= $2 AND ul.created_at < $3
     AND ($4::bigint IS NULL OR a.id=$4)
@@ -1319,8 +1388,10 @@ func scanSettlement(scanner interface{ Scan(...any) error }) (*service.PoolSettl
 
 func (r *poolRepository) loadSettlementAccountCosts(ctx context.Context, id int64) ([]service.PoolSettlementAccountCost, error) {
 	rows, err := r.db.QueryContext(ctx, `
-SELECT id,settlement_id,account_id,cost_entry_id,kind,payer_user_id,amount_minor
-FROM pool_settlement_account_costs WHERE settlement_id=$1 ORDER BY account_id,kind,cost_entry_id`, id)
+SELECT c.id,c.settlement_id,c.account_id,c.cost_entry_id,c.kind,c.payer_user_id,c.amount_minor
+FROM pool_settlement_account_costs c
+JOIN accounts a ON a.id=c.account_id AND a.deleted_at IS NULL
+WHERE c.settlement_id=$1 ORDER BY c.account_id,c.kind,c.cost_entry_id`, id)
 	if err != nil {
 		return nil, err
 	}
@@ -1352,11 +1423,36 @@ func (r *poolRepository) loadSettlementCosts(ctx context.Context, item *service.
 	return nil
 }
 
+func (r *poolRepository) loadSettlementAccountContexts(ctx context.Context, id int64) ([]service.PoolAccount, error) {
+	rows, err := r.db.QueryContext(ctx, poolAccountSelect+`
+AND EXISTS (
+	SELECT 1 FROM pool_settlement_account_costs c WHERE c.settlement_id=$1 AND c.account_id=a.id
+	UNION ALL
+	SELECT 1 FROM pool_settlement_account_lines l WHERE l.settlement_id=$1 AND l.account_id=a.id
+)
+ORDER BY a.id`, id)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	items := make([]service.PoolAccount, 0)
+	for rows.Next() {
+		item, scanErr := scanPoolAccount(rows)
+		if scanErr != nil {
+			return nil, scanErr
+		}
+		items = append(items, *item)
+	}
+	return items, rows.Err()
+}
+
 func (r *poolRepository) loadSettlementAccountLines(ctx context.Context, id int64) ([]service.PoolSettlementAccountLine, error) {
 	rows, err := r.db.QueryContext(ctx, `
 SELECT l.id,l.settlement_id,l.account_id,l.user_id,u.email,u.username,l.account_usage_weight,l.usage_share,
        l.allocated_cost_minor,l.contribution_credit_minor,l.adjustment_minor,l.net_amount_minor,l.trace_quality
-FROM pool_settlement_account_lines l JOIN users u ON u.id=l.user_id
+FROM pool_settlement_account_lines l
+JOIN accounts a ON a.id=l.account_id AND a.deleted_at IS NULL
+JOIN users u ON u.id=l.user_id
 WHERE l.settlement_id=$1 ORDER BY l.account_id,l.user_id`, id)
 	if err != nil {
 		return nil, err
@@ -1402,15 +1498,21 @@ func (r *poolRepository) GetSettlement(ctx context.Context, id int64) (*service.
 	if err != nil {
 		return nil, err
 	}
+	return item, r.loadSettlementDetails(ctx, item)
+}
+
+func (r *poolRepository) loadSettlementDetails(ctx context.Context, item *service.PoolSettlement) (err error) {
 	if err = r.loadSettlementCosts(ctx, item); err != nil {
-		return nil, err
+		return err
 	}
-	item.Lines, err = r.loadSettlementLines(ctx, id)
-	if err != nil {
-		return nil, err
+	if item.AccountContexts, err = r.loadSettlementAccountContexts(ctx, item.ID); err != nil {
+		return err
 	}
-	item.AccountLines, err = r.loadSettlementAccountLines(ctx, id)
-	return item, err
+	if item.Lines, err = r.loadSettlementLines(ctx, item.ID); err != nil {
+		return err
+	}
+	item.AccountLines, err = r.loadSettlementAccountLines(ctx, item.ID)
+	return err
 }
 
 func (r *poolRepository) ListSettlements(ctx context.Context, accountID *int64, limit, offset int) ([]service.PoolSettlement, int64, error) {
@@ -1418,17 +1520,17 @@ func (r *poolRepository) ListSettlements(ctx context.Context, accountID *int64, 
 	if err := r.db.QueryRowContext(ctx, `
 SELECT COUNT(*) FROM pool_settlements s
 WHERE ($1::bigint IS NULL OR EXISTS (
-  SELECT 1 FROM pool_settlement_account_costs c WHERE c.settlement_id=s.id AND c.account_id=$1
+  SELECT 1 FROM pool_settlement_account_costs c JOIN accounts a ON a.id=c.account_id AND a.deleted_at IS NULL WHERE c.settlement_id=s.id AND c.account_id=$1
   UNION
-  SELECT 1 FROM pool_settlement_account_lines l WHERE l.settlement_id=s.id AND l.account_id=$1
+  SELECT 1 FROM pool_settlement_account_lines l JOIN accounts a ON a.id=l.account_id AND a.deleted_at IS NULL WHERE l.settlement_id=s.id AND l.account_id=$1
 ))`, accountID).Scan(&total); err != nil {
 		return nil, 0, err
 	}
 	rows, err := r.db.QueryContext(ctx, settlementSelect+`
 WHERE ($1::bigint IS NULL OR EXISTS (
-  SELECT 1 FROM pool_settlement_account_costs c WHERE c.settlement_id=pool_settlements.id AND c.account_id=$1
+  SELECT 1 FROM pool_settlement_account_costs c JOIN accounts a ON a.id=c.account_id AND a.deleted_at IS NULL WHERE c.settlement_id=pool_settlements.id AND c.account_id=$1
   UNION
-  SELECT 1 FROM pool_settlement_account_lines l WHERE l.settlement_id=pool_settlements.id AND l.account_id=$1
+  SELECT 1 FROM pool_settlement_account_lines l JOIN accounts a ON a.id=l.account_id AND a.deleted_at IS NULL WHERE l.settlement_id=pool_settlements.id AND l.account_id=$1
 )) ORDER BY period_start DESC,id DESC LIMIT $2 OFFSET $3`, accountID, limit, offset)
 	if err != nil {
 		return nil, 0, err
@@ -1449,21 +1551,30 @@ WHERE ($1::bigint IS NULL OR EXISTS (
 		return nil, 0, err
 	}
 	for i := range items {
-		if err := r.loadSettlementCosts(ctx, &items[i]); err != nil {
+		if err := r.loadSettlementDetails(ctx, &items[i]); err != nil {
 			return nil, 0, err
 		}
 	}
 	return items, total, nil
 }
 
-func (r *poolRepository) GetRecovery(ctx context.Context, start, end time.Time) ([]service.AccountRecovery, error) {
+func (r *poolRepository) GetRecovery(ctx context.Context, start, end time.Time, accountID ...*int64) ([]service.AccountRecovery, error) {
 	_ = start // Recovery is cumulative as of end; start is used by period AA only.
+	accountClause := ""
+	args := []any{end}
+	if len(accountID) > 0 && accountID[0] != nil {
+		accountClause = " AND a.id=$2"
+		args = append(args, *accountID[0])
+	}
 	rows, err := r.db.QueryContext(ctx, `
 WITH RECURSIVE pool_accounts AS (
   SELECT a.id,a.name,a.provider_identity,a.created_at,a.created_by_user_id,
+         `+poolRuntimeColumns+`,
          COALESCE(NULLIF(uploader.username,''),uploader.email) uploader_username
   FROM accounts a LEFT JOIN users uploader ON uploader.id=a.created_by_user_id
-	WHERE a.cost_sharing_enabled=TRUE
+	WHERE a.deleted_at IS NULL
+	  AND (a.cost_sharing_enabled=TRUE OR EXISTS (SELECT 1 FROM account_cost_entries pc WHERE pc.account_id=a.id))
+`+accountClause+`
 ), costs AS (
   SELECT a.id account_id,
 	       COALESCE(SUM(c.cny_amount_minor) FILTER (WHERE c.entry_type NOT IN ('refund','replacement_out','write_off')),0)::bigint cost_basis_minor,
@@ -1568,7 +1679,7 @@ WITH RECURSIVE pool_accounts AS (
   SELECT c.account_id,TRUE has_investment FROM account_cost_entries c JOIN pool_accounts a ON a.id=c.account_id
 	WHERE c.paid_at<$1 AND c.cny_amount_minor>0 AND c.expected_token_count>0 GROUP BY c.account_id
 )
-SELECT a.id,a.name,a.provider_identity,a.created_by_user_id,a.uploader_username,a.created_at,
+SELECT a.id,a.name,a.provider_identity,`+poolRuntimeColumns+`,a.created_by_user_id,a.uploader_username,a.created_at,
        source.name,COALESCE(lifecycle.event_type,'active'),
 	   COALESCE(c.cost_basis_minor,0),
 	   LEAST(COALESCE(c.cost_basis_minor,0),
@@ -1591,7 +1702,7 @@ LEFT JOIN lifecycle ON lifecycle.account_id=a.id LEFT JOIN banned ON banned.acco
 LEFT JOIN refunds ON refunds.account_id=a.id
 LEFT JOIN recoveries ON recoveries.account_id=a.id LEFT JOIN current_balances ON current_balances.account_id=a.id
 LEFT JOIN investments ON investments.account_id=a.id
-ORDER BY a.id DESC`, end)
+ORDER BY a.id DESC`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("get pool recovery: %w", err)
 	}
@@ -1599,9 +1710,13 @@ ORDER BY a.id DESC`, end)
 	items := make([]service.AccountRecovery, 0)
 	for rows.Next() {
 		var item service.AccountRecovery
-		if err := rows.Scan(&item.AccountID, &item.AccountName, &item.ProviderIdentity, &item.UploaderUserID, &item.UploaderUsername, &item.UploadedAt, &item.PurchaseSource, &item.LifecycleStatus, &item.NetCostMinor, &item.ValueMinor, &item.AverageDailyTokens, &item.PurchasedAt, &item.BannedAt, &item.Refunded, &item.EffectiveUsageDays, &item.ObservationDays, &item.BannedLossMinor, &item.FirstRecoveryAt, &item.LatestRecoveryAt, &item.CurrentlyRecovered, &item.ExpectedTokens, &item.UsedTokens, &item.RemainingTokens); err != nil {
+		targets := []any{&item.AccountID, &item.AccountName, &item.ProviderIdentity}
+		targets = append(targets, poolRuntimeScanTargets(&item.PoolAccountRuntime)...)
+		targets = append(targets, &item.UploaderUserID, &item.UploaderUsername, &item.UploadedAt, &item.PurchaseSource, &item.LifecycleStatus, &item.NetCostMinor, &item.ValueMinor, &item.AverageDailyTokens, &item.PurchasedAt, &item.BannedAt, &item.Refunded, &item.EffectiveUsageDays, &item.ObservationDays, &item.BannedLossMinor, &item.FirstRecoveryAt, &item.LatestRecoveryAt, &item.CurrentlyRecovered, &item.ExpectedTokens, &item.UsedTokens, &item.RemainingTokens)
+		if err := rows.Scan(targets...); err != nil {
 			return nil, err
 		}
+		finalizePoolRuntime(&item.PoolAccountRuntime)
 		finalizeAccountRecovery(&item, end)
 		items = append(items, item)
 	}

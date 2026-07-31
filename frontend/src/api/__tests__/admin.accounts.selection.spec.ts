@@ -40,6 +40,23 @@ describe('admin account selection API', () => {
     })
   })
 
+  it('passes the standalone and batched workbench scopes to server-side queries', async () => {
+    const page = { items: [], total: 0, page: 1, page_size: 20, pages: 0 }
+    const summary = { total: 0, platforms: [], types: [] }
+    get.mockResolvedValueOnce({ data: page }).mockResolvedValueOnce({ data: summary })
+
+    await listRows(1, 20, { import_batch_scope: 'batched' })
+    await getSelectionSummary({ import_batch_scope: 'standalone' })
+
+    expect(get).toHaveBeenNthCalledWith(1, '/admin/accounts/rows', {
+      params: { page: 1, page_size: 20, import_batch_scope: 'batched' },
+      signal: undefined
+    })
+    expect(get).toHaveBeenNthCalledWith(2, '/admin/accounts/selection-summary', {
+      params: { import_batch_scope: 'standalone' }
+    })
+  })
+
   it('serializes uploader and import batch filters for export', async () => {
     get.mockResolvedValueOnce({ data: { accounts: [] } })
 
@@ -48,6 +65,16 @@ describe('admin account selection API', () => {
     })
     expect(get).toHaveBeenCalledWith('/admin/accounts/data', {
       params: { uploader_user_id: '77', import_batch_id: '668f52b3-14af-4a5a-bde0-e923ed69299a' }
+    })
+  })
+
+  it('serializes workbench scope for export', async () => {
+    get.mockResolvedValueOnce({ data: { accounts: [] } })
+
+    await exportData({ filters: { import_batch_scope: 'standalone' } })
+
+    expect(get).toHaveBeenCalledWith('/admin/accounts/data', {
+      params: { import_batch_scope: 'standalone' }
     })
   })
 })

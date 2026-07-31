@@ -195,6 +195,88 @@
         </div>
       </template>
       <template #table>
+        <div :class="embedded ? 'flex min-h-0 flex-1 flex-col lg:flex-row' : 'contents'">
+          <aside
+            v-if="embedded"
+            class="shrink-0 border-b border-gray-200 bg-gray-50/60 dark:border-dark-700 dark:bg-dark-900/30 lg:w-72 lg:border-b-0 lg:border-r"
+            :aria-label="t('admin.accounts.importBatchGroup')"
+          >
+            <div class="flex items-start gap-2 overflow-x-auto p-3 lg:block lg:h-full lg:space-y-1 lg:overflow-y-auto">
+              <button
+                type="button"
+                data-test="workbench-all"
+                :class="['workbench-nav-item', workbenchScope === 'all' ? 'workbench-nav-item-active' : '']"
+                @click="selectWorkbenchScope('all')"
+              >
+                <span class="truncate font-medium">{{ t('admin.sharedPool.ledger.allAccounts') }}</span>
+                <span class="shrink-0 text-xs tabular-nums text-gray-500 dark:text-gray-400">{{ workbenchAccountTotal }}</span>
+              </button>
+              <button
+                type="button"
+                data-test="workbench-standalone"
+                :class="['workbench-nav-item', workbenchScope === 'standalone' ? 'workbench-nav-item-active' : '']"
+                @click="selectWorkbenchScope('standalone')"
+              >
+                <span class="truncate font-medium">{{ t('admin.accounts.standaloneImport') }}</span>
+                <span class="shrink-0 text-xs tabular-nums text-gray-500 dark:text-gray-400">{{ workbenchStandaloneCount }}</span>
+              </button>
+
+              <div
+                v-for="group in workbenchUploaderGroups"
+                :key="String(group.id)"
+                class="flex min-w-max items-start gap-1 border-l border-gray-200 pl-2 dark:border-dark-700 lg:block lg:min-w-0 lg:space-y-1 lg:border-l-0 lg:border-t lg:pl-0 lg:pt-2"
+              >
+                <button
+                  type="button"
+                  data-test="workbench-uploader"
+                  :class="['workbench-nav-item', workbenchScope === 'uploader' && String(selectedWorkbenchUploaderID) === String(group.id) ? 'workbench-nav-item-active' : '']"
+                  @click="selectWorkbenchUploader(group)"
+                >
+                  <span class="truncate font-medium" :title="group.label">{{ group.label }}</span>
+                  <span class="shrink-0 text-xs tabular-nums text-gray-500 dark:text-gray-400">{{ group.count }}</span>
+                </button>
+                <button
+                  v-for="batch in group.batches"
+                  :key="batch.id"
+                  type="button"
+                  data-test="workbench-batch"
+                  :class="['workbench-batch-item', selectedWorkbenchBatchID === batch.id ? 'workbench-batch-item-active' : '']"
+                  @click="selectWorkbenchBatch(batch)"
+                >
+                  <span class="min-w-0">
+                    <span class="block truncate font-medium text-gray-800 dark:text-gray-100" :title="batch.names.join('、')">
+                      {{ batch.names.join('、') || t('admin.accounts.importBatchGroup') }}
+                    </span>
+                    <span class="block truncate text-xs text-gray-500 dark:text-gray-400">
+                      {{ formatDateTime(batch.created_at) }} · {{ batch.id }}
+                    </span>
+                  </span>
+                  <span class="shrink-0 text-xs tabular-nums text-gray-500 dark:text-gray-400">{{ batch.matched_count }}</span>
+                </button>
+              </div>
+              <LoadingSpinner v-if="workbenchNavigatorLoading" class="m-3 shrink-0" />
+            </div>
+          </aside>
+
+          <section class="flex min-h-0 min-w-0 flex-1 flex-col">
+            <header v-if="embedded" class="flex flex-wrap items-start justify-between gap-3 border-b border-gray-200 px-4 py-3 dark:border-dark-700">
+              <div class="min-w-0">
+                <h2 class="truncate text-base font-semibold text-gray-900 dark:text-white" :title="workbenchTitle">{{ workbenchTitle }}</h2>
+                <p class="mt-0.5 truncate text-xs text-gray-500 dark:text-gray-400" :title="workbenchSubtitle">{{ workbenchSubtitle }}</p>
+              </div>
+              <div v-if="selectedWorkbenchBatch" class="flex max-w-full flex-wrap justify-end gap-1.5">
+                <span
+                  v-for="item in batchStatusItems(selectedWorkbenchBatch.status)"
+                  :key="item.key"
+                  :class="['inline-flex items-center rounded px-2 py-1 text-xs font-medium', item.className]"
+                >
+                  {{ item.label }} {{ item.count }}
+                </span>
+                <span class="inline-flex items-center rounded bg-gray-100 px-2 py-1 text-xs font-medium text-gray-600 dark:bg-dark-700 dark:text-gray-300">
+                  {{ t('admin.accounts.importBatchSchedulable', { current: selectedWorkbenchBatch.schedulable_count, total: selectedWorkbenchBatch.matched_count }) }}
+                </span>
+              </div>
+            </header>
         <AccountBulkActionsBar
           v-if="selIds.length > 0 || hasEffectiveFilters"
           :selected-ids="selIds"
@@ -230,7 +312,9 @@
           :estimate-row-height="156"
           :overscan="5"
           :virtualize-threshold="50"
-          :mobile-column-keys="['select', 'uploader', 'usage', 'pool_record', 'status']"
+          :mobile-column-keys="embedded
+            ? ['select', 'name', 'id', 'status', 'schedulable', 'capacity', 'platform_type', 'groups', 'usage', 'actions']
+            : ['select', 'uploader', 'usage', 'pool_record', 'status']"
         >
           <template #header-select>
             <input
@@ -270,15 +354,24 @@
               :aria-expanded="expandedImportBatches.has(row.batchID)"
               @click="toggleImportBatch(row.batchID)"
             >
-              <Icon :name="expandedImportBatches.has(row.batchID) ? 'chevronDown' : 'chevronRight'" size="sm" class="shrink-0 text-emerald-600 dark:text-emerald-400" />
+              <Icon :name="expandedImportBatches.has(row.batchID) ? 'chevronDown' : 'chevronRight'" size="sm" class="shrink-0 text-gray-500 dark:text-gray-400" />
               <span class="min-w-0">
                 <span class="block font-semibold text-gray-900 dark:text-white">{{ t('admin.accounts.importBatchGroup') }}</span>
                 <span class="block max-w-64 truncate text-xs text-gray-500 dark:text-gray-400" :title="row.names">{{ row.names }}</span>
               </span>
             </button>
-            <div v-else class="flex flex-col" :class="isImportBatchChild(row) ? 'border-l-2 border-emerald-200 pl-4 dark:border-emerald-800' : ''">
+            <div v-else class="flex flex-col" :class="isImportBatchChild(row) ? 'border-l-2 border-gray-200 pl-4 dark:border-dark-600' : ''">
+              <button
+                v-if="embedded"
+                type="button"
+                class="min-h-11 max-w-[220px] truncate text-left font-medium text-primary-600 hover:underline dark:text-primary-400"
+                :title="value"
+                @click="emit('trace-account', row.id)"
+              >
+                {{ value }}
+              </button>
               <HelpTooltip
-                v-if="accountHomepageUrl(row)"
+                v-else-if="accountHomepageUrl(row)"
                 :content="accountHomepageUrl(row)"
                 width-class="w-max max-w-sm break-all"
                 class="-ml-1 self-start"
@@ -312,14 +405,14 @@
               :aria-expanded="expandedImportBatches.has(row.batchID)"
               @click="toggleImportBatch(row.batchID)"
             >
-              <Icon :name="expandedImportBatches.has(row.batchID) ? 'chevronDown' : 'chevronRight'" size="sm" class="shrink-0 text-emerald-600 md:hidden" />
+              <Icon :name="expandedImportBatches.has(row.batchID) ? 'chevronDown' : 'chevronRight'" size="sm" class="shrink-0 text-gray-500 md:hidden dark:text-gray-400" />
               <span class="min-w-0">
                 <span class="block truncate font-semibold text-gray-900 dark:text-white" :title="row.uploader">{{ row.uploader }}</span>
                 <span class="block text-xs text-gray-500 dark:text-gray-400">{{ t('admin.accounts.importBatchSummary', { count: row.matchedCount, time: formatDateTime(row.createdAt) }) }}</span>
                 <span class="mt-1 block max-w-56 truncate text-xs text-gray-500 dark:text-gray-400 md:hidden" :title="row.names">{{ row.names }}</span>
               </span>
             </button>
-            <div v-else-if="isImportBatchChild(row)" class="min-w-0 border-l-2 border-emerald-200 pl-3 dark:border-emerald-800 md:border-0 md:pl-0">
+            <div v-else-if="isImportBatchChild(row)" class="min-w-0 border-l-2 border-gray-200 pl-3 dark:border-dark-600 md:border-0 md:pl-0">
               <p class="max-w-52 truncate font-medium text-gray-900 dark:text-white md:hidden" :title="row.name">
                 {{ row.name }} · #{{ row.id }}
               </p>
@@ -388,8 +481,10 @@
             <span v-if="isImportBatchRow(row)" class="text-xs font-medium tabular-nums text-gray-600 dark:text-gray-300">
               {{ t('admin.accounts.importBatchSchedulable', { current: row.schedulableCount, total: row.matchedCount }) }}
             </span>
-            <button v-else @click="handleToggleSchedulable(row)" :disabled="togglingSchedulable === row.id" class="relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 dark:focus:ring-offset-dark-800" :class="[row.schedulable ? 'bg-primary-500 hover:bg-primary-600' : 'bg-gray-200 hover:bg-gray-300 dark:bg-dark-600 dark:hover:bg-dark-500']" :title="row.schedulable ? t('admin.accounts.schedulableEnabled') : t('admin.accounts.schedulableDisabled')">
-              <span class="pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out" :class="[row.schedulable ? 'translate-x-4' : 'translate-x-0']" />
+            <button v-else @click="handleToggleSchedulable(row)" :disabled="togglingSchedulable === row.id" class="inline-flex h-11 w-11 flex-shrink-0 cursor-pointer items-center justify-center rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 dark:focus:ring-offset-dark-800" :title="row.schedulable ? t('admin.accounts.schedulableEnabled') : t('admin.accounts.schedulableDisabled')">
+              <span class="relative inline-flex h-5 w-9 rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out" :class="[row.schedulable ? 'bg-primary-500 hover:bg-primary-600' : 'bg-gray-200 hover:bg-gray-300 dark:bg-dark-600 dark:hover:bg-dark-500']">
+                <span class="pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out" :class="[row.schedulable ? 'translate-x-4' : 'translate-x-0']" />
+              </span>
             </button>
           </template>
           <template #cell-today_stats="{ row }">
@@ -546,17 +641,19 @@
               {{ expandedImportBatches.has(row.batchID) ? t('admin.accounts.collapseImportBatch') : t('admin.accounts.expandImportBatch') }}
             </button>
             <div v-else class="flex items-center gap-1">
-              <button @click="handleEdit(row)" class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-primary-600 dark:hover:bg-dark-700 dark:hover:text-primary-400">
+              <button @click="handleEdit(row)" class="flex min-h-11 min-w-11 flex-col items-center justify-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-primary-600 dark:hover:bg-dark-700 dark:hover:text-primary-400">
                 <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10" /></svg>
                 <span class="text-xs">{{ t('common.edit') }}</span>
               </button>
-              <button @click="openMenu(row, $event)" class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-900 dark:hover:bg-dark-700 dark:hover:text-white">
+              <button @click="openMenu(row, $event)" class="flex min-h-11 min-w-11 flex-col items-center justify-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-900 dark:hover:bg-dark-700 dark:hover:text-white">
                 <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M6.75 12a.75.75 0 11-1.5 0 .75.75 0 011.5 0zM12.75 12a.75.75 0 11-1.5 0 .75.75 0 011.5 0zM18.75 12a.75.75 0 11-1.5 0 .75.75 0 011.5 0z" /></svg>
                 <span class="text-xs">{{ t('common.more') }}</span>
               </button>
             </div>
           </template>
         </DataTable>
+        </div>
+          </section>
         </div>
       </template>
       <template #pagination><Pagination v-if="pagination.total > 0" :page="pagination.page" :total="pagination.total" :page-size="pagination.page_size" @update:page="handlePageChange" @update:pageSize="handlePageSizeChange" /></template>
@@ -921,13 +1018,43 @@ import type { Account, AccountPlatform, AccountSchedulerGroupScore, AccountType,
 import type { AccountBatchStatusSummary, AccountImportBatchSummary, AccountListRow } from '@/api/admin/accounts'
 import type { PoolApproval, PoolApprovalBusinessChange, PoolApprovalBusinessSummary, PoolApprovalScope, PoolApprovalStatus, PoolCredentialReveal, SharedPoolAccountCost } from '@/api/admin/sharedPool'
 
+type AccountWorkbenchScope = 'all' | 'standalone' | 'uploader' | 'batch'
+type AccountWorkbenchContext = {
+  scope: AccountWorkbenchScope
+  import_batch_id?: string
+  uploader_user_id?: number | string
+  page: number
+  page_size: number
+  search: string
+  platform: string
+  type: string
+  status: string
+  group: string
+  privacy_mode: string
+  sort_by: string
+  sort_order: 'asc' | 'desc'
+}
 const props = withDefaults(defineProps<{
   embedded?: boolean
   poolRecords?: Record<number, SharedPoolAccountCost>
-}>(), { embedded: false, poolRecords: () => ({}) })
+  initialWorkbenchScope?: 'all' | 'standalone' | 'uploader' | 'batch'
+  initialImportBatchId?: string
+  initialUploaderUserId?: number | string
+  initialWorkbenchContext?: Partial<AccountWorkbenchContext>
+}>(), {
+  embedded: false,
+  poolRecords: () => ({}),
+  initialWorkbenchScope: 'all',
+  initialImportBatchId: '',
+  initialUploaderUserId: '',
+  initialWorkbenchContext: () => ({})
+})
 const embedded = props.embedded
 const emit = defineEmits<{
   'pool-record': [account: Account]
+  'trace-account': [accountId: number]
+  'workbench-context': [context: AccountWorkbenchContext]
+  refreshed: []
   'pool-create-request': []
   'pool-import-request': []
   'pool-created': [accounts: Array<Pick<Account, 'id' | 'name'>>]
@@ -942,6 +1069,19 @@ const proxies = ref<AccountProxy[]>([])
 const groups = ref<AdminGroup[]>([])
 const uploaderOptions = ref<Array<{ value: number; label: string }>>([])
 const expandedImportBatches = ref(new Set<string>())
+const workbenchScope = ref<AccountWorkbenchScope>(
+  props.initialWorkbenchContext.import_batch_id || props.initialImportBatchId
+    ? 'batch'
+    : props.initialWorkbenchContext.scope || props.initialWorkbenchScope
+)
+const selectedWorkbenchBatchID = ref(props.initialWorkbenchContext.import_batch_id || props.initialImportBatchId)
+const selectedWorkbenchUploaderID = ref<number | string>(
+  props.initialWorkbenchContext.uploader_user_id ?? props.initialUploaderUserId
+)
+const workbenchBatches = ref<AccountImportBatchSummary[]>([])
+const workbenchNavigatorLoading = ref(false)
+const workbenchAccountTotal = ref(0)
+let workbenchNavigatorRevision = 0
 const accountTableRef = ref<HTMLElement | null>(null)
 const dataTableRef = ref<InstanceType<typeof DataTable> | null>(null)
 type AccountBulkEditTarget =
@@ -962,6 +1102,8 @@ type AccountBulkEditTarget =
         privacy_mode?: string
         uploader_user_id?: number
         uploader_unassigned?: boolean
+        import_batch_id?: string
+        import_batch_scope?: 'standalone' | 'batched'
         sort_by?: string
         sort_order?: AccountSortOrder
       }
@@ -1187,14 +1329,18 @@ const accountToolsDropdownStyle = computed(() => ({
   width: `${accountToolsDropdownPosition.width}px`
 }))
 const hiddenColumns = reactive<Set<string>>(new Set())
-const DEFAULT_HIDDEN_COLUMNS = [
-  'id', 'today_stats', 'groups', 'proxy', 'notes', 'priority', 'scheduler_score',
-  'rate_multiplier', 'upstream_billing_rate', 'last_used_at', 'expires_at'
-]
+const DEFAULT_HIDDEN_COLUMNS = embedded
+  ? [
+      'id', 'uploader', 'today_stats', 'pool_record', 'proxy', 'notes', 'priority', 'scheduler_score',
+      'rate_multiplier', 'upstream_billing_rate', 'last_used_at', 'created_at', 'expires_at'
+    ]
+  : [
+      'id', 'today_stats', 'groups', 'proxy', 'notes', 'priority', 'scheduler_score',
+      'rate_multiplier', 'upstream_billing_rate', 'last_used_at', 'expires_at'
+    ]
 const HIDDEN_COLUMNS_KEY = 'account-hidden-columns'
-// One-time migration: hide scheduler score for existing admins too, because showing it opt-ins to heavy backend scoring.
 const HIDDEN_COLUMNS_VERSION_KEY = 'account-hidden-columns-version'
-const HIDDEN_COLUMNS_CURRENT_VERSION = 'scheduler-score-hidden-by-default'
+const HIDDEN_COLUMNS_CURRENT_VERSION = embedded ? 'shared-pool-workbench-v1' : 'scheduler-score-hidden-by-default'
 
 // Sorting settings
 const ACCOUNT_SORT_STORAGE_KEY = 'account-table-sort-v2'
@@ -1210,7 +1356,12 @@ const ACCOUNT_SORTABLE_KEYS = new Set([
   'created_at'
 ])
 const loadInitialAccountSortState = (): AccountSortState => {
-  const fallback: AccountSortState = { sort_by: 'created_at', sort_order: 'desc' }
+  const initialSortKey = props.initialWorkbenchContext.sort_by || 'created_at'
+  const fallback: AccountSortState = {
+    sort_by: ACCOUNT_SORTABLE_KEYS.has(initialSortKey) ? initialSortKey : 'created_at',
+    sort_order: props.initialWorkbenchContext.sort_order === 'asc' ? 'asc' : 'desc'
+  }
+  if (props.initialWorkbenchContext.sort_by) return fallback
   try {
     const raw = localStorage.getItem(ACCOUNT_SORT_STORAGE_KEY)
     if (!raw) return fallback
@@ -1345,9 +1496,17 @@ const loadSavedColumns = () => {
       parsed.forEach(key => {
         hiddenColumns.add(key)
       })
-      // Older saved column layouts may have scheduler_score visible; migrate them to the safe default once.
       if (localStorage.getItem(HIDDEN_COLUMNS_VERSION_KEY) !== HIDDEN_COLUMNS_CURRENT_VERSION) {
         hiddenColumns.add('scheduler_score')
+        if (embedded) {
+          DEFAULT_HIDDEN_COLUMNS.forEach(key => hiddenColumns.add(key))
+          hiddenColumns.delete('capacity')
+          hiddenColumns.delete('platform_type')
+          hiddenColumns.delete('status')
+          hiddenColumns.delete('schedulable')
+          hiddenColumns.delete('groups')
+          hiddenColumns.delete('usage')
+        }
         localStorage.setItem(HIDDEN_COLUMNS_KEY, JSON.stringify([...hiddenColumns]))
         localStorage.setItem(HIDDEN_COLUMNS_VERSION_KEY, HIDDEN_COLUMNS_CURRENT_VERSION)
       }
@@ -1458,6 +1617,40 @@ const syncAccountListDerivedParams = () => {
   requestParams.include_scheduler_score = shouldIncludeSchedulerScore() ? '1' : '0'
 }
 
+const workbenchRequestFilters = (raw: Record<string, unknown>) => {
+  const request = { ...raw } as Record<string, unknown>
+  delete request.import_batch_id
+  delete request.import_batch_scope
+  if (workbenchScope.value === 'uploader') {
+    request.uploader_user_id = selectedWorkbenchUploaderID.value
+    request.import_batch_scope = 'batched'
+  }
+  return request
+}
+
+const fetchAccountWorkbenchRows = async (
+  page: number,
+  pageSize: number,
+  rawFilters: Record<string, unknown>,
+  options?: { signal?: AbortSignal }
+) => {
+  if (!embedded) return adminAPI.accounts.listRows(page, pageSize, rawFilters, options)
+
+  const filters = workbenchRequestFilters(rawFilters)
+  if (workbenchScope.value === 'batch' && selectedWorkbenchBatchID.value) {
+    const result = await adminAPI.accounts.listImportBatch(
+      selectedWorkbenchBatchID.value,
+      page,
+      pageSize,
+      filters
+    )
+    return { ...result, items: result.items.map(account => ({ kind: 'account' as const, account })) }
+  }
+  if (workbenchScope.value === 'standalone') filters.import_batch_scope = 'standalone'
+  const result = await adminAPI.accounts.list(page, pageSize, filters, options)
+  return { ...result, items: result.items.map(account => ({ kind: 'account' as const, account })) }
+}
+
 const {
   items: accountListRows,
   loading,
@@ -1469,24 +1662,30 @@ const {
   handlePageChange: baseHandlePageChange,
   handlePageSizeChange: baseHandlePageSizeChange
 } = useTableLoader<AccountListRow, any>({
-  fetchFn: adminAPI.accounts.listRows,
+  fetchFn: fetchAccountWorkbenchRows,
   initialParams: {
-    platform: '',
-    type: '',
-    status: '',
-    privacy_mode: '',
+    platform: props.initialWorkbenchContext.platform || '',
+    type: props.initialWorkbenchContext.type || '',
+    status: props.initialWorkbenchContext.status || '',
+    privacy_mode: props.initialWorkbenchContext.privacy_mode || '',
     uploader_user_id: '',
-    group: '',
-    search: '',
+    group: props.initialWorkbenchContext.group || '',
+    search: props.initialWorkbenchContext.search || '',
     include_scheduler_score: shouldIncludeSchedulerScore() ? '1' : '0',
     include_pool_metrics: '1',
     sort_by: sortState.sort_by,
     sort_order: sortState.sort_order
   }
 })
+if (embedded) {
+  pagination.page = Math.max(1, Number(props.initialWorkbenchContext.page || 1))
+  if (props.initialWorkbenchContext.page_size) {
+    pagination.page_size = Math.max(1, Number(props.initialWorkbenchContext.page_size))
+  }
+}
 
 const accounts = ref<Account[]>([])
-const visibleResultAccountCount = computed(() => accountListRows.value.reduce(
+const visibleResultAccountCount = computed(() => embedded ? pagination.total : accountListRows.value.reduce(
   (total, row) => total + (row.kind === 'account' ? 1 : row.batch.matched_count),
   0
 ))
@@ -1630,7 +1829,7 @@ const syncPageAccounts = () => {
 }
 watch([accountListRows, completeImportBatchAccounts], syncPageAccounts, { immediate: true })
 const pageBatchLoading = computed(() => [...currentBatchIDs.value].some(isImportBatchLoading))
-const importBatchStatusItems = (batch: ImportBatchRow) => {
+const batchStatusItems = (status: AccountBatchStatusSummary) => {
   const definitions: Array<{ key: keyof AccountBatchStatusSummary; label: string; className: string }> = [
     { key: 'normal', label: t('admin.accounts.status.active'), className: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' },
     { key: 'error', label: t('admin.accounts.status.error'), className: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300' },
@@ -1641,8 +1840,146 @@ const importBatchStatusItems = (batch: ImportBatchRow) => {
     { key: 'manual_unschedulable', label: t('admin.accounts.status.unschedulable'), className: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300' }
   ]
   return definitions
-    .map(item => ({ ...item, count: batch.status[item.key] }))
+    .map(item => ({ ...item, count: status[item.key] }))
     .filter(item => item.count > 0)
+}
+const importBatchStatusItems = (batch: ImportBatchRow) => batchStatusItems(batch.status)
+type WorkbenchUploaderGroup = {
+  id: number | string
+  label: string
+  count: number
+  batches: AccountImportBatchSummary[]
+}
+const workbenchUploaderGroups = computed<WorkbenchUploaderGroup[]>(() => {
+  const groups = new Map<string, WorkbenchUploaderGroup>()
+  for (const batch of workbenchBatches.value) {
+    const id = batch.uploader_user_id ?? 'unassigned'
+    const key = String(id)
+    const group = groups.get(key) || {
+      id,
+      label: batch.uploader_username || batch.uploader_email || t('admin.sharedPool.ledger.unassignedUploader'),
+      count: 0,
+      batches: []
+    }
+    group.count += batch.matched_count
+    group.batches.push(batch)
+    groups.set(key, group)
+  }
+  return [...groups.values()]
+})
+const selectedWorkbenchBatch = computed(() =>
+  workbenchBatches.value.find(batch => batch.id === selectedWorkbenchBatchID.value)
+)
+const workbenchBatchedAccountCount = computed(() =>
+  workbenchBatches.value.reduce((total, batch) => total + batch.matched_count, 0)
+)
+const workbenchStandaloneCount = computed(() =>
+  Math.max(0, workbenchAccountTotal.value - workbenchBatchedAccountCount.value)
+)
+const selectedWorkbenchUploader = computed(() =>
+  workbenchUploaderGroups.value.find(group => String(group.id) === String(selectedWorkbenchUploaderID.value))
+)
+const workbenchTitle = computed(() => {
+  if (workbenchScope.value === 'standalone') return t('admin.accounts.standaloneImport')
+  if (workbenchScope.value === 'uploader') return selectedWorkbenchUploader.value?.label || t('admin.sharedPool.ledger.allUploaders')
+  if (workbenchScope.value === 'batch') return selectedWorkbenchBatch.value?.names.join('、') || t('admin.accounts.importBatchGroup')
+  return t('admin.sharedPool.ledger.allAccounts')
+})
+const workbenchSubtitle = computed(() => {
+  const batch = selectedWorkbenchBatch.value
+  if (workbenchScope.value === 'batch' && batch) {
+    const uploader = batch.uploader_username || batch.uploader_email || t('admin.sharedPool.ledger.unassignedUploader')
+    return `${uploader} · ${formatDateTime(batch.created_at)} · ${batch.id}`
+  }
+  return t('admin.accounts.resultSummary', {
+    accounts: pagination.total,
+    batches: workbenchScope.value === 'all' ? workbenchBatches.value.length : 0
+  })
+})
+const loadWorkbenchNavigator = async () => {
+  if (!embedded) return
+  const revision = ++workbenchNavigatorRevision
+  workbenchNavigatorLoading.value = true
+  try {
+    const filters = {
+      platform: String(params.platform || ''),
+      type: String(params.type || ''),
+      status: String(params.status || ''),
+      group: String(params.group || ''),
+      search: String(params.search || ''),
+      privacy_mode: String(params.privacy_mode || ''),
+      uploader_user_id: params.uploader_user_id || undefined,
+      import_batch_scope: 'batched' as const,
+      sort_by: 'created_at',
+      sort_order: 'desc' as const
+    }
+    const summaryFilters = { ...filters } as Record<string, unknown>
+    delete summaryFilters.import_batch_scope
+    const summaryPromise = adminAPI.accounts.getSelectionSummary(summaryFilters)
+    const batches: AccountImportBatchSummary[] = []
+    let page = 1
+    let pages = 1
+    do {
+      const result = await adminAPI.accounts.listRows(page, 100, filters)
+      if (revision !== workbenchNavigatorRevision) return
+      for (const row of result.items) {
+        if (row.kind === 'import_batch') batches.push(row.batch)
+      }
+      pages = Math.max(result.pages || 1, 1)
+      page++
+    } while (page <= pages)
+    const summary = await summaryPromise
+    if (revision !== workbenchNavigatorRevision) return
+    workbenchBatches.value = batches
+    workbenchAccountTotal.value = summary.total
+  } catch (error) {
+    console.error('Failed to load account workbench navigator:', error)
+  } finally {
+    if (revision === workbenchNavigatorRevision) workbenchNavigatorLoading.value = false
+  }
+}
+const emitWorkbenchContext = () => emit('workbench-context', {
+  scope: workbenchScope.value,
+  ...(selectedWorkbenchBatchID.value ? { import_batch_id: selectedWorkbenchBatchID.value } : {}),
+  ...(workbenchScope.value === 'uploader' ? { uploader_user_id: selectedWorkbenchUploaderID.value } : {}),
+  page: pagination.page,
+  page_size: pagination.page_size,
+  search: String(params.search || ''),
+  platform: String(params.platform || ''),
+  type: String(params.type || ''),
+  status: String(params.status || ''),
+  group: String(params.group || ''),
+  privacy_mode: String(params.privacy_mode || ''),
+  sort_by: sortState.sort_by,
+  sort_order: sortState.sort_order
+})
+const selectWorkbenchScope = (scope: 'all' | 'standalone') => {
+  if (workbenchScope.value === scope) return
+  workbenchScope.value = scope
+  selectedWorkbenchBatchID.value = ''
+  selectedWorkbenchUploaderID.value = ''
+  clearSelection()
+  pagination.page = 1
+  emitWorkbenchContext()
+  void reload()
+}
+const selectWorkbenchUploader = (group: WorkbenchUploaderGroup) => {
+  workbenchScope.value = 'uploader'
+  selectedWorkbenchBatchID.value = ''
+  selectedWorkbenchUploaderID.value = group.id
+  clearSelection()
+  pagination.page = 1
+  emitWorkbenchContext()
+  void reload()
+}
+const selectWorkbenchBatch = (batch: AccountImportBatchSummary) => {
+  workbenchScope.value = 'batch'
+  selectedWorkbenchBatchID.value = batch.id
+  selectedWorkbenchUploaderID.value = ''
+  clearSelection()
+  pagination.page = 1
+  emitWorkbenchContext()
+  void reload()
 }
 const toggleImportBatch = async (id: string) => {
   const next = new Set(expandedImportBatches.value)
@@ -1792,7 +2129,7 @@ const load = async () => {
   if (isFirstLoad.value) {
     requestParams.lite = '1'
   }
-  await baseLoad()
+  await Promise.all([baseLoad(), loadWorkbenchNavigator()])
   if (isFirstLoad.value) {
     isFirstLoad.value = false
     delete requestParams.lite
@@ -1807,9 +2144,60 @@ const reload = async (resetPage = true) => {
   hasPendingListSync.value = false
   resetAutoRefreshCache()
   pendingTodayStatsRefresh.value = false
-  await (resetPage ? baseReload() : baseLoad())
+  await Promise.all([
+    resetPage ? baseReload() : baseLoad(),
+    loadWorkbenchNavigator()
+  ])
   await refreshTodayStatsBatch()
 }
+
+const applyWorkbenchContext = async (context: Partial<AccountWorkbenchContext>) => {
+  const nextBatchID = context.import_batch_id || ''
+  const nextScope = nextBatchID ? 'batch' : context.scope || props.initialWorkbenchScope
+  const nextUploaderID = nextScope === 'uploader' ? context.uploader_user_id ?? '' : ''
+  const nextPage = Math.max(1, Number(context.page || 1))
+  const nextPageSize = Math.max(1, Number(context.page_size || 20))
+  const nextSortBy = ACCOUNT_SORTABLE_KEYS.has(context.sort_by || '') ? context.sort_by! : 'created_at'
+  const nextSortOrder = context.sort_order === 'asc' ? 'asc' : 'desc'
+  const nextFilters = {
+    search: context.search || '',
+    platform: context.platform || '',
+    type: context.type || '',
+    status: context.status || '',
+    group: context.group || '',
+    privacy_mode: context.privacy_mode || ''
+  }
+  const unchanged =
+    workbenchScope.value === nextScope &&
+    selectedWorkbenchBatchID.value === nextBatchID &&
+    String(selectedWorkbenchUploaderID.value) === String(nextUploaderID) &&
+    pagination.page === nextPage &&
+    pagination.page_size === nextPageSize &&
+    sortState.sort_by === nextSortBy &&
+    sortState.sort_order === nextSortOrder &&
+    Object.entries(nextFilters).every(([key, value]) => String(params[key] || '') === value)
+  if (unchanged) return
+
+  workbenchScope.value = nextScope
+  selectedWorkbenchBatchID.value = nextBatchID
+  selectedWorkbenchUploaderID.value = nextUploaderID
+  pagination.page = nextPage
+  pagination.page_size = nextPageSize
+  sortState.sort_by = nextSortBy
+  sortState.sort_order = nextSortOrder
+  Object.assign(params, nextFilters, { sort_by: nextSortBy, sort_order: nextSortOrder })
+  clearSelection()
+  await reload(false)
+}
+
+watch(
+  () => props.initialWorkbenchContext,
+  (context) => {
+    if (embedded) void applyWorkbenchContext(context)
+  },
+  { deep: true }
+)
+
 const refreshCurrentPage = () => reload(false)
 
 const handleAccountCreated = async (accounts: Array<Pick<Account, 'id' | 'name'>> = []) => {
@@ -1849,6 +2237,7 @@ const handleSearchChange = (value: string) => {
   params.search = value
   resetSelectionForFilterChange()
   invalidateImportBatchCache(true)
+  if (embedded) emitWorkbenchContext()
   debouncedReload()
 }
 
@@ -1856,6 +2245,7 @@ const handleFiltersChange = (filters: Record<string, unknown>) => {
   Object.assign(params, filters)
   resetSelectionForFilterChange()
   expandedImportBatches.value = new Set()
+  if (embedded) emitWorkbenchContext()
   void reload()
 }
 
@@ -1871,6 +2261,7 @@ const clearFilters = () => {
   })
   resetSelectionForFilterChange()
   expandedImportBatches.value = new Set()
+  if (embedded) emitWorkbenchContext()
   void reload()
 }
 
@@ -1881,6 +2272,7 @@ const handlePageChange = (page: number) => {
   resetAutoRefreshCache()
   pendingTodayStatsRefresh.value = true
   baseHandlePageChange(page)
+  if (embedded) emitWorkbenchContext()
 }
 
 const handlePageSizeChange = (size: number) => {
@@ -1890,6 +2282,7 @@ const handlePageSizeChange = (size: number) => {
   resetAutoRefreshCache()
   pendingTodayStatsRefresh.value = true
   baseHandlePageSizeChange(size)
+  if (embedded) emitWorkbenchContext()
 }
 
 const handleSort = (key: string, order: AccountSortOrder) => {
@@ -1904,6 +2297,7 @@ const handleSort = (key: string, order: AccountSortOrder) => {
   hasPendingListSync.value = false
   resetAutoRefreshCache()
   pendingTodayStatsRefresh.value = true
+  if (embedded) emitWorkbenchContext()
   load()
 }
 
@@ -1967,7 +2361,7 @@ const refreshAccountsIncrementally = async () => {
   const revision = autoRefreshRequestRevision
   autoRefreshFetching.value = true
   try {
-    const result = await adminAPI.accounts.listRows(
+    const result = await fetchAccountWorkbenchRows(
       pagination.page,
       pagination.page_size,
       toRaw(params) as {
@@ -2010,7 +2404,8 @@ const refreshAccountsIncrementally = async () => {
       }
     }))
 
-    await refreshTodayStatsBatch()
+    await Promise.all([refreshTodayStatsBatch(), loadWorkbenchNavigator()])
+    emit('refreshed')
   } catch (error) {
     console.error('Auto refresh failed:', error)
   } finally {
@@ -2022,6 +2417,7 @@ const handleManualRefresh = async () => {
   await Promise.all([load(), loadUpstreamBillingProbeGlobalState()])
   // Force usage cells to refetch /usage on explicit user refresh.
   usageManualRefreshToken.value += 1
+  emit('refreshed')
 }
 
 const loadUpstreamBillingProbeGlobalState = async () => {
@@ -2080,7 +2476,7 @@ const handleCreateRequest = () => {
 
 const continueCreateWithPoolDraft = () => { showCreate.value = true }
 const continueImportWithPoolDraft = () => { showImportData.value = true }
-defineExpose({ continueCreateWithPoolDraft, continueImportWithPoolDraft })
+defineExpose({ continueCreateWithPoolDraft, continueImportWithPoolDraft, reload })
 
 const openExportDataDialogFromMenu = () => {
   closeAccountToolsDropdown()
@@ -2263,21 +2659,21 @@ function getAntigravityTierClass(row: any): string {
 const allColumns = computed(() => {
   const c = [
     { key: 'select', label: '', sortable: false },
-    { key: 'uploader', label: t('admin.sharedPool.columns.uploader'), sortable: false },
     { key: 'name', label: t('admin.accounts.columns.name'), sortable: true },
     { key: 'id', label: t('admin.accounts.columns.id'), sortable: false },
-    { key: 'platform_type', label: t('admin.accounts.columns.platformType'), sortable: false },
-    { key: 'capacity', label: t('admin.accounts.columns.capacity'), sortable: false },
     { key: 'status', label: t('admin.accounts.columns.status'), sortable: true },
     { key: 'schedulable', label: t('admin.accounts.columns.schedulable'), sortable: true },
-    { key: 'today_stats', label: t('admin.accounts.columns.todayStats'), sortable: false }
+    { key: 'capacity', label: t('admin.accounts.columns.capacity'), sortable: false },
+    { key: 'platform_type', label: t('admin.accounts.columns.platformType'), sortable: false }
   ]
   if (!authStore.isSimpleMode) {
     c.push({ key: 'groups', label: t('admin.accounts.columns.groups'), sortable: false })
   }
   c.push({ key: 'usage', label: t('admin.accounts.columns.usageWindows'), sortable: false })
-  c.push({ key: 'pool_record', label: t('admin.sharedPool.actions.poolRecord'), sortable: false })
   c.push(
+    { key: 'uploader', label: t('admin.sharedPool.columns.uploader'), sortable: false },
+    { key: 'today_stats', label: t('admin.accounts.columns.todayStats'), sortable: false },
+    { key: 'pool_record', label: t('admin.sharedPool.actions.poolRecord'), sortable: false },
     { key: 'proxy', label: t('admin.accounts.columns.proxy'), sortable: false },
     { key: 'priority', label: t('admin.accounts.columns.priority'), sortable: false },
     { key: 'scheduler_score', label: t('admin.accounts.columns.schedulerScore'), sortable: false },
@@ -2292,15 +2688,14 @@ const allColumns = computed(() => {
   return c
 })
 
-// Uploader is a core pool ownership field and remains visible on every layout.
 const toggleableColumns = computed(() =>
-  allColumns.value.filter(col => !['select', 'name', 'uploader', 'actions'].includes(col.key))
+  allColumns.value.filter(col => !['select', 'name', 'actions'].includes(col.key))
 )
 
 // Filtered columns based on visibility
 const cols = computed(() =>
   allColumns.value.filter(col =>
-    ['select', 'name', 'uploader', 'actions'].includes(col.key) || !hiddenColumns.has(col.key)
+    ['select', 'name', 'actions'].includes(col.key) || !hiddenColumns.has(col.key)
   )
 )
 
@@ -2864,7 +3259,7 @@ const buildBulkEditFilterSnapshot = () => {
   const uploaderUserID = typeof rawUploaderUserID === 'number'
     ? (rawUploaderUserID > 0 ? rawUploaderUserID : undefined)
     : (/^\d+$/.test(String(rawUploaderUserID || '')) ? Number(rawUploaderUserID) : undefined)
-  return {
+  const filters = {
     platform: typeof rawParams.platform === 'string' ? rawParams.platform : '',
     type: typeof rawParams.type === 'string' ? rawParams.type : '',
     status: typeof rawParams.status === 'string' ? rawParams.status : '',
@@ -2876,6 +3271,21 @@ const buildBulkEditFilterSnapshot = () => {
     sort_by: typeof rawParams.sort_by === 'string' ? rawParams.sort_by : '',
     sort_order: sortOrder
   }
+  if (embedded && workbenchScope.value === 'batch' && selectedWorkbenchBatchID.value) {
+    return { ...filters, import_batch_id: selectedWorkbenchBatchID.value }
+  }
+  if (embedded && workbenchScope.value === 'standalone') {
+    return { ...filters, import_batch_scope: 'standalone' as const }
+  }
+  if (embedded && workbenchScope.value === 'uploader') {
+    return {
+      ...filters,
+      uploader_user_id: Number(selectedWorkbenchUploaderID.value) || undefined,
+      uploader_unassigned: selectedWorkbenchUploaderID.value === 'unassigned' || undefined,
+      import_batch_scope: 'batched' as const
+    }
+  }
+  return filters
 }
 
 const openBulkEditSelected = () => {
@@ -2934,17 +3344,25 @@ const handleDataImported = (importedAccounts: Array<{ id: number; name: string }
   void reload()
   if (embedded) emit('pool-imported', importedAccounts)
 }
-const buildAccountQueryFilters = () => ({
-  platform: params.platform || '',
-  type: params.type || '',
-  status: params.status || '',
-  group: params.group || '',
-  privacy_mode: params.privacy_mode || '',
-  uploader_user_id: params.uploader_user_id || '',
-  search: params.search || '',
-  sort_by: sortState.sort_by,
-  sort_order: sortState.sort_order
-})
+const buildAccountQueryFilters = () => {
+  const filters = workbenchRequestFilters({
+    platform: params.platform || '',
+    type: params.type || '',
+    status: params.status || '',
+    group: params.group || '',
+    privacy_mode: params.privacy_mode || '',
+    uploader_user_id: params.uploader_user_id || '',
+    search: params.search || '',
+    sort_by: sortState.sort_by,
+    sort_order: sortState.sort_order
+  })
+  if (embedded && workbenchScope.value === 'batch' && selectedWorkbenchBatchID.value) {
+    filters.import_batch_id = selectedWorkbenchBatchID.value
+  } else if (embedded && workbenchScope.value === 'standalone') {
+    filters.import_batch_scope = 'standalone'
+  }
+  return filters
+}
 const handleProbeUpstreamBilling = async (account: Account) => {
   if (probingUpstreamBilling.has(account.id)) return
   probingUpstreamBilling.add(account.id)
@@ -3295,7 +3713,19 @@ onUnmounted(() => {
   @apply inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-md;
 }
 
-:deep(tr[data-row-id^='import-batch:'] > td) {
-  @apply border-y border-emerald-200 bg-emerald-50/80 dark:border-emerald-800 dark:bg-emerald-950/30;
+.workbench-nav-item {
+  @apply flex min-h-11 min-w-48 items-center justify-between gap-3 rounded-md px-3 py-2 text-left text-sm text-gray-700 transition-colors hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-dark-700 lg:min-w-0 lg:w-full;
+}
+
+.workbench-nav-item-active {
+  @apply bg-white text-primary-700 shadow-sm ring-1 ring-gray-200 dark:bg-dark-800 dark:text-primary-300 dark:ring-dark-600;
+}
+
+.workbench-batch-item {
+  @apply flex min-h-11 min-w-64 items-center justify-between gap-3 rounded-md px-3 py-2 text-left text-sm transition-colors hover:bg-gray-100 dark:hover:bg-dark-700 lg:mt-1 lg:min-w-0 lg:w-full;
+}
+
+.workbench-batch-item-active {
+  @apply bg-gray-100 ring-1 ring-gray-200 dark:bg-dark-700 dark:ring-dark-600;
 }
 </style>

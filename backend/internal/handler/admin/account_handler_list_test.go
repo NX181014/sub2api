@@ -66,6 +66,35 @@ func TestAccountHandlerListFiltersCompleteImportBatch(t *testing.T) {
 	require.Equal(t, 1, adminSvc.lastListAccounts.calls)
 }
 
+func TestAccountHandlerListFiltersImportBatchScope(t *testing.T) {
+	router, adminSvc := setupAccountListRouter()
+
+	for _, scope := range []string{"standalone", "batched"} {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/accounts?import_batch_scope="+scope, nil)
+		router.ServeHTTP(rec, req)
+
+		require.Equal(t, http.StatusOK, rec.Code)
+		require.Equal(t, scope, adminSvc.lastListAccounts.batchScope)
+	}
+}
+
+func TestAccountHandlerListRejectsInvalidOrConflictingImportBatchScope(t *testing.T) {
+	router, _ := setupAccountListRouter()
+	batchID := "668f52b3-14af-4a5a-bde0-e923ed69299a"
+
+	for _, query := range []string{
+		"import_batch_scope=other",
+		"import_batch_scope=standalone&import_batch_id=" + batchID,
+	} {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/accounts?"+query, nil)
+		router.ServeHTTP(rec, req)
+
+		require.Equal(t, http.StatusBadRequest, rec.Code)
+	}
+}
+
 func TestAccountHandlerListFiltersUnassignedUploader(t *testing.T) {
 	router, adminSvc := setupAccountListRouter()
 
@@ -398,4 +427,52 @@ func TestAccountHandlerListSchedulerScoreIgnoresPagination(t *testing.T) {
 	require.Equal(t, int64(301), payload.Data.Items[0].ID)
 	require.Less(t, payload.Data.Items[0].SchedulerScore.BaseScore, 3.75)
 	require.Empty(t, payload.Data.Items[0].SchedulerScores)
+}
+
+func TestAccountHandlerListSchedulerScoreKeepsImportBatchScope(t *testing.T) {
+	router, adminSvc := setupAccountListRouter()
+	now := time.Now().UTC()
+	visibleAccount := service.Account{
+		ID:          401,
+		Name:        "standalone",
+		Platform:    service.PlatformOpenAI,
+		Type:        service.AccountTypeAPIKey,
+		Status:      service.StatusActive,
+		Schedulable: true,
+		Concurrency: 10,
+		Priority:    100,
+		Extra:       map[string]any{},
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}
+	batchedPeer := visibleAccount
+	batchedPeer.ID = 402
+	batchedPeer.Name = "batched"
+	batchedPeer.Priority = 1
+	batchedPeer.Extra = map[string]any{"import_batch_id": "batch-1"}
+	adminSvc.accounts = []service.Account{visibleAccount}
+
+	loadScore := func() float64 {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/accounts?page=1&page_size=1&platform=openai&import_batch_scope=standalone&include_scheduler_score=1", nil)
+		router.ServeHTTP(rec, req)
+		require.Equal(t, http.StatusOK, rec.Code)
+		var payload struct {
+			Data struct {
+				Items []struct {
+					SchedulerScore struct {
+						BaseScore float64 `json:"base_score"`
+					} `json:"scheduler_score"`
+				} `json:"items"`
+			} `json:"data"`
+		}
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &payload))
+		require.Len(t, payload.Data.Items, 1)
+		return payload.Data.Items[0].SchedulerScore.BaseScore
+	}
+
+	adminSvc.accountSchedulerScoreFilterAccounts = []service.Account{visibleAccount}
+	expected := loadScore()
+	adminSvc.accountSchedulerScoreFilterAccounts = []service.Account{visibleAccount, batchedPeer}
+	require.Equal(t, expected, loadScore())
 }

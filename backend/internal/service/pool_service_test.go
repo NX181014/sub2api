@@ -9,6 +9,18 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+type recoveryCaptureRepository struct {
+	PoolRepository
+	accountID *int64
+}
+
+func (r *recoveryCaptureRepository) GetRecovery(_ context.Context, _, _ time.Time, accountID ...*int64) ([]AccountRecovery, error) {
+	if len(accountID) > 0 {
+		r.accountID = accountID[0]
+	}
+	return []AccountRecovery{{AccountID: *r.accountID}}, nil
+}
+
 func TestCreateLifecycleRejectsFinancialBypass(t *testing.T) {
 	service := &PoolService{}
 	for _, eventType := range []string{"refund", "replaced"} {
@@ -17,6 +29,47 @@ func TestCreateLifecycleRejectsFinancialBypass(t *testing.T) {
 		})
 		require.Error(t, err)
 	}
+}
+
+func TestResolvePoolAvailabilityPrecedence(t *testing.T) {
+	now := time.Date(2026, 7, 31, 12, 0, 0, 0, time.UTC)
+	past := now.Add(-time.Hour)
+	future := now.Add(time.Hour)
+	tests := []struct {
+		name  string
+		state PoolAccountRuntime
+		want  string
+	}{
+		{"error wins", PoolAccountRuntime{AccountStatus: StatusError, Schedulable: true, RateLimitResetAt: &future}, PoolAvailabilityError},
+		{"inactive wins", PoolAccountRuntime{AccountStatus: StatusDisabled, Schedulable: true, OverloadUntil: &future}, PoolAvailabilityInactive},
+		{"manual pause wins", PoolAccountRuntime{AccountStatus: StatusActive, Schedulable: false, OverloadUntil: &future}, PoolAvailabilityManualUnschedulable},
+		{"expired", PoolAccountRuntime{AccountStatus: StatusActive, Schedulable: true, ExpiresAt: &past, AutoPauseOnExpired: true}, PoolAvailabilityManualUnschedulable},
+		{"overload wins", PoolAccountRuntime{AccountStatus: StatusActive, Schedulable: true, RateLimitResetAt: &future, OverloadUntil: &future}, PoolAvailabilityOverloaded},
+		{"rate limit", PoolAccountRuntime{AccountStatus: StatusActive, Schedulable: true, RateLimitResetAt: &future}, PoolAvailabilityRateLimited},
+		{"overload", PoolAccountRuntime{AccountStatus: StatusActive, Schedulable: true, OverloadUntil: &future, TempUnschedulableUntil: &future}, PoolAvailabilityOverloaded},
+		{"temporary pause", PoolAccountRuntime{AccountStatus: StatusActive, Schedulable: true, TempUnschedulableUntil: &future}, PoolAvailabilityTempUnschedulable},
+		{"normal", PoolAccountRuntime{AccountStatus: StatusActive, Schedulable: true}, PoolAvailabilityNormal},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.want, ResolvePoolAvailability(tt.state, now))
+		})
+	}
+}
+
+func TestPoolRecoveryForwardsAccountID(t *testing.T) {
+	repo := &recoveryCaptureRepository{}
+	pool := NewPoolService(repo, nil, nil, nil, nil)
+	start := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
+	end := start.AddDate(0, 1, 0)
+	accountID := int64(9)
+
+	overview, err := pool.GetRecovery(context.Background(), start, end, &accountID)
+
+	require.NoError(t, err)
+	require.Equal(t, &accountID, repo.accountID)
+	require.Len(t, overview.Accounts, 1)
+	require.Equal(t, accountID, overview.Accounts[0].AccountID)
 }
 
 func TestPoolSettlementMath(t *testing.T) {

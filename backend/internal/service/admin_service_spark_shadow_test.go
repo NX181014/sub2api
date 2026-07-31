@@ -580,7 +580,8 @@ func TestBulkUpdateAccounts_RejectsCredentialWriteToShadow(t *testing.T) {
 func TestDeleteAccount_CascadeToShadow(t *testing.T) {
 	ctx := context.Background()
 	repo := newSparkShadowRepoStub()
-	svc := &adminServiceImpl{accountRepo: repo}
+	invalidator := &accountDeleteTokenInvalidator{}
+	svc := &adminServiceImpl{accountRepo: repo, tokenCacheInvalidator: invalidator}
 
 	parent := &Account{
 		Name:        "cascade-parent",
@@ -609,6 +610,16 @@ func TestDeleteAccount_CascadeToShadow(t *testing.T) {
 	// Shadow is also gone (cascade).
 	_, ok = repo.accounts[shadowID]
 	require.False(t, ok, "shadow account should be cascade-deleted")
+	require.ElementsMatch(t, []int64{parent.ID, shadowID}, invalidator.accountIDs)
+}
+
+type accountDeleteTokenInvalidator struct {
+	accountIDs []int64
+}
+
+func (i *accountDeleteTokenInvalidator) InvalidateToken(_ context.Context, account *Account) error {
+	i.accountIDs = append(i.accountIDs, account.ID)
+	return nil
 }
 
 // TestUpdateAccount_PropagatesProxyToShadow verifies that updating a parent

@@ -54,16 +54,23 @@
             </div>
             <div>
               <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.accounts.columns.status') }}</p>
-              <StatusBadge class="mt-1" :status="accountState.badge" :label="t(`admin.sharedPool.status.${accountState.key}`)" />
+              <AccountStatusIndicator class="mt-1" :account="account" />
             </div>
             <div>
               <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.accounts.columns.schedulable') }}</p>
               <StatusBadge
                 class="mt-1"
-                :status="account.schedulable ? 'success' : 'warning'"
-                :label="t(account.schedulable ? 'admin.accounts.schedulableEnabled' : 'admin.accounts.schedulableDisabled')"
+                :status="effectiveSchedulable ? 'success' : 'warning'"
+                :label="t(effectiveSchedulable ? 'admin.accounts.schedulableEnabled' : 'admin.accounts.schedulableDisabled')"
               />
             </div>
+            <div>
+              <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.approval.impacts.lifecycle_events') }}</p>
+              <StatusBadge class="mt-1" :status="lifecycleState.badge" :label="lifecycleState.label" />
+            </div>
+            <p v-if="runtimeReason" class="col-span-2 break-words text-xs text-amber-700 dark:text-amber-300 sm:col-span-3">
+              {{ runtimeReason }}
+            </p>
           </div>
         </header>
 
@@ -84,8 +91,15 @@
 
         <div class="min-h-0 flex-1 overflow-y-auto p-3 sm:p-5">
           <div v-if="loading" class="flex min-h-48 items-center justify-center"><LoadingSpinner /></div>
+          <div
+            v-else-if="dataQualityNotices.length"
+            class="mb-4 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-800/60 dark:bg-amber-900/20 dark:text-amber-300"
+          >
+            <p class="font-medium">{{ t('admin.sharedPool.intake.pending') }}</p>
+            <p v-for="notice in dataQualityNotices" :key="notice" class="mt-1">{{ notice }}</p>
+          </div>
 
-          <template v-else-if="activeTab === 'costs'">
+          <template v-if="!loading && activeTab === 'costs'">
             <DataTable
               :columns="costColumns"
               :data="entries"
@@ -98,9 +112,17 @@
               <template #cell-paid_at="{ row }"><span class="whitespace-nowrap">{{ formatDate(row.paid_at) }}</span></template>
             </DataTable>
             <EmptyState v-if="!entries.length" :title="t('admin.sharedPool.ledger.emptyEntries')" />
+            <Pagination
+              v-if="entriesTotal > 20"
+              class="mt-4"
+              :page="entriesPage"
+              :page-size="20"
+              :total="entriesTotal"
+              @update:page="emit('entry-page', $event)"
+            />
           </template>
 
-          <template v-else-if="activeTab === 'settlement'">
+          <template v-else-if="!loading && activeTab === 'settlement'">
             <div v-if="settlement" class="mb-4 flex flex-wrap items-center justify-between gap-2 border-b border-gray-100 pb-3 text-sm dark:border-dark-700">
               <span>{{ dateOnly(settlement.period_start) }} - {{ dateOnly(settlement.period_end) }}</span>
               <StatusBadge :status="settlementState.badge" :label="t(`admin.sharedPool.status.${settlementState.key}`)" />
@@ -116,6 +138,7 @@
               <template #cell-allocated_cost="{ row }"><span class="tabular-nums">{{ formatMoney(row.allocated_cost) }}</span></template>
               <template #cell-contribution_credit="{ row }"><span class="tabular-nums">{{ formatMoney(row.contribution_credit) }}</span></template>
               <template #cell-net_amount="{ row }"><span class="font-medium tabular-nums">{{ formatMoney(row.net_amount) }}</span></template>
+              <template #cell-trace_quality="{ row }"><StatusBadge :status="row.trace_quality === 'exact' ? 'success' : 'warning'" :label="row.trace_quality" /></template>
             </DataTable>
             <div v-if="accountCosts.length" class="mt-5 border-t border-gray-100 pt-4 dark:border-dark-700">
               <h3 class="mb-2 text-sm font-semibold text-gray-900 dark:text-white">{{ t('admin.sharedPool.columns.cost') }}</h3>
@@ -127,9 +150,18 @@
               </div>
             </div>
             <EmptyState v-if="!accountLines.length && !accountCosts.length" :title="t('admin.sharedPool.empty.settlement')" />
+            <Pagination
+              v-if="settlementTotal > 1"
+              class="mt-4"
+              :page="settlementPage"
+              :page-size="1"
+              :show-page-size-selector="false"
+              :total="settlementTotal"
+              @update:page="emit('settlement-page', $event)"
+            />
           </template>
 
-          <template v-else-if="activeTab === 'payback'">
+          <template v-else-if="!loading && activeTab === 'payback'">
             <dl v-if="recovery" class="grid grid-cols-2 gap-4 text-sm sm:grid-cols-3">
               <div><dt class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.columns.cost') }}</dt><dd class="mt-1 font-semibold tabular-nums">{{ formatMoney(recovery.purchase_cost, recovery.currency) }}</dd></div>
               <div><dt class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.metrics.usageValue') }}</dt><dd class="mt-1 font-semibold tabular-nums">{{ formatMoney(recovery.usage_value, recovery.currency) }}</dd></div>
@@ -141,7 +173,7 @@
             <EmptyState v-else :title="t('admin.sharedPool.empty.overview')" />
           </template>
 
-          <template v-else>
+          <template v-else-if="!loading && activeTab === 'lifecycle'">
             <ol v-if="lifecycle.length" class="divide-y divide-gray-100 dark:divide-dark-700">
               <li v-for="event in lifecycle" :key="event.id" class="py-3 first:pt-0">
                 <div class="flex items-start justify-between gap-3">
@@ -152,6 +184,28 @@
               </li>
             </ol>
             <EmptyState v-else :title="t('admin.sharedPool.approval.impacts.lifecycle_events')" />
+          </template>
+
+          <template v-else-if="!loading">
+            <ol v-if="approvals.length" class="divide-y divide-gray-100 dark:divide-dark-700">
+              <li v-for="approval in approvals" :key="approval.id" class="py-3 first:pt-0">
+                <div class="flex items-start justify-between gap-3">
+                  <span class="font-medium">{{ approvalLabel(approval.action_type) }}</span>
+                  <StatusBadge :status="approvalState(approval.status)" :label="t(`admin.sharedPool.approval.${approval.status}`)" />
+                </div>
+                <p class="mt-1 text-sm text-gray-600 dark:text-gray-300">{{ approval.reason || '-' }}</p>
+                <time class="mt-1 block text-xs text-gray-500 dark:text-gray-400">{{ formatDate(approval.requested_at) }}</time>
+              </li>
+            </ol>
+            <EmptyState v-else :title="t('admin.sharedPool.approval.empty')" />
+            <Pagination
+              v-if="approvalsTotal > 20"
+              class="mt-4"
+              :page="approvalsPage"
+              :page-size="20"
+              :total="approvalsTotal"
+              @update:page="emit('approval-page', $event)"
+            />
           </template>
         </div>
       </aside>
@@ -164,31 +218,47 @@ import { computed, nextTick, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { Account } from '@/types'
 import type {
+  PoolApproval,
+  PoolApprovalAction,
+  PoolApprovalStatus,
   SharedPoolAccountCost,
   SharedPoolLedgerEntry,
   SharedPoolLifecycleEvent,
   SharedPoolSettlementPreview
 } from '@/api/admin/sharedPool'
-import { DataTable, EmptyState, LoadingSpinner } from '@/components/common'
+import AccountStatusIndicator from '@/components/account/AccountStatusIndicator.vue'
+import { DataTable, EmptyState, LoadingSpinner, Pagination } from '@/components/common'
 import PlatformTypeBadge from '@/components/common/PlatformTypeBadge.vue'
 import StatusBadge from '@/components/common/StatusBadge.vue'
 import type { Column } from '@/components/common/types'
 import Icon from '@/components/icons/Icon.vue'
 import { formatDateTimeToMinute } from '@/utils/format'
-import { accountStatusPresentation, formatPoolMoney, settlementStatusPresentation } from '@/utils/sharedPool'
+import { formatPoolMoney, settlementStatusPresentation } from '@/utils/sharedPool'
 
-type TraceTab = 'costs' | 'settlement' | 'payback' | 'lifecycle'
+type TraceTab = 'costs' | 'settlement' | 'payback' | 'lifecycle' | 'approvals'
 const props = defineProps<{
   show: boolean
   loading: boolean
   accountId: number
   account: Account | null
   entries: SharedPoolLedgerEntry[]
+  entriesPage: number
+  entriesTotal: number
   settlement: SharedPoolSettlementPreview | null
+  settlementPage: number
+  settlementTotal: number
   recovery: SharedPoolAccountCost | null
   lifecycle: SharedPoolLifecycleEvent[]
+  approvals: PoolApproval[]
+  approvalsPage: number
+  approvalsTotal: number
 }>()
-const emit = defineEmits<{ (event: 'close'): void }>()
+const emit = defineEmits<{
+  (event: 'close'): void
+  (event: 'entry-page', page: number): void
+  (event: 'settlement-page', page: number): void
+  (event: 'approval-page', page: number): void
+}>()
 const { t, locale } = useI18n()
 const activeTab = ref<TraceTab>('costs')
 const panelRef = ref<HTMLElement | null>(null)
@@ -250,7 +320,8 @@ const tabs = computed(() => [
   { key: 'costs' as const, label: t('admin.sharedPool.tabs.ledger') },
   { key: 'settlement' as const, label: t('admin.sharedPool.tabs.settlement') },
   { key: 'payback' as const, label: t('admin.sharedPool.tabs.overview') },
-  { key: 'lifecycle' as const, label: t('admin.sharedPool.approval.impacts.lifecycle_events') }
+  { key: 'lifecycle' as const, label: t('admin.sharedPool.approval.impacts.lifecycle_events') },
+  { key: 'approvals' as const, label: t('admin.sharedPool.approval.title') }
 ])
 const costColumns = computed<Column[]>(() => [
   { key: 'entry_type', label: t('admin.sharedPool.columns.costType') },
@@ -266,17 +337,73 @@ const settlementColumns = computed<Column[]>(() => [
   { key: 'usage_share', label: t('admin.sharedPool.columns.share') },
   { key: 'allocated_cost', label: t('admin.sharedPool.columns.allocated') },
   { key: 'contribution_credit', label: t('admin.sharedPool.columns.credit') },
-  { key: 'net_amount', label: t('admin.sharedPool.columns.net') }
+  { key: 'net_amount', label: t('admin.sharedPool.columns.net') },
+  { key: 'trace_quality', label: t('admin.sharedPool.approval.technicalDetails') }
 ])
 const uploaderName = computed(() => props.account?.uploader_username || props.account?.uploader_email || '-')
 const importBatch = computed(() => String(props.account?.extra?.import_batch_id || t('admin.sharedPool.page.singleImport')))
-const accountState = computed(() => accountStatusPresentation(props.account?.status === 'error' ? 'warning' : props.account?.status || 'inactive'))
+const latestLifecycle = computed(() => props.lifecycle[0])
+const lifecycleState = computed(() => {
+  const event = latestLifecycle.value?.event_type
+  if (!event) return { badge: 'inactive', label: '-' }
+  const badge = event === 'banned_confirmed' ? 'danger' : event === 'refund' ? 'warning' : event === 'recovered' ? 'success' : 'inactive'
+  return { badge, label: lifecycleLabel(event) }
+})
+const runtimeReason = computed(() => {
+  const account = props.account
+  if (!account) return ''
+  if (account.error_message) return account.error_message
+  if (account.temp_unschedulable_reason) return account.temp_unschedulable_reason
+  const until = account.rate_limit_reset_at || account.overload_until || account.temp_unschedulable_until
+  return until ? formatDate(until) : ''
+})
+const effectiveSchedulable = computed(() => {
+  const account = props.account
+  if (!account || account.status !== 'active' || !account.schedulable) return false
+  const now = Date.now()
+  if ([account.rate_limit_reset_at, account.overload_until, account.temp_unschedulable_until]
+    .some((value) => value ? new Date(value).getTime() > now : false)) return false
+  if (account.auto_pause_on_expired && account.expires_at && account.expires_at * 1000 <= now) return false
+  const quotaExceeded = (used?: number | null, limit?: number | null) =>
+    typeof limit === 'number' && limit > 0 && typeof used === 'number' && used >= limit
+  const quotaWindowActive = (kind: 'daily' | 'weekly') => {
+    const extra = account.extra as Record<string, unknown> | undefined
+    const mode = String(extra?.[`quota_${kind}_reset_mode`] || 'rolling')
+    const rawTime = mode === 'fixed'
+      ? extra?.[`quota_${kind}_reset_at`]
+      : extra?.[`quota_${kind}_start`]
+    const parsedTime = rawTime ? new Date(String(rawTime)).getTime() : Number.NaN
+    const resetTime = mode === 'fixed' || !Number.isFinite(parsedTime)
+      ? parsedTime
+      : parsedTime + (kind === 'daily' ? 86_400_000 : 604_800_000)
+    return Number.isFinite(resetTime) && resetTime > now
+  }
+  return !(['apikey', 'bedrock'].includes(account.type) && (
+    quotaExceeded(account.quota_used, account.quota_limit) ||
+    (quotaWindowActive('daily') && quotaExceeded(account.quota_daily_used, account.quota_daily_limit)) ||
+    (quotaWindowActive('weekly') && quotaExceeded(account.quota_weekly_used, account.quota_weekly_limit))
+  ))
+})
 const settlementState = computed(() => settlementStatusPresentation(props.settlement?.status || 'draft'))
 const accountLines = computed(() => (props.settlement?.account_lines || []).filter((line) => line.account_id === props.accountId))
 const accountCosts = computed(() => (props.settlement?.account_costs || []).filter((cost) => cost.account_id === props.accountId))
+const dataQualityNotices = computed(() => {
+  const notices: string[] = []
+  if (!props.entries.length) notices.push(t('admin.sharedPool.intake.pendingNotice'))
+  const nonExactLines = accountLines.value.filter((line) => line.trace_quality !== 'exact').length
+  if (nonExactLines) notices.push(t('admin.sharedPool.settlement.unpricedWarning', { count: nonExactLines }))
+  const pending = props.approvals.filter((item) => item.status === 'pending')
+  if (pending.length) notices.push(t('admin.sharedPool.approval.queueSummary', {
+    pending: pending.length,
+    highRisk: pending.filter((item) => item.changes?.business?.high_risk).length
+  }))
+  return notices
+})
 const formatMoney = (amount: number, currency = props.settlement?.currency || 'CNY') => formatPoolMoney(Number.isFinite(amount) ? amount : 0, currency, locale.value)
 const formatPercent = (value: number) => `${(Number.isFinite(value) ? value : 0).toFixed(1)}%`
 const formatDate = (value?: string | null) => value ? formatDateTimeToMinute(value, locale.value) : '-'
 const dateOnly = (value?: string | null) => value ? value.slice(0, 10) : '-'
 const lifecycleLabel = (event: SharedPoolLifecycleEvent['event_type']) => t(`admin.sharedPool.event.${event === 'banned_confirmed' ? 'banned' : event}`)
+const approvalLabel = (action: PoolApprovalAction) => t(`admin.sharedPool.approval.${action === 'UPDATE_ACCOUNT' ? 'updateAccount' : action === 'VIEW_CREDENTIAL' ? 'viewCredential' : 'deleteAccount'}`)
+const approvalState = (status: PoolApprovalStatus) => status === 'approved' || status === 'consumed' ? 'success' : status === 'pending' ? 'warning' : status === 'rejected' ? 'danger' : 'inactive'
 </script>

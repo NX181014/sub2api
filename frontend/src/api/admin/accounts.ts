@@ -39,6 +39,7 @@ export interface AccountListFilters {
   include_pool_metrics?: string
   uploader_user_id?: number | string
   import_batch_id?: string
+  import_batch_scope?: 'standalone' | 'batched'
   sort_by?: string
   sort_order?: 'asc' | 'desc'
 }
@@ -696,6 +697,7 @@ export async function exportData(options?: {
     search?: string
     uploader_user_id?: number | string
     import_batch_id?: string
+    import_batch_scope?: 'standalone' | 'batched'
     sort_by?: string
     sort_order?: 'asc' | 'desc'
   }
@@ -705,7 +707,7 @@ export async function exportData(options?: {
   if (options?.ids && options.ids.length > 0) {
     params.ids = options.ids.join(',')
   } else if (options?.filters) {
-    const { platform, type, status, group, privacy_mode, search, uploader_user_id, import_batch_id, sort_by, sort_order } = options.filters
+    const { platform, type, status, group, privacy_mode, search, uploader_user_id, import_batch_id, import_batch_scope, sort_by, sort_order } = options.filters
     if (platform) params.platform = platform
     if (type) params.type = type
     if (status) params.status = status
@@ -714,6 +716,7 @@ export async function exportData(options?: {
     if (search) params.search = search
     if (uploader_user_id) params.uploader_user_id = String(uploader_user_id)
     if (import_batch_id) params.import_batch_id = import_batch_id
+    if (import_batch_scope) params.import_batch_scope = import_batch_scope
     if (sort_by) params.sort_by = sort_by
     if (sort_order) params.sort_order = sort_order
   }

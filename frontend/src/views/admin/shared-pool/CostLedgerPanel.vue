@@ -11,7 +11,7 @@
             v-for="view in ledgerViews"
             :key="view.value"
             type="button"
-            class="min-h-10 px-3 text-sm font-medium"
+            class="min-h-11 px-3 text-sm font-medium"
             :class="activeView === view.value ? 'rounded bg-primary-50 text-primary-600 dark:bg-primary-900/30 dark:text-primary-300' : 'text-gray-500 dark:text-gray-400'"
             role="tab"
             :aria-selected="activeView === view.value"
@@ -32,7 +32,7 @@
     </div>
 
     <div v-if="activeView === 'summary'" class="min-w-0">
-      <div class="grid grid-cols-1 gap-3 border-b border-gray-100 p-4 dark:border-dark-700 sm:grid-cols-2 xl:grid-cols-6">
+      <div class="grid grid-cols-1 gap-3 border-b border-gray-100 p-4 dark:border-dark-700 sm:grid-cols-2 xl:grid-cols-8">
         <SearchInput
           v-model="summaryFilters.search"
           class="xl:col-span-2"
@@ -42,6 +42,7 @@
         <Select v-model="summaryFilters.uploader_user_id" :options="uploaderFilterOptions" searchable :aria-label="t('admin.sharedPool.columns.uploader')" @change="applySummaryFilters" />
         <Select v-model="summaryFilters.payer_user_id" :options="payerFilterOptions" searchable :aria-label="t('admin.sharedPool.ledger.payer')" @change="applySummaryFilters" />
         <Select v-model="summaryFilters.purchase_source_id" :options="sourceFilterOptions" searchable :aria-label="t('admin.sharedPool.columns.source')" @change="applySummaryFilters" />
+        <Select v-model="summaryFilters.availability_status" :options="availabilityFilterOptions" :aria-label="t('admin.accounts.columns.status')" @change="applySummaryFilters" />
         <Select v-model="summaryFilters.lifecycle_status" :options="statusFilterOptions" :aria-label="t('admin.sharedPool.columns.status')" @change="applySummaryFilters" />
         <Select v-model="summaryFilters.has_cost" :options="hasCostFilterOptions" :aria-label="t('admin.sharedPool.ledger.costState')" @change="applySummaryFilters" />
       </div>
@@ -62,7 +63,10 @@
             <article v-for="row in uploaderAccountStates[uploaderGroupKey(group)]?.items || []" :key="row.account_id" class="p-3 sm:p-4">
               <div class="flex min-w-0 items-start justify-between gap-3">
                 <div class="min-w-0"><button type="button" class="block min-h-11 max-w-full truncate text-left text-sm font-semibold text-primary-600 hover:underline dark:text-primary-400" :title="row.account_name" @click="emit('trace-account', row.account_id)">{{ row.account_name }}</button><p class="truncate text-xs text-gray-500 dark:text-gray-400" :title="row.provider_identity || ''">{{ row.provider_identity || '-' }}</p></div>
-                <StatusBadge :status="statusPresentation(row.latest_lifecycle_status).badge" :label="t(`admin.sharedPool.status.${statusPresentation(row.latest_lifecycle_status).key}`)" />
+                <div class="flex shrink-0 flex-col items-end gap-1">
+                  <StatusBadge :status="availabilityPresentation(row.availability_status, row.account_status).badge" :label="t(`admin.accounts.status.${availabilityPresentation(row.availability_status, row.account_status).key}`)" />
+                  <span class="text-xs text-gray-500 dark:text-gray-400">{{ t(`admin.sharedPool.status.${statusPresentation(row.latest_lifecycle_status).key}`) }}</span>
+                </div>
               </div>
               <dl class="mt-3 grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
                 <div><dt class="text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.ledger.netCost') }}</dt><dd class="mt-1 font-medium tabular-nums">{{ formatMinor(row.net_cost_minor) }}</dd></div>
@@ -111,6 +115,7 @@
         <DataTable :columns="entryColumns" :data="entries" row-key="id" :loading="loading">
           <template #cell-account_name="{ row }"><button type="button" class="min-h-11 font-medium text-primary-600 hover:underline dark:text-primary-400" @click="emit('trace-account', row.account_id)">{{ row.account_name }}</button></template>
           <template #cell-entry_type="{ row }">{{ t(`admin.sharedPool.entryTypes.${row.entry_type}`) }}</template>
+          <template #cell-availability_status="{ row }"><StatusBadge :status="availabilityPresentation(row.availability_status, row.account_status).badge" :label="t(`admin.accounts.status.${availabilityPresentation(row.availability_status, row.account_status).key}`)" /></template>
           <template #cell-original_amount="{ row }"><span class="tabular-nums">{{ formatMoney(Number(row.original_amount), row.currency) }}</span></template>
           <template #cell-cny_amount_minor="{ row }"><span class="block tabular-nums">{{ formatMinor(row.cny_amount_minor) }}</span><span class="block whitespace-nowrap text-xs text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.page.fxRateAt', { currency: row.currency, rate: row.fx_rate, date: dateOnly(row.paid_at) }) }}</span></template>
           <template #cell-service_start="{ row }"><span class="whitespace-nowrap">{{ dateOnly(row.service_start) }} - {{ dateOnly(row.service_end) }}</span></template>
@@ -123,6 +128,7 @@
       <div class="space-y-3 p-3 md:hidden">
         <article v-for="row in entries" :key="row.id" class="rounded-md border border-gray-200 p-3 text-sm dark:border-dark-700">
           <div class="flex min-w-0 items-start justify-between gap-3"><button type="button" class="min-h-11 min-w-0 truncate text-left font-semibold text-primary-600 dark:text-primary-400" :title="row.account_name" @click="emit('trace-account', row.account_id)">{{ row.account_name }}</button><span class="shrink-0 font-medium tabular-nums">{{ formatMoney(Number(row.original_amount), row.currency) }}</span></div>
+          <StatusBadge class="mt-2" :status="availabilityPresentation(row.availability_status, row.account_status).badge" :label="t(`admin.accounts.status.${availabilityPresentation(row.availability_status, row.account_status).key}`)" />
           <div class="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-gray-500 dark:text-gray-400">
             <span>{{ t(`admin.sharedPool.entryTypes.${row.entry_type}`) }}</span><span>{{ row.purchase_source || '-' }}</span><span>{{ row.payer_email || '-' }}</span><span>{{ dateOnly(row.paid_at) }}</span>
           </div>
@@ -172,7 +178,7 @@
       <div v-if="batchForm.amount_mode === 'order_total'" class="md:col-span-2">
         <span class="input-label">{{ t('admin.sharedPool.ledger.allocationMode') }}</span>
         <div class="inline-flex rounded-md border border-gray-200 p-0.5 dark:border-dark-600">
-          <button v-for="mode in allocationModeOptions" :key="mode.value" type="button" class="min-h-10 px-4 text-sm" :class="batchForm.allocation_mode === mode.value ? 'rounded bg-primary-50 font-medium text-primary-600 dark:bg-primary-900/30 dark:text-primary-300' : ''" @click="batchForm.allocation_mode = mode.value">{{ mode.label }}</button>
+          <button v-for="mode in allocationModeOptions" :key="mode.value" type="button" class="min-h-11 px-4 text-sm" :class="batchForm.allocation_mode === mode.value ? 'rounded bg-primary-50 font-medium text-primary-600 dark:bg-primary-900/30 dark:text-primary-300' : ''" @click="batchForm.allocation_mode = mode.value">{{ mode.label }}</button>
         </div>
       </div>
       <div><label for="ledger-payer" class="input-label">{{ t('admin.sharedPool.ledger.payer') }} *</label><Select id="ledger-payer" v-model="batchForm.payer_user_id" :options="userOptions" searchable /></div>
@@ -233,13 +239,14 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import { adminAPI } from '@/api/admin'
 import type { Account } from '@/types'
 import type {
   BatchSharedPoolCostRequest,
+  PoolAvailabilityStatus,
   PoolCostEntryType,
   SharedPoolBatchAmountMode,
   SharedPoolCostSummary,
@@ -303,6 +310,7 @@ const uploaderSummaries = ref<SharedPoolCostUploaderSummary[]>([])
 const entries = ref<SharedPoolLedgerEntry[]>([])
 const users = ref<Array<{ id: number; label: string; active: boolean }>>([])
 const sources = ref<SharedPoolPurchaseSource[]>([])
+const referencedSources = ref<SharedPoolPurchaseSource[]>([])
 const accountChoices = ref<AccountChoice[]>([])
 const batchAccounts = ref<AccountChoice[]>([])
 const selectedAccounts = ref<AccountChoice[]>([])
@@ -321,6 +329,7 @@ const summaryFilters = reactive({
   uploader_user_id: queryID('uploader_user_id') || props.initialUploaderUserId,
   payer_user_id: queryID('payer_user_id'),
   purchase_source_id: queryID('purchase_source_id') || props.initialPurchaseSourceId,
+  availability_status: queryText('ledger_availability_status') as PoolAvailabilityStatus | '',
   lifecycle_status: queryText('ledger_lifecycle_status'),
   has_cost: queryText('ledger_has_cost')
 })
@@ -385,13 +394,23 @@ const userOptions = computed(() => users.value.filter((item) => item.active).map
 const uploaderFilterOptions = computed(() => [{ value: 0, label: t('admin.sharedPool.ledger.allUploaders') }, ...allUserOptions.value])
 const payerFilterOptions = computed(() => [{ value: 0, label: t('admin.sharedPool.ledger.allPayers') }, ...allUserOptions.value])
 const sourceOptions = computed(() => sources.value.filter((item) => item.active).map((item) => ({ value: item.id, label: item.name })))
-const sourceFilterOptions = computed(() => [{ value: 0, label: t('admin.sharedPool.ledger.allSources') }, ...sources.value.map((item) => ({ value: item.id, label: item.name }))])
+const sourceFilterOptions = computed(() => [{ value: 0, label: t('admin.sharedPool.ledger.allSources') }, ...referencedSources.value.map((item) => ({ value: item.id, label: item.name }))])
 const accountFilterOptions = computed(() => [{ value: 0, label: t('admin.sharedPool.ledger.allAccounts') }, ...accountChoices.value.map((item) => ({ value: item.id, label: item.name }))])
 const statusFilterOptions = computed(() => [
   { value: '', label: t('admin.sharedPool.ledger.allStatuses') },
   { value: 'active', label: t('admin.sharedPool.status.active') },
   { value: 'banned_confirmed', label: t('admin.sharedPool.status.banned') },
   { value: 'retired', label: t('admin.sharedPool.status.inactive') }
+])
+const availabilityFilterOptions = computed(() => [
+  { value: '', label: t('admin.sharedPool.ledger.allStatuses') },
+  { value: 'normal', label: t('admin.accounts.status.active') },
+  { value: 'error', label: t('admin.accounts.status.error') },
+  { value: 'rate_limited', label: t('admin.accounts.status.rateLimited') },
+  { value: 'overloaded', label: t('admin.accounts.status.overloaded') },
+  { value: 'temp_unschedulable', label: t('admin.accounts.status.tempUnschedulable') },
+  { value: 'inactive', label: t('admin.accounts.status.inactive') },
+  { value: 'manual_unschedulable', label: t('admin.accounts.status.unschedulable') }
 ])
 const hasCostFilterOptions = computed(() => [
   { value: '', label: t('admin.sharedPool.ledger.allCostStates') },
@@ -402,6 +421,7 @@ const hasCostFilterOptions = computed(() => [
 const entryColumns = computed<Column[]>(() => [
   { key: 'account_name', label: t('admin.sharedPool.columns.account') },
   { key: 'entry_type', label: t('admin.sharedPool.columns.costType') },
+  { key: 'availability_status', label: t('admin.accounts.columns.status') },
   { key: 'payer_email', label: t('admin.sharedPool.ledger.payer') },
   { key: 'purchase_source', label: t('admin.sharedPool.columns.source') },
   { key: 'original_amount', label: t('admin.sharedPool.ledger.originalAmount') },
@@ -450,6 +470,19 @@ const formatMinor = (minor: number) => formatMoney((minor || 0) / 100)
 const formatTokens = (tokens: number) => new Intl.NumberFormat(locale.value, { notation: 'compact', maximumFractionDigits: 1 }).format(tokens || 0)
 const dateOnly = (value?: string | null) => value ? value.slice(0, 10) : '-'
 const statusPresentation = (status: string) => accountStatusPresentation(status === 'banned_confirmed' ? 'banned' : status === 'retired' || status === 'replaced' ? 'inactive' : status === 'refund' ? 'warning' : 'active')
+const availabilityPresentation = (availability?: PoolAvailabilityStatus | null, accountStatus?: string | null) => {
+  const value = availability || (accountStatus === 'error' ? 'error' : accountStatus === 'active' ? 'normal' : 'inactive')
+  const states = {
+    normal: { badge: 'success', key: 'active' },
+    error: { badge: 'danger', key: 'error' },
+    rate_limited: { badge: 'warning', key: 'rateLimited' },
+    overloaded: { badge: 'danger', key: 'overloaded' },
+    temp_unschedulable: { badge: 'warning', key: 'tempUnschedulable' },
+    inactive: { badge: 'inactive', key: 'inactive' },
+    manual_unschedulable: { badge: 'inactive', key: 'unschedulable' }
+  } as const
+  return states[value]
+}
 const selectedOptionLabel = (options: Array<{ value: number; label: string }>, value: number) => options.find((item) => item.value === value)?.label || '-'
 const batchErrorLabel = (error: string) => {
   const key = `admin.sharedPool.ledger.errors.${error}`
@@ -457,13 +490,15 @@ const batchErrorLabel = (error: string) => {
 }
 
 async function loadReferences() {
-  const [userResponse, sourceResponse, accountResponse] = await Promise.all([
+  const [userResponse, sourceResponse, referencedSourceResponse, accountResponse] = await Promise.all([
     adminAPI.users.list(1, 200, { sort_by: 'email', sort_order: 'asc' }),
     adminAPI.sharedPool.listPurchaseSources(),
+    adminAPI.sharedPool.listPurchaseSources({ referenced: true }),
     adminAPI.accounts.list(1, 200, { lite: 'true', sort_by: 'name', sort_order: 'asc' })
   ])
   users.value = userResponse.items.map((user) => ({ id: user.id, label: user.username || user.email, active: user.status === 'active' }))
   sources.value = sourceResponse
+  referencedSources.value = referencedSourceResponse
   accountChoices.value = accountResponse.items.map((account) => ({ id: account.id, name: account.name }))
 }
 
@@ -477,6 +512,7 @@ async function loadSummary() {
       uploader_user_id: summaryFilters.uploader_user_id || undefined,
       payer_user_id: summaryFilters.payer_user_id || undefined,
       purchase_source_id: summaryFilters.purchase_source_id || undefined,
+      availability_status: summaryFilters.availability_status || undefined,
       lifecycle_status: summaryFilters.lifecycle_status || undefined,
       has_cost: summaryFilters.has_cost === '' ? undefined : summaryFilters.has_cost === 'true'
     })
@@ -501,6 +537,7 @@ async function loadUploaderAccounts(group: SharedPoolCostUploaderSummary, page: 
       uploader_unassigned: !group.uploader_user_id || undefined,
       payer_user_id: summaryFilters.payer_user_id || undefined,
       purchase_source_id: summaryFilters.purchase_source_id || undefined,
+      availability_status: summaryFilters.availability_status || undefined,
       lifecycle_status: summaryFilters.lifecycle_status || undefined,
       has_cost: summaryFilters.has_cost === '' ? undefined : summaryFilters.has_cost === 'true'
     })
@@ -553,6 +590,7 @@ const syncSummaryQuery = () => replaceLedgerQuery({
   uploader_user_id: summaryFilters.uploader_user_id || undefined,
   payer_user_id: summaryFilters.payer_user_id || undefined,
   purchase_source_id: summaryFilters.purchase_source_id || undefined,
+  ledger_availability_status: summaryFilters.availability_status || undefined,
   ledger_lifecycle_status: summaryFilters.lifecycle_status || undefined,
   ledger_has_cost: summaryFilters.has_cost || undefined
 })
@@ -577,6 +615,88 @@ async function changeSummaryPageSize(size: number) { summaryPagination.page_size
 async function changeEntryPage(page: number) { entryPagination.page = page; await syncEntryQuery(); await loadEntries() }
 async function changeEntryPageSize(size: number) { entryPagination.page_size = size; entryPagination.page = 1; await syncEntryQuery(); await loadEntries() }
 async function showAccountEntries(accountId: number) { entryFilters.account_id = accountId; entryPagination.page = 1; activeView.value = 'entries'; await syncEntryQuery(); await loadEntries() }
+
+const ledgerRouteSignature = computed(() => JSON.stringify([
+  'ledger_view',
+  'ledger_summary_page', 'ledger_summary_page_size', 'ledger_summary_search',
+  'ledger_availability_status', 'ledger_lifecycle_status', 'ledger_has_cost',
+  'ledger_entry_page', 'ledger_entry_page_size', 'ledger_entry_search',
+  'ledger_entry_type', 'ledger_entry_start', 'ledger_entry_end',
+  'account_id', 'uploader_user_id', 'payer_user_id', 'purchase_source_id'
+].map(queryText)))
+
+watch(ledgerRouteSignature, () => {
+  const nextView: LedgerView = queryText('ledger_view') === 'entries' || (queryID('account_id') > 0 && !queryText('ledger_view'))
+    ? 'entries'
+    : 'summary'
+  const nextSummary = {
+    page: queryPage('ledger_summary_page', 1),
+    page_size: queryPage('ledger_summary_page_size', 20),
+    search: queryText('ledger_summary_search'),
+    uploader_user_id: queryID('uploader_user_id'),
+    payer_user_id: queryID('payer_user_id'),
+    purchase_source_id: queryID('purchase_source_id'),
+    availability_status: queryText('ledger_availability_status') as PoolAvailabilityStatus | '',
+    lifecycle_status: queryText('ledger_lifecycle_status'),
+    has_cost: queryText('ledger_has_cost')
+  }
+  const nextEntries = {
+    page: queryPage('ledger_entry_page', 1),
+    page_size: queryPage('ledger_entry_page_size', 20),
+    search: queryText('ledger_entry_search'),
+    account_id: queryID('account_id'),
+    uploader_user_id: queryID('uploader_user_id'),
+    payer_user_id: queryID('payer_user_id'),
+    purchase_source_id: queryID('purchase_source_id'),
+    entry_type: queryText('ledger_entry_type') as PoolCostEntryType | '',
+    start_date: queryText('ledger_entry_start'),
+    end_date: queryText('ledger_entry_end')
+  }
+  const activeChanged = nextView !== activeView.value || (nextView === 'summary'
+    ? summaryPagination.page !== nextSummary.page ||
+      summaryPagination.page_size !== nextSummary.page_size ||
+      summaryFilters.search !== nextSummary.search ||
+      summaryFilters.uploader_user_id !== nextSummary.uploader_user_id ||
+      summaryFilters.payer_user_id !== nextSummary.payer_user_id ||
+      summaryFilters.purchase_source_id !== nextSummary.purchase_source_id ||
+      summaryFilters.availability_status !== nextSummary.availability_status ||
+      summaryFilters.lifecycle_status !== nextSummary.lifecycle_status ||
+      summaryFilters.has_cost !== nextSummary.has_cost
+    : entryPagination.page !== nextEntries.page ||
+      entryPagination.page_size !== nextEntries.page_size ||
+      entryFilters.search !== nextEntries.search ||
+      entryFilters.account_id !== nextEntries.account_id ||
+      entryFilters.uploader_user_id !== nextEntries.uploader_user_id ||
+      entryFilters.payer_user_id !== nextEntries.payer_user_id ||
+      entryFilters.purchase_source_id !== nextEntries.purchase_source_id ||
+      entryFilters.entry_type !== nextEntries.entry_type ||
+      entryFilters.start_date !== nextEntries.start_date ||
+      entryFilters.end_date !== nextEntries.end_date)
+
+  activeView.value = nextView
+  Object.assign(summaryPagination, { page: nextSummary.page, page_size: nextSummary.page_size })
+  Object.assign(summaryFilters, {
+    search: nextSummary.search,
+    uploader_user_id: nextSummary.uploader_user_id,
+    payer_user_id: nextSummary.payer_user_id,
+    purchase_source_id: nextSummary.purchase_source_id,
+    availability_status: nextSummary.availability_status,
+    lifecycle_status: nextSummary.lifecycle_status,
+    has_cost: nextSummary.has_cost
+  })
+  Object.assign(entryPagination, { page: nextEntries.page, page_size: nextEntries.page_size })
+  Object.assign(entryFilters, {
+    search: nextEntries.search,
+    account_id: nextEntries.account_id,
+    uploader_user_id: nextEntries.uploader_user_id,
+    payer_user_id: nextEntries.payer_user_id,
+    purchase_source_id: nextEntries.purchase_source_id,
+    entry_type: nextEntries.entry_type,
+    start_date: nextEntries.start_date,
+    end_date: nextEntries.end_date
+  })
+  if (activeChanged) void loadActiveView()
+})
 
 async function loadBatchAccounts(search = accountSearch.value) {
   try {

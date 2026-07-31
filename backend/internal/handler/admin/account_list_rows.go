@@ -54,22 +54,47 @@ func importBatchID(account *service.Account) string {
 	return value
 }
 
+func accountEffectivelySchedulable(account *service.Account, now time.Time) bool {
+	effectivelySchedulable := account.Status == service.StatusActive && account.Schedulable
+	if account.AutoPauseOnExpired && account.ExpiresAt != nil && !now.Before(*account.ExpiresAt) {
+		effectivelySchedulable = false
+	}
+	if account.OverloadUntil != nil && account.OverloadUntil.After(now) {
+		effectivelySchedulable = false
+	}
+	if account.RateLimitResetAt != nil && account.RateLimitResetAt.After(now) {
+		effectivelySchedulable = false
+	}
+	if account.TempUnschedulableUntil != nil && account.TempUnschedulableUntil.After(now) {
+		effectivelySchedulable = false
+	}
+	if effectivelySchedulable && account.IsAPIKeyOrBedrock() && account.IsQuotaExceeded() {
+		effectivelySchedulable = false
+	}
+	return effectivelySchedulable
+}
+
 func addBatchStatus(summary *accountImportBatchSummary, account *service.Account, now time.Time) {
-	if account.Schedulable {
+	effectivelySchedulable := accountEffectivelySchedulable(account, now)
+	if effectivelySchedulable {
 		summary.SchedulableCount++
 	}
 	switch {
 	case account.Status == service.StatusError:
 		summary.Status.Error++
-	case account.RateLimitResetAt != nil && account.RateLimitResetAt.After(now):
-		summary.Status.RateLimited++
-	case account.OverloadUntil != nil && account.OverloadUntil.After(now):
-		summary.Status.Overloaded++
-	case account.TempUnschedulableUntil != nil && account.TempUnschedulableUntil.After(now):
-		summary.Status.TempUnschedulable++
 	case account.Status != service.StatusActive:
 		summary.Status.Inactive++
 	case !account.Schedulable:
+		summary.Status.ManualUnschedulable++
+	case account.AutoPauseOnExpired && account.ExpiresAt != nil && !now.Before(*account.ExpiresAt):
+		summary.Status.ManualUnschedulable++
+	case account.OverloadUntil != nil && account.OverloadUntil.After(now):
+		summary.Status.Overloaded++
+	case account.RateLimitResetAt != nil && account.RateLimitResetAt.After(now):
+		summary.Status.RateLimited++
+	case account.TempUnschedulableUntil != nil && account.TempUnschedulableUntil.After(now):
+		summary.Status.TempUnschedulable++
+	case !effectivelySchedulable:
 		summary.Status.ManualUnschedulable++
 	default:
 		summary.Status.Normal++
@@ -170,7 +195,7 @@ func sortAccountLogicalRows(rows []accountLogicalRow, sortBy, sortOrder string, 
 	}
 	rowSchedulable := func(row accountLogicalRow) (int, int) {
 		if row.account != nil {
-			if row.account.Schedulable {
+			if accountEffectivelySchedulable(row.account, now) {
 				return 1, 1
 			}
 			return 0, 1
@@ -238,7 +263,7 @@ func (h *AccountHandler) enrichLogicalRowRuntime(ctx context.Context, accounts [
 
 	if includeSchedulerScore && pageHasOpenAI {
 		pool := h.listAccountSchedulerScoreFilterPool(ctx, filters.Platform, filters.Type, filters.Status, filters.Search, filters.GroupID, filters.PrivacyMode)
-		if filters.UploaderUserID > 0 || filters.UploaderUnassigned || filters.ImportBatchID != "" {
+		if filters.UploaderUserID > 0 || filters.UploaderUnassigned || filters.ImportBatchID != "" || filters.ImportBatchScope != "" {
 			filtered := pool[:0]
 			for i := range pool {
 				account := &pool[i]
@@ -250,6 +275,12 @@ func (h *AccountHandler) enrichLogicalRowRuntime(ctx context.Context, accounts [
 					continue
 				}
 				if filters.ImportBatchID != "" && batchID != filters.ImportBatchID {
+					continue
+				}
+				if filters.ImportBatchScope == "standalone" && batchID != "" {
+					continue
+				}
+				if filters.ImportBatchScope == "batched" && batchID == "" {
 					continue
 				}
 				filtered = append(filtered, *account)

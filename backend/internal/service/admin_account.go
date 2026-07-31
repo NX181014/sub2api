@@ -77,6 +77,7 @@ type AccountSelectionFilters struct {
 	UploaderUserID     int64
 	UploaderUnassigned bool
 	ImportBatchID      string
+	ImportBatchScope   string
 }
 
 type AccountSelectionSummary struct {
@@ -1230,10 +1231,12 @@ func (s *adminServiceImpl) resolveBulkUpdateTargetIDs(ctx context.Context, filte
 			total    int64
 			err      error
 		)
-		if filters.UploaderUnassigned {
+		if filters.ImportBatchID != "" || filters.ImportBatchScope != "" || filters.UploaderUnassigned {
 			accounts, total, err = s.ListAccountsBySelection(ctx, page, pageSize, AccountSelectionFilters{
 				Platform: filters.Platform, Type: filters.Type, Status: filters.Status, Search: filters.Search,
-				GroupID: groupID, PrivacyMode: filters.PrivacyMode, UploaderUnassigned: true,
+				GroupID: groupID, PrivacyMode: filters.PrivacyMode, UploaderUserID: filters.UploaderUserID,
+				UploaderUnassigned: filters.UploaderUnassigned, ImportBatchID: filters.ImportBatchID,
+				ImportBatchScope: filters.ImportBatchScope,
 			}, false, "", "")
 		} else if filters.UploaderUserID > 0 {
 			accounts, total, err = s.ListAccountsByUploader(ctx, page, pageSize, filters.Platform, filters.Type, filters.Status, filters.Search, groupID, filters.PrivacyMode, filters.UploaderUserID, false, "", "")
@@ -1283,6 +1286,10 @@ type accountLifecycleDeleteRepository interface {
 }
 
 func (s *adminServiceImpl) DeleteAccountWithOptions(ctx context.Context, id int64, options AccountDeleteOptions) (*AccountDeleteResult, error) {
+	cacheTargets, err := s.accountDeleteCacheTargets(ctx, id)
+	if err != nil {
+		return nil, err
+	}
 	if repo, ok := s.accountRepo.(accountLifecycleDeleteRepository); ok {
 		result, err := repo.DeleteAccountWithLifecycle(ctx, id, options)
 		if err != nil {
@@ -1293,12 +1300,40 @@ func (s *adminServiceImpl) DeleteAccountWithOptions(ctx context.Context, id int6
 				s.runtimeBlocker.ClearAccountSchedulingBlock(accountID)
 			}
 		}
+		s.invalidateDeletedAccountTokens(ctx, cacheTargets)
 		return result, nil
 	}
 	if err := s.deleteAccountLegacy(ctx, id); err != nil {
 		return nil, err
 	}
+	s.invalidateDeletedAccountTokens(ctx, cacheTargets)
 	return &AccountDeleteResult{AccountID: id, AffectedAccountIDs: []int64{id}}, nil
+}
+
+func (s *adminServiceImpl) accountDeleteCacheTargets(ctx context.Context, id int64) ([]*Account, error) {
+	if s.tokenCacheInvalidator == nil {
+		return nil, nil
+	}
+	account, err := s.accountRepo.GetByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	shadows, err := s.accountRepo.ListShadowsByParent(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("list spark shadows for token cache cleanup: %w", err)
+	}
+	targets := make([]*Account, 0, len(shadows)+1)
+	targets = append(targets, account)
+	targets = append(targets, shadows...)
+	return targets, nil
+}
+
+func (s *adminServiceImpl) invalidateDeletedAccountTokens(ctx context.Context, accounts []*Account) {
+	for _, account := range accounts {
+		if err := s.tokenCacheInvalidator.InvalidateToken(ctx, account); err != nil {
+			slog.Warn("account delete token cache invalidation failed", "account_id", account.ID, "error", err)
+		}
+	}
 }
 
 func (s *adminServiceImpl) DeleteAccount(ctx context.Context, id int64) error {

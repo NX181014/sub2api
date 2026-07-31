@@ -391,7 +391,16 @@ func (h *PoolHandler) CreateAccountIntake(c *gin.Context) {
 }
 
 func (h *PoolHandler) ListSources(c *gin.Context) {
-	items, err := h.poolService.ListSources(c.Request.Context())
+	referencedOnly := false
+	if raw := strings.TrimSpace(c.Query("referenced")); raw != "" {
+		value, err := strconv.ParseBool(raw)
+		if err != nil {
+			response.BadRequest(c, "referenced must be true or false")
+			return
+		}
+		referencedOnly = value
+	}
+	items, err := h.poolService.ListSources(c.Request.Context(), referencedOnly)
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
@@ -556,7 +565,8 @@ func poolCostSummaryFilter(c *gin.Context) (service.AccountCostSummaryFilter, bo
 	}
 	return service.AccountCostSummaryFilter{
 		Search: strings.TrimSpace(c.Query("search")), UploaderUserID: uploaderID, UploaderUnassigned: uploaderUnassigned, PayerUserID: payerID,
-		PurchaseSourceID: sourceID, LifecycleStatus: strings.TrimSpace(c.Query("lifecycle_status")),
+		PurchaseSourceID: sourceID, AccountStatus: strings.TrimSpace(c.Query("account_status")),
+		AvailabilityStatus: strings.TrimSpace(c.Query("availability_status")), LifecycleStatus: strings.TrimSpace(c.Query("lifecycle_status")),
 		EntryType: strings.TrimSpace(c.Query("entry_type")), HasCost: hasCost,
 	}, true
 }
@@ -1046,6 +1056,10 @@ func (h *PoolHandler) MarkSettlementPaid(c *gin.Context) {
 }
 
 func (h *PoolHandler) GetOverview(c *gin.Context) {
+	accountID, ok := optionalPoolQueryID(c, "account_id")
+	if !ok {
+		return
+	}
 	loc, _ := time.LoadLocation(service.PoolTimezone)
 	now := time.Now().In(loc)
 	start := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, loc)
@@ -1065,7 +1079,7 @@ func (h *PoolHandler) GetOverview(c *gin.Context) {
 			return
 		}
 	}
-	item, err := h.poolService.GetRecovery(c.Request.Context(), start, end)
+	item, err := h.poolService.GetRecovery(c.Request.Context(), start, end, accountID)
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return

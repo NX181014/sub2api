@@ -172,7 +172,11 @@ const batchRowsResponse = (batchID: string, matchedCount: number) => ({
   pages: 1
 })
 
-const mountAccountsView = (stubs: Record<string, unknown> = {}) => mount(AccountsView, {
+const mountAccountsView = (
+  stubs: Record<string, unknown> = {},
+  props: Record<string, unknown> = {}
+) => mount(AccountsView, {
+  props,
   global: {
     stubs: {
       AppLayout: { template: '<div><slot /></div>' },
@@ -306,6 +310,104 @@ describe('admin AccountsView bulk edit scope', () => {
     expect(wrapper.get('[data-test="bulk-edit-modal"]').attributes('data-platforms')).toBe('openai')
     expect(listAccounts).toHaveBeenCalledTimes(2)
     expect(getSelectionSummary).toHaveBeenCalledWith(expect.objectContaining({ platform: 'openai' }))
+  })
+
+  it('uses the embedded batch workbench with account pagination and emits account trace IDs', async () => {
+    const batchID = 'batch-workbench'
+    const mainAccount = account(7)
+    const batchAccount = { ...account(42), extra: { import_batch_id: batchID } }
+    listAccounts.mockResolvedValue({
+      items: [mainAccount],
+      total: 3,
+      page: 1,
+      page_size: 20,
+      pages: 1
+    })
+    listRows.mockResolvedValue(batchRowsResponse(batchID, 2))
+    listImportBatch.mockResolvedValue({
+      items: [batchAccount],
+      total: 2,
+      page: 1,
+      page_size: 20,
+      pages: 1
+    })
+    getSelectionSummary.mockResolvedValue({ total: 3, platforms: ['openai'], types: ['apikey'] })
+
+    const wrapper = mountAccountsView({}, { embedded: true })
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="workbench-all"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="workbench-standalone"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="workbench-batch"]').exists()).toBe(true)
+    const defaultColumnKeys = (wrapper.getComponent(DataTableStub).props('columns') as Array<{ key: string }>).map(column => column.key)
+    expect(defaultColumnKeys).toEqual(expect.arrayContaining([
+      'name', 'status', 'schedulable', 'capacity', 'platform_type', 'groups', 'usage', 'actions'
+    ]))
+    expect(defaultColumnKeys).not.toContain('id')
+    expect(wrapper.text()).toContain('#7')
+    expect(defaultColumnKeys).not.toContain('uploader')
+    expect(defaultColumnKeys).not.toContain('pool_record')
+
+    await wrapper.get('[data-test="workbench-batch"]').trigger('click')
+    await flushPromises()
+
+    expect(listImportBatch).toHaveBeenCalledWith(batchID, 1, 20, expect.any(Object))
+    expect(wrapper.emitted('workbench-context')?.at(-1)?.[0]).toMatchObject({
+      scope: 'batch',
+      import_batch_id: batchID,
+      page: 1,
+      page_size: 20,
+      sort_by: 'created_at',
+      sort_order: 'desc'
+    })
+    const rows = wrapper.getComponent(DataTableStub).props('data') as Array<{ id: number }>
+    expect(rows.map(row => row.id)).toEqual([42])
+
+    const traceButton = wrapper.findAll('button').find(button => button.text() === batchAccount.name)
+    expect(traceButton).toBeDefined()
+    await traceButton!.trigger('click')
+    expect(wrapper.emitted('trace-account')).toEqual([[42]])
+
+    await wrapper.get('[data-test="workbench-standalone"]').trigger('click')
+    await flushPromises()
+    expect(listAccounts.mock.calls.at(-1)?.[2]).toMatchObject({ import_batch_scope: 'standalone' })
+  })
+
+  it('applies an updated workbench URL context without emitting it back', async () => {
+    const batchID = 'batch-from-history'
+    listRows.mockResolvedValue(batchRowsResponse(batchID, 1))
+    listImportBatch.mockResolvedValue({
+      items: [account(42)],
+      total: 1,
+      page: 2,
+      page_size: 10,
+      pages: 2
+    })
+
+    const wrapper = mountAccountsView({}, {
+      embedded: true,
+      initialWorkbenchContext: { scope: 'all', page: 1, page_size: 20 }
+    })
+    await flushPromises()
+    await wrapper.setProps({
+      initialWorkbenchContext: {
+        scope: 'batch',
+        import_batch_id: batchID,
+        page: 2,
+        page_size: 10,
+        search: 'account',
+        sort_by: 'name',
+        sort_order: 'asc'
+      }
+    })
+    await flushPromises()
+
+    expect(listImportBatch).toHaveBeenCalledWith(batchID, 2, 10, expect.objectContaining({
+      search: 'account',
+      sort_by: 'name',
+      sort_order: 'asc'
+    }))
+    expect(wrapper.emitted('workbench-context')).toBeUndefined()
   })
 
   it('runs only one filtered selection summary while the async preflight is pending', async () => {

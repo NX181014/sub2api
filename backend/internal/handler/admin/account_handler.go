@@ -230,6 +230,8 @@ type BulkUpdateAccountFilters struct {
 	PrivacyMode        string `json:"privacy_mode"`
 	UploaderUserID     int64  `json:"uploader_user_id"`
 	UploaderUnassigned bool   `json:"uploader_unassigned"`
+	ImportBatchID      string `json:"import_batch_id"`
+	ImportBatchScope   string `json:"import_batch_scope"`
 }
 
 // CheckMixedChannelRequest represents check mixed channel risk request
@@ -276,12 +278,13 @@ type accountFilterQuery struct {
 func parseAccountFilterQuery(c *gin.Context) (accountFilterQuery, error) {
 	filters := accountFilterQuery{
 		AccountSelectionFilters: service.AccountSelectionFilters{
-			Platform:      c.Query("platform"),
-			Type:          c.Query("type"),
-			Status:        c.Query("status"),
-			Search:        strings.TrimSpace(c.Query("search")),
-			PrivacyMode:   strings.TrimSpace(c.Query("privacy_mode")),
-			ImportBatchID: strings.TrimSpace(c.Query("import_batch_id")),
+			Platform:         c.Query("platform"),
+			Type:             c.Query("type"),
+			Status:           c.Query("status"),
+			Search:           strings.TrimSpace(c.Query("search")),
+			PrivacyMode:      strings.TrimSpace(c.Query("privacy_mode")),
+			ImportBatchID:    strings.TrimSpace(c.Query("import_batch_id")),
+			ImportBatchScope: strings.TrimSpace(c.Query("import_batch_scope")),
 		},
 		SortBy:    c.DefaultQuery("sort_by", "name"),
 		SortOrder: c.DefaultQuery("sort_order", "asc"),
@@ -318,11 +321,19 @@ func parseAccountFilterQuery(c *gin.Context) (accountFilterQuery, error) {
 		}
 		filters.ImportBatchID = parsed.String()
 	}
+	switch filters.ImportBatchScope {
+	case "", "standalone", "batched":
+	default:
+		return accountFilterQuery{}, infraerrors.BadRequest("INVALID_IMPORT_BATCH_SCOPE", "invalid import batch scope")
+	}
+	if filters.ImportBatchID != "" && filters.ImportBatchScope != "" {
+		return accountFilterQuery{}, infraerrors.BadRequest("CONFLICTING_IMPORT_BATCH_FILTER", "import batch id and scope cannot be combined")
+	}
 	return filters, nil
 }
 
 func (h *AccountHandler) listAccountPage(ctx context.Context, page, pageSize int, filters accountFilterQuery, includePoolMetrics bool) ([]service.Account, int64, error) {
-	if filters.ImportBatchID != "" || filters.UploaderUnassigned {
+	if filters.ImportBatchID != "" || filters.ImportBatchScope != "" || filters.UploaderUnassigned {
 		selectionService, ok := h.adminService.(accountSelectionListService)
 		if !ok {
 			return nil, 0, infraerrors.InternalServer("ACCOUNT_SELECTION_FILTER_UNAVAILABLE", "account selection filter is unavailable")
@@ -727,6 +738,20 @@ func (h *AccountHandler) List(c *gin.Context) {
 				if batchID, _ := schedulerFilterPool[i].Extra["import_batch_id"].(string); batchID == filters.ImportBatchID {
 					filteredPool = append(filteredPool, schedulerFilterPool[i])
 				}
+			}
+			schedulerFilterPool = filteredPool
+		}
+		if filters.ImportBatchScope != "" {
+			filteredPool := schedulerFilterPool[:0]
+			for i := range schedulerFilterPool {
+				batchID, _ := schedulerFilterPool[i].Extra["import_batch_id"].(string)
+				if filters.ImportBatchScope == "standalone" && batchID != "" {
+					continue
+				}
+				if filters.ImportBatchScope == "batched" && batchID == "" {
+					continue
+				}
+				filteredPool = append(filteredPool, schedulerFilterPool[i])
 			}
 			schedulerFilterPool = filteredPool
 		}
@@ -2298,6 +2323,24 @@ func (h *AccountHandler) BulkUpdate(c *gin.Context) {
 		response.BadRequest(c, "account_ids or filters is required")
 		return
 	}
+	if req.Filters != nil {
+		req.Filters.ImportBatchID = strings.TrimSpace(req.Filters.ImportBatchID)
+		req.Filters.ImportBatchScope = strings.TrimSpace(req.Filters.ImportBatchScope)
+		switch req.Filters.ImportBatchScope {
+		case "", "standalone", "batched":
+		default:
+			response.BadRequest(c, "invalid import_batch_scope")
+			return
+		}
+		if req.Filters.ImportBatchID != "" {
+			batchID, err := uuid.Parse(req.Filters.ImportBatchID)
+			if err != nil || batchID == uuid.Nil || req.Filters.ImportBatchScope != "" {
+				response.BadRequest(c, "invalid import batch filter")
+				return
+			}
+			req.Filters.ImportBatchID = batchID.String()
+		}
+	}
 	// base_rpm 输入校验：负值归零，超过 10000 截断
 	sanitizeExtraBaseRPM(req.Extra)
 
@@ -2374,6 +2417,8 @@ func toServiceBulkUpdateAccountFilters(filters *BulkUpdateAccountFilters) *servi
 		PrivacyMode:        filters.PrivacyMode,
 		UploaderUserID:     filters.UploaderUserID,
 		UploaderUnassigned: filters.UploaderUnassigned,
+		ImportBatchID:      filters.ImportBatchID,
+		ImportBatchScope:   filters.ImportBatchScope,
 	}
 }
 

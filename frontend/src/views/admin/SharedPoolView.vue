@@ -171,7 +171,7 @@
                     v-model="overviewRecoveryFilter"
                     :options="overviewRecoveryFilterOptions"
                     :aria-label="t('admin.sharedPool.page.recoveryFilter')"
-                    @change="overviewPagination.page = 1"
+                    @change="applyOverviewRecoveryFilter"
                   />
                 </div>
               </div>
@@ -206,8 +206,8 @@
                 </template>
                 <template #cell-status="{ row }">
                   <StatusBadge
-                    :status="accountStatus(row.status).badge"
-                    :label="t(`admin.sharedPool.status.${accountStatus(row.status).key}`)"
+                    :status="availabilityPresentation(row.availability_status, row.account_status).badge"
+                    :label="t(`admin.accounts.status.${availabilityPresentation(row.availability_status, row.account_status).key}`)"
                   />
                 </template>
                 <template #cell-roi_rate="{ row }">
@@ -242,7 +242,7 @@
                 :page="overviewPagination.page"
                 :page-size="overviewPagination.page_size"
                 :total="filteredOverviewAccounts.length"
-                @update:page="overviewPagination.page = $event"
+                @update:page="changeOverviewPage"
                 @update:page-size="changeOverviewPageSize"
               />
             </section>
@@ -265,8 +265,12 @@
         <AccountsView
           ref="accountsViewRef"
           embedded
+          :initial-workbench-context="initialWorkbenchContext"
           :pool-records="poolRecordsByAccountID"
           @pool-record="openAccountPoolRecord"
+          @trace-account="openAccountTrace"
+          @workbench-context="syncWorkbenchContext"
+          @refreshed="refreshAccountPoolRecords"
           @pool-create-request="prepareAccountAction('create')"
           @pool-import-request="prepareAccountAction('import')"
           @pool-created="completeCreatedAccountIntake"
@@ -297,11 +301,11 @@
             {{ t('common.refresh') }}
           </button>
         </section>
-        <dl v-if="selectedSettlementAccount" class="grid grid-cols-2 gap-3 rounded-lg border border-primary-100 bg-primary-50/60 px-4 py-3 text-sm dark:border-primary-900/60 dark:bg-primary-900/10 sm:grid-cols-4">
-          <div><dt class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.columns.account') }}</dt><dd class="mt-1 truncate font-medium"><button type="button" class="max-w-full truncate text-primary-600 hover:underline dark:text-primary-400" :title="selectedSettlementAccount.name" @click="openAccountTrace(selectedSettlementAccount.id)">{{ selectedSettlementAccount.name }}</button></dd></div>
-          <div><dt class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.columns.uploader') }}</dt><dd class="mt-1 truncate font-medium">{{ selectedSettlementAccount.uploader_username || selectedSettlementAccount.uploader_email || '-' }}</dd></div>
-          <div><dt class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.page.importBatch') }}</dt><dd class="mt-1 truncate font-medium">{{ selectedSettlementImportBatchID || t('admin.sharedPool.page.singleImport') }}</dd></div>
-          <div><dt class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.columns.uploadedAt') }}</dt><dd class="mt-1 whitespace-nowrap font-medium">{{ formatDateTimeToMinute(selectedSettlementAccount.created_at, locale) }}</dd></div>
+        <dl v-if="selectedSettlementIdentity" class="grid grid-cols-2 gap-3 rounded-lg border border-primary-100 bg-primary-50/60 px-4 py-3 text-sm dark:border-primary-900/60 dark:bg-primary-900/10 sm:grid-cols-4">
+          <div><dt class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.columns.account') }}</dt><dd class="mt-1 truncate font-medium"><button type="button" class="max-w-full truncate text-primary-600 hover:underline dark:text-primary-400" :title="selectedSettlementIdentity.name" @click="openAccountTrace(selectedSettlementIdentity.id)">{{ selectedSettlementIdentity.name }}</button></dd></div>
+          <div><dt class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.columns.uploader') }}</dt><dd class="mt-1 truncate font-medium">{{ selectedSettlementIdentity.uploader || '-' }}</dd></div>
+          <div><dt class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.page.importBatch') }}</dt><dd class="mt-1 truncate font-medium">{{ selectedSettlementIdentity.importBatch || t('admin.sharedPool.page.singleImport') }}</dd></div>
+          <div><dt class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.columns.uploadedAt') }}</dt><dd class="mt-1 whitespace-nowrap font-medium">{{ selectedSettlementIdentity.createdAt ? formatDateTimeToMinute(selectedSettlementIdentity.createdAt, locale) : '-' }}</dd></div>
         </dl>
         <template v-if="settlement">
           <div
@@ -402,6 +406,10 @@
                     <span class="block truncate text-sm font-semibold" :title="group.account_name">{{ group.account_name }}</span>
                     <span class="block text-xs text-gray-500 dark:text-gray-400">{{ group.lines.length }} {{ t('admin.sharedPool.columns.member') }} · {{ formatMoney(group.total_cost, settlement.currency) }}</span>
                   </button>
+                  <div v-if="group.context" class="hidden shrink-0 flex-col items-end gap-1 sm:flex">
+                    <StatusBadge :status="availabilityPresentation(group.context.availability_status, group.context.account_status).badge" :label="t(`admin.accounts.status.${availabilityPresentation(group.context.availability_status, group.context.account_status).key}`)" />
+                    <span class="text-xs text-gray-500 dark:text-gray-400">{{ lifecycleStatusLabel(group.context.latest_lifecycle_status) }}</span>
+                  </div>
                   <button type="button" class="inline-flex h-11 w-11 shrink-0 items-center justify-center text-primary-600 dark:text-primary-400" :title="t('admin.sharedPool.actions.poolRecord')" :aria-label="t('admin.sharedPool.actions.poolRecord')" @click="openAccountTrace(group.account_id)"><Icon name="eye" size="sm" /></button>
                   <button type="button" class="min-h-11 shrink-0 px-2 text-xs font-medium text-primary-600 dark:text-primary-400" @click="toggleSettlementAccount(group.account_id)">{{ expandedSettlementAccounts.has(group.account_id) ? t('common.collapse') : t('common.expand') }}</button>
                 </div>
@@ -423,7 +431,7 @@
                 </div>
               </article>
             </div>
-            <Pagination v-if="settlementAccountGroups.length > settlementAccountPagination.page_size" :page="settlementAccountPagination.page" :page-size="settlementAccountPagination.page_size" :total="settlementAccountGroups.length" @update:page="settlementAccountPagination.page = $event" @update:page-size="changeSettlementAccountPageSize" />
+            <Pagination v-if="settlementAccountGroups.length > settlementAccountPagination.page_size" :page="settlementAccountPagination.page" :page-size="settlementAccountPagination.page_size" :total="settlementAccountGroups.length" @update:page="changeSettlementAccountPage" @update:page-size="changeSettlementAccountPageSize" />
           </section>
         </template>
         <EmptyState v-else :title="t('admin.sharedPool.empty.settlement')" />
@@ -465,8 +473,9 @@
                       <span class="shrink-0 text-xs text-primary-600 dark:text-primary-400">{{ expandedSourceItems.has(sourceItemKey(group, source)) ? t('common.collapse') : t('common.expand') }}</span>
                     </button>
                     <div v-if="expandedSourceItems.has(sourceItemKey(group, source))" class="border-t border-gray-100 dark:border-dark-700">
-                      <div v-for="account in paginatedSourceAccounts(group, source)" :key="account.account_id" class="grid grid-cols-[minmax(0,1fr)_auto] gap-3 border-b border-gray-100 px-3 py-2 text-sm last:border-b-0 dark:border-dark-700 sm:grid-cols-[minmax(0,1fr)_150px_110px]">
+                      <div v-for="account in paginatedSourceAccounts(group, source)" :key="account.account_id" class="grid grid-cols-[minmax(0,1fr)_auto] gap-3 border-b border-gray-100 px-3 py-2 text-sm last:border-b-0 dark:border-dark-700 sm:grid-cols-[minmax(0,1fr)_auto_150px_110px]">
                         <div class="min-w-0"><button type="button" class="block min-h-11 max-w-full truncate text-left font-medium text-primary-600 hover:underline dark:text-primary-400" :title="account.account_name" @click="openAccountTrace(account.account_id)">{{ account.account_name }}</button><p class="truncate text-xs text-gray-500 dark:text-gray-400">{{ formatDateTimeToMinute(account.uploaded_at, locale) }}</p></div>
+                        <StatusBadge class="self-center" :status="availabilityPresentation(account.availability_status, account.account_status).badge" :label="t(`admin.accounts.status.${availabilityPresentation(account.availability_status, account.account_status).key}`)" />
                         <span class="hidden self-center text-right tabular-nums sm:block">{{ formatMoney(account.purchase_cost) }}</span>
                         <span class="self-center text-right font-medium tabular-nums">{{ formatPercent(account.roi_rate) }}</span>
                       </div>
@@ -479,7 +488,7 @@
                         @update:page="setSourceAccountPage(group, source, $event)"
                       />
                       <div class="border-t border-gray-100 p-2 text-right dark:border-dark-700">
-                        <button type="button" class="btn btn-secondary min-h-10 px-3 text-xs" :disabled="!sourceID(source)" @click="openSourceLedger(group, source)">{{ t('admin.sharedPool.sources.locateRecords') }}</button>
+                        <button type="button" class="btn btn-secondary min-h-11 px-3 text-xs" :disabled="!sourceID(source)" @click="openSourceLedger(group, source)">{{ t('admin.sharedPool.sources.locateRecords') }}</button>
                       </div>
                     </div>
                   </article>
@@ -494,7 +503,7 @@
                 </div>
               </article>
             </div>
-            <Pagination v-if="sources.length" :page="sourcePagination.page" :page-size="sourcePagination.page_size" :total="sources.length" @update:page="sourcePagination.page = $event" @update:page-size="changeSourcePageSize" />
+            <Pagination v-if="sources.length" :page="sourcePagination.page" :page-size="sourcePagination.page_size" :total="sources.length" @update:page="changeSourcePage" @update:page-size="changeSourcePageSize" />
           </section>
         </div>
         <EmptyState v-else :title="t('admin.sharedPool.empty.sources')" />
@@ -507,10 +516,20 @@
       :account-id="traceAccountId"
       :account="traceAccount"
       :entries="traceEntries"
+      :entries-page="traceEntryPage"
+      :entries-total="traceEntryTotal"
       :settlement="traceSettlement"
+      :settlement-page="traceSettlementPage"
+      :settlement-total="traceSettlementTotal"
       :recovery="traceRecovery"
       :lifecycle="traceLifecycle"
+      :approvals="traceApprovals"
+      :approvals-page="traceApprovalPage"
+      :approvals-total="traceApprovalTotal"
       @close="closeAccountTrace"
+      @entry-page="loadTraceEntryPage"
+      @settlement-page="loadTraceSettlementPage"
+      @approval-page="loadTraceApprovalPage"
     />
 
     <BaseDialog :show="showCostDialog" :title="costDialogTitle" width="wide" @close="closeCostDialog">
@@ -720,11 +739,14 @@ import { adminAPI } from '@/api/admin'
 import type {
   CreateSharedPoolCostRequest,
   CreateSharedPoolIntakeRequest,
+  PoolApproval,
+  PoolAvailabilityStatus,
   PoolLifecycleEventType,
   PoolAccountStatus,
   PoolPeriodType,
   PoolSettlementStatus,
   SharedPoolAccountCost,
+  SharedPoolAccountContext,
   SharedPoolLifecycleEvent,
   SharedPoolOverview,
   SharedPoolSettlementAccountCost,
@@ -766,6 +788,23 @@ type CreatedAccount = { id: number; name: string }
 type AccountsViewExpose = {
   continueCreateWithPoolDraft: () => void
   continueImportWithPoolDraft: () => void
+  reload: (resetPage?: boolean) => Promise<void>
+}
+type WorkbenchScope = 'all' | 'standalone' | 'uploader' | 'batch'
+type WorkbenchContext = {
+  scope: WorkbenchScope
+  import_batch_id?: string
+  uploader_user_id?: number | string
+  page: number
+  page_size: number
+  search: string
+  platform: string
+  type: string
+  status: string
+  group: string
+  privacy_mode: string
+  sort_by: string
+  sort_order: 'asc' | 'desc'
 }
 
 const { t, locale } = useI18n()
@@ -776,6 +815,29 @@ const authStore = useAuthStore()
 const initialPeriod = resolvePoolPeriod('month')
 const requestedTab = Array.isArray(route.query.tab) ? route.query.tab[0] : route.query.tab
 const requestedSettlementLineStatus = Array.isArray(route.query.settlement_line_status) ? route.query.settlement_line_status[0] : route.query.settlement_line_status
+const queryString = (key: string) => String(Array.isArray(route.query[key]) ? route.query[key]?.[0] || '' : route.query[key] || '')
+const queryPage = (key: string, fallback: number) => Math.max(1, Number(queryString(key)) || fallback)
+const routeTab = (): TabKey => ['overview', 'accounts', 'ledger', 'settlement', 'sources'].includes(queryString('tab'))
+  ? queryString('tab') as TabKey
+  : 'accounts'
+const initialWorkbenchContext = computed<Partial<WorkbenchContext>>(() => {
+  const requestedScope = queryString('account_scope')
+  return {
+    scope: (['all', 'standalone', 'uploader', 'batch'].includes(requestedScope) ? requestedScope : 'all') as WorkbenchScope,
+    import_batch_id: queryString('import_batch_id'),
+    uploader_user_id: queryString('uploader_user_id'),
+    page: queryPage('account_page', 1),
+    page_size: queryPage('account_page_size', 20),
+    search: queryString('account_search'),
+    platform: queryString('account_platform'),
+    type: queryString('account_type'),
+    status: queryString('account_status'),
+    group: queryString('account_group'),
+    privacy_mode: queryString('account_privacy_mode'),
+    sort_by: queryString('account_sort_by'),
+    sort_order: queryString('account_sort_order') === 'asc' ? 'asc' : 'desc'
+  }
+})
 const activeTab = ref<TabKey>(['overview', 'accounts', 'ledger', 'settlement', 'sources'].includes(String(requestedTab)) ? requestedTab as TabKey : 'accounts')
 const periodType = ref<PoolPeriodType>('month')
 const startDate = ref(initialPeriod.start)
@@ -802,7 +864,11 @@ const purchaseSources = ref<SharedPoolPurchaseSource[]>([])
 const accountOptions = ref<Array<{ value: number; label: string }>>([])
 const accountReferences = ref<Account[]>([])
 const userOptions = ref<Array<{ value: number; label: string }>>([])
-const overviewRecoveryFilter = ref<RecoveryFilter>('all')
+const overviewRecoveryFilter = ref<RecoveryFilter>(
+  ['all', 'unrecovered', 'recovered', 'soon', 'no_data'].includes(queryString('overview_recovery'))
+    ? queryString('overview_recovery') as RecoveryFilter
+    : 'all'
+)
 const settlementFilters = reactive({
   account_id: routeQueryID('account_id') || '',
   uploader_user_id: routeQueryID('uploader_user_id') || '',
@@ -819,9 +885,9 @@ const retryAccounts = ref<CreatedAccount[]>([])
 const autoAccountIdentity = ref(false)
 const recoveryRecord = ref<SharedPoolAccountCost | null>(null)
 const editingLedgerEntry = ref<SharedPoolLedgerEntry | null>(null)
-const overviewPagination = reactive({ page: 1, page_size: 10 })
-const sourcePagination = reactive({ page: 1, page_size: 8 })
-const settlementAccountPagination = reactive({ page: 1, page_size: 10 })
+const overviewPagination = reactive({ page: queryPage('overview_page', 1), page_size: queryPage('overview_page_size', 10) })
+const sourcePagination = reactive({ page: queryPage('source_page', 1), page_size: queryPage('source_page_size', 8) })
+const settlementAccountPagination = reactive({ page: queryPage('settlement_page', 1), page_size: queryPage('settlement_page_size', 10) })
 const expandedSourceUploaders = ref(new Set<string>())
 const expandedSourceItems = ref(new Set<string>())
 const expandedSettlementAccounts = ref(new Set<number>())
@@ -833,9 +899,16 @@ const traceLoading = ref(false)
 const traceAccountId = ref(0)
 const traceAccount = ref<Account | null>(null)
 const traceEntries = ref<SharedPoolLedgerEntry[]>([])
+const traceEntryPage = ref(1)
+const traceEntryTotal = ref(0)
 const traceSettlement = ref<SharedPoolSettlementPreview | null>(null)
+const traceSettlementPage = ref(1)
+const traceSettlementTotal = ref(0)
 const traceRecovery = ref<SharedPoolAccountCost | null>(null)
 const traceLifecycle = ref<SharedPoolLifecycleEvent[]>([])
+const traceApprovals = ref<PoolApproval[]>([])
+const traceApprovalPage = ref(1)
+const traceApprovalTotal = ref(0)
 
 const tabs = computed(() => [
   { key: 'overview' as const, label: t('admin.sharedPool.tabs.overview'), icon: 'chart' as const },
@@ -949,14 +1022,19 @@ const settlementAccountColumns = computed<Column[]>(() => [
   { key: 'net_amount', label: t('admin.sharedPool.columns.net') },
   { key: 'trace_quality', label: t('admin.sharedPool.approval.technicalDetails') }
 ])
+const settlementContextByID = computed(() => new Map(
+  (settlement.value?.account_contexts || []).map((context) => [context.id, context])
+))
 const settlementAccountGroups = computed(() => {
-  const groups = new Map<number, { account_id: number; account_name: string; lines: SharedPoolSettlementAccountLine[]; costs: SharedPoolSettlementAccountCost[]; total_cost: number }>()
+  const groups = new Map<number, { account_id: number; account_name: string; context?: SharedPoolAccountContext; lines: SharedPoolSettlementAccountLine[]; costs: SharedPoolSettlementAccountCost[]; total_cost: number }>()
   const ensure = (accountID: number) => {
     let group = groups.get(accountID)
     if (!group) {
+      const context = settlementContextByID.value.get(accountID)
       group = {
         account_id: accountID,
-        account_name: accountReferences.value.find((account) => account.id === accountID)?.name || `#${accountID}`,
+        account_name: context?.name || `#${accountID}`,
+        context,
         lines: [],
         costs: [],
         total_cost: 0
@@ -982,7 +1060,12 @@ const pendingSettlementConfirmations = computed(() => settlement.value?.lines.fi
   (line) => line.net_amount !== 0 && line.confirmation_status !== 'confirmed'
 ).length || 0)
 const settlementAllConfirmed = computed(() => pendingSettlementConfirmations.value === 0)
-const settlementAccountOptions = computed(() => [{ value: '', label: t('admin.sharedPool.ledger.allAccounts') }, ...accountOptions.value])
+const settlementAccountOptions = computed(() => {
+  const options = new Map<number, string>()
+  for (const context of settlement.value?.account_contexts || []) options.set(context.id, context.name)
+  for (const option of accountOptions.value) if (!options.has(option.value)) options.set(option.value, option.label)
+  return [{ value: '', label: t('admin.sharedPool.ledger.allAccounts') }, ...[...options].map(([value, label]) => ({ value, label }))]
+})
 const settlementUploaderOptions = computed(() => [{ value: '', label: t('admin.sharedPool.ledger.allUploaders') }, ...userOptions.value])
 const settlementPayerOptions = computed(() => [{ value: '', label: t('admin.sharedPool.ledger.allPayers') }, ...userOptions.value])
 const settlementSourceOptions = computed(() => [
@@ -996,9 +1079,19 @@ const settlementLineFilterOptions = computed(() => [
   { value: 'abnormal', label: t('admin.sharedPool.page.abnormal') }
 ])
 const selectedSettlementAccount = computed(() => accountReferences.value.find((account) => account.id === Number(settlementFilters.account_id)))
-const selectedSettlementImportBatchID = computed(() => {
-  const value = selectedSettlementAccount.value?.extra?.import_batch_id
-  return typeof value === 'string' ? value : ''
+const selectedSettlementContext = computed(() => settlementContextByID.value.get(Number(settlementFilters.account_id)))
+const selectedSettlementIdentity = computed(() => {
+  const account = selectedSettlementAccount.value
+  const context = selectedSettlementContext.value
+  if (!account && !context) return null
+  const batch = account?.extra?.import_batch_id
+  return {
+    id: account?.id || context!.id,
+    name: account?.name || context!.name,
+    uploader: account?.uploader_username || account?.uploader_email || context?.created_by_username || context?.created_by_email || '',
+    importBatch: typeof batch === 'string' ? batch : context?.import_batch_id || '',
+    createdAt: account?.created_at || context?.created_at || ''
+  }
 })
 const filteredSettlementLines = computed(() => filterSettlementLines(settlement.value?.lines || [], settlementFilters.line_status))
 
@@ -1079,7 +1172,10 @@ const emptyEventForm = () => ({
   reason: ''
 })
 const eventForm = reactive(emptyEventForm())
-const periodParams = () => buildPoolPeriodParams(periodType.value, startDate.value, endDate.value)
+const periodParams = () => ({
+  ...buildPoolPeriodParams(periodType.value, startDate.value, endDate.value),
+  account_id: routeQueryID('account_id') || undefined
+})
 const settlementParams = () => ({
   ...periodParams(),
   account_id: Number(settlementFilters.account_id) || undefined,
@@ -1094,6 +1190,23 @@ const formatPercent = (value: number) => `${(Number.isFinite(value) ? value : 0)
 const dateOnly = (value?: string | null) => value ? value.slice(0, 10) : '-'
 const accountStatus = (status: PoolAccountStatus) => accountStatusPresentation(status)
 const settlementStatus = (status: PoolSettlementStatus) => settlementStatusPresentation(status)
+const availabilityPresentation = (availability?: PoolAvailabilityStatus | null, accountStatusValue?: string | null) => {
+  const value = availability || (accountStatusValue === 'error' ? 'error' : accountStatusValue === 'active' ? 'normal' : 'inactive')
+  const states = {
+    normal: { badge: 'success', key: 'active' },
+    error: { badge: 'danger', key: 'error' },
+    rate_limited: { badge: 'warning', key: 'rateLimited' },
+    overloaded: { badge: 'danger', key: 'overloaded' },
+    temp_unschedulable: { badge: 'warning', key: 'tempUnschedulable' },
+    inactive: { badge: 'inactive', key: 'inactive' },
+    manual_unschedulable: { badge: 'inactive', key: 'unschedulable' }
+  } as const
+  return states[value]
+}
+const lifecycleStatusLabel = (status: string) => {
+  const state = accountStatus(status === 'banned_confirmed' ? 'banned' : status === 'refund' ? 'warning' : status === 'retired' || status === 'replaced' ? 'inactive' : 'active')
+  return t(`admin.sharedPool.status.${state.key}`)
+}
 
 function resetPendingIntake() {
   pendingAccountAction.value = null
@@ -1155,6 +1268,42 @@ function switchTab(tab: TabKey) {
   if (tab !== 'ledger') void loadActiveTab()
 }
 
+async function syncWorkbenchContext(context: WorkbenchContext) {
+  const query: LocationQueryRaw = { ...route.query, tab: 'accounts', account_scope: context.scope }
+  if (context.import_batch_id) query.import_batch_id = context.import_batch_id
+  else delete query.import_batch_id
+  if (context.uploader_user_id) query.uploader_user_id = String(context.uploader_user_id)
+  else delete query.uploader_user_id
+  query.account_page = String(context.page)
+  query.account_page_size = String(context.page_size)
+  query.account_sort_by = context.sort_by
+  query.account_sort_order = context.sort_order
+  for (const [key, value] of Object.entries({
+    account_search: context.search,
+    account_platform: context.platform,
+    account_type: context.type,
+    account_status: context.status,
+    account_group: context.group,
+    account_privacy_mode: context.privacy_mode
+  })) {
+    if (value) query[key] = value
+    else delete query[key]
+  }
+  await router.replace({ query })
+}
+
+async function refreshAccountPoolRecords() {
+  try {
+    const requests: Array<Promise<unknown>> = [adminAPI.sharedPool.listAccountCosts(periodParams())]
+    if (showTracePanel.value && traceAccountId.value) requests.push(adminAPI.accounts.getById(traceAccountId.value))
+    const [costs, account] = await Promise.all(requests)
+    accountCosts.value = (costs as { items: SharedPoolAccountCost[] }).items || []
+    if (account) traceAccount.value = account as Account
+  } catch (error) {
+    console.error('Failed to refresh shared-pool account context:', error)
+  }
+}
+
 const sourceID = (source: SharedPoolSourceStat) => purchaseSources.value.find(
   (item) => item.name.trim().toLocaleLowerCase() === source.name.trim().toLocaleLowerCase()
 )?.id
@@ -1187,18 +1336,57 @@ const openSourceLedger = async (group: SharedPoolUploaderSourceGroup, source: Sh
 }
 
 async function openAccountContext(tab: 'ledger' | 'settlement', row: SharedPoolAccountCost) {
-  await router.replace({ query: { ...route.query, tab, account_id: String(row.account_id), ...(row.uploader_user_id ? { uploader_user_id: String(row.uploader_user_id) } : {}) } })
+  await router.replace({
+    query: {
+      ...route.query,
+      tab,
+      account_id: String(row.account_id),
+      ...(tab === 'ledger' ? { ledger_view: 'entries' } : {}),
+      ...(row.uploader_user_id ? { uploader_user_id: String(row.uploader_user_id) } : {})
+    }
+  })
+  if (activeTab.value === tab) return
   activeTab.value = tab
   if (tab === 'settlement') {
-    settlementFilters.account_id = row.account_id
-    settlementFilters.uploader_user_id = row.uploader_user_id || ''
+    syncSettlementFiltersFromRoute()
     await loadActiveTab()
   }
 }
 
-function changeOverviewPageSize(size: number) { overviewPagination.page_size = size; overviewPagination.page = 1 }
-function changeSourcePageSize(size: number) { sourcePagination.page_size = size; sourcePagination.page = 1 }
-function changeSettlementAccountPageSize(size: number) { settlementAccountPagination.page_size = size; settlementAccountPagination.page = 1 }
+async function syncPageQuery(prefix: 'overview' | 'source' | 'settlement', page: number, pageSize: number) {
+  await router.replace({ query: { ...route.query, [`${prefix}_page`]: String(page), [`${prefix}_page_size`]: String(pageSize) } })
+}
+function changeOverviewPage(page: number) {
+  overviewPagination.page = page
+  void syncPageQuery('overview', page, overviewPagination.page_size)
+}
+function changeOverviewPageSize(size: number) {
+  overviewPagination.page_size = size
+  changeOverviewPage(1)
+}
+function changeSourcePage(page: number) {
+  sourcePagination.page = page
+  void syncPageQuery('source', page, sourcePagination.page_size)
+}
+function changeSourcePageSize(size: number) {
+  sourcePagination.page_size = size
+  changeSourcePage(1)
+}
+function changeSettlementAccountPage(page: number) {
+  settlementAccountPagination.page = page
+  void syncPageQuery('settlement', page, settlementAccountPagination.page_size)
+}
+function changeSettlementAccountPageSize(size: number) {
+  settlementAccountPagination.page_size = size
+  changeSettlementAccountPage(1)
+}
+async function applyOverviewRecoveryFilter() {
+  overviewPagination.page = 1
+  const query: LocationQueryRaw = { ...route.query, overview_page: '1' }
+  if (overviewRecoveryFilter.value === 'all') delete query.overview_recovery
+  else query.overview_recovery = overviewRecoveryFilter.value
+  await router.replace({ query })
+}
 function toggleSettlementAccount(accountID: number) {
   const next = new Set(expandedSettlementAccounts.value)
   if (next.has(accountID)) next.delete(accountID)
@@ -1219,8 +1407,9 @@ async function applySettlementFilters() {
     if (value) query[key] = String(value)
     else delete query[key]
   }
-  await router.replace({ query })
   settlementAccountPagination.page = 1
+  query.settlement_page = '1'
+  await router.replace({ query })
   expandedSettlementAccounts.value = new Set()
   await loadActiveTab()
 }
@@ -1231,22 +1420,19 @@ async function loadActiveTab() {
   try {
     if (activeTab.value === 'overview') {
       overview.value = await adminAPI.sharedPool.getOverview(periodParams())
-      overviewPagination.page = 1
     } else if (activeTab.value === 'accounts') {
       const response = await adminAPI.sharedPool.listAccountCosts(periodParams())
       accountCosts.value = response.items || []
     } else if (activeTab.value === 'settlement') {
       if (!accountOptions.value.length || !userOptions.value.length) await loadReferenceOptions()
       settlement.value = await adminAPI.sharedPool.previewSettlement(settlementParams())
-      settlementAccountPagination.page = 1
       expandedSettlementAccounts.value = new Set()
     } else {
       const [sourceResponse, sourceOptions] = await Promise.all([
         adminAPI.sharedPool.listSources(periodParams()),
-        adminAPI.sharedPool.listPurchaseSources()
+        adminAPI.sharedPool.listPurchaseSources({ referenced: true })
       ])
       sources.value = sourceResponse.items || []
-      sourcePagination.page = 1
       expandedSourceUploaders.value = new Set()
       expandedSourceItems.value = new Set()
       Object.keys(sourceItemPages).forEach((key) => delete sourceItemPages[key])
@@ -1375,6 +1561,67 @@ function routeQueryID(key: 'account_id' | 'ledger_entry_id' | 'purchase_source_i
   return Number.isSafeInteger(id) && id > 0 ? id : 0
 }
 
+async function fetchTraceSettlementPage(accountID: number, page: number) {
+  const response = await adminAPI.sharedPool.listSettlements({ page, page_size: 1, account_id: accountID })
+  const summary = response.items[0]
+  return {
+    page: response.page || page,
+    total: response.total || 0,
+    settlement: summary?.id ? await adminAPI.sharedPool.getSettlement(summary.id) : summary || null
+  }
+}
+
+async function loadTraceSettlementPage(page: number) {
+  const accountID = traceAccountId.value
+  if (!accountID || page < 1) return
+  traceLoading.value = true
+  try {
+    const result = await fetchTraceSettlementPage(accountID, page)
+    if (traceAccountId.value !== accountID) return
+    traceSettlement.value = result.settlement
+    traceSettlementPage.value = result.page
+    traceSettlementTotal.value = result.total
+  } catch (error: any) {
+    appStore.showError(error?.message || t('admin.sharedPool.errors.load'))
+  } finally {
+    if (traceAccountId.value === accountID) traceLoading.value = false
+  }
+}
+
+async function loadTraceEntryPage(page: number) {
+  const accountID = traceAccountId.value
+  if (!accountID || page < 1) return
+  traceLoading.value = true
+  try {
+    const result = await adminAPI.sharedPool.listLedgerEntries({ page, page_size: 20, account_id: accountID })
+    if (traceAccountId.value !== accountID) return
+    traceEntries.value = result.items || []
+    traceEntryPage.value = result.page || page
+    traceEntryTotal.value = result.total || 0
+  } catch (error: any) {
+    appStore.showError(error?.message || t('admin.sharedPool.errors.load'))
+  } finally {
+    if (traceAccountId.value === accountID) traceLoading.value = false
+  }
+}
+
+async function loadTraceApprovalPage(page: number) {
+  const accountID = traceAccountId.value
+  if (!accountID || page < 1) return
+  traceLoading.value = true
+  try {
+    const result = await adminAPI.sharedPool.listApprovals({ account_id: accountID, page, page_size: 20 })
+    if (traceAccountId.value !== accountID) return
+    traceApprovals.value = result.items || []
+    traceApprovalPage.value = result.page || page
+    traceApprovalTotal.value = result.total || 0
+  } catch (error: any) {
+    appStore.showError(error?.message || t('admin.sharedPool.errors.load'))
+  } finally {
+    if (traceAccountId.value === accountID) traceLoading.value = false
+  }
+}
+
 async function openAccountTrace(accountID: number, syncRoute = true) {
   if (!Number.isSafeInteger(accountID) || accountID <= 0) return
   traceAccountId.value = accountID
@@ -1382,29 +1629,47 @@ async function openAccountTrace(accountID: number, syncRoute = true) {
   traceLoading.value = true
   traceAccount.value = null
   traceEntries.value = []
+  traceEntryPage.value = 1
+  traceEntryTotal.value = 0
   traceSettlement.value = null
+  traceSettlementPage.value = 1
+  traceSettlementTotal.value = 0
   traceRecovery.value = null
   traceLifecycle.value = []
+  traceApprovals.value = []
+  traceApprovalPage.value = 1
+  traceApprovalTotal.value = 0
   if (syncRoute) await router.replace({ query: { ...route.query, account_id: String(accountID), trace: '1' } })
 
   const currentRecovery = overview.value?.accounts.find((item) => item.account_id === accountID)
   const results = await Promise.allSettled([
     adminAPI.accounts.getById(accountID),
-    adminAPI.sharedPool.listLedgerEntries({ page: 1, page_size: 200, account_id: accountID }),
-    adminAPI.sharedPool.listSettlements({ page: 1, page_size: 1, account_id: accountID }).then((page) => {
-      const id = page.items[0]?.id
-      return id ? adminAPI.sharedPool.getSettlement(id) : null
-    }),
+    adminAPI.sharedPool.listLedgerEntries({ page: 1, page_size: 20, account_id: accountID }),
+    fetchTraceSettlementPage(accountID, 1),
     currentRecovery ? Promise.resolve(currentRecovery) : adminAPI.sharedPool.getOverview({ ...periodParams(), account_id: accountID }).then((item) => item.accounts.find((account) => account.account_id === accountID) || null),
-    adminAPI.sharedPool.listLifecycle(accountID)
+    adminAPI.sharedPool.listLifecycle(accountID),
+    adminAPI.sharedPool.listApprovals({ account_id: accountID, page: 1, page_size: 20 })
   ])
   if (traceAccountId.value !== accountID) return
-  const [accountResult, entriesResult, settlementResult, recoveryResult, lifecycleResult] = results
+  const [accountResult, entriesResult, settlementResult, recoveryResult, lifecycleResult, approvalResult] = results
   if (accountResult.status === 'fulfilled') traceAccount.value = accountResult.value
-  if (entriesResult.status === 'fulfilled') traceEntries.value = entriesResult.value.items || []
-  if (settlementResult.status === 'fulfilled') traceSettlement.value = settlementResult.value
+  if (entriesResult.status === 'fulfilled') {
+    traceEntries.value = entriesResult.value.items || []
+    traceEntryPage.value = entriesResult.value.page || 1
+    traceEntryTotal.value = entriesResult.value.total || 0
+  }
+  if (settlementResult.status === 'fulfilled') {
+    traceSettlement.value = settlementResult.value.settlement
+    traceSettlementPage.value = settlementResult.value.page
+    traceSettlementTotal.value = settlementResult.value.total
+  }
   if (recoveryResult.status === 'fulfilled') traceRecovery.value = recoveryResult.value
   if (lifecycleResult.status === 'fulfilled') traceLifecycle.value = lifecycleResult.value
+  if (approvalResult.status === 'fulfilled') {
+    traceApprovals.value = approvalResult.value.items || []
+    traceApprovalPage.value = approvalResult.value.page || 1
+    traceApprovalTotal.value = approvalResult.value.total || 0
+  }
   traceLoading.value = false
   const failed = results.find((result) => result.status === 'rejected')
   if (failed?.status === 'rejected') appStore.showError(failed.reason?.message || t('admin.sharedPool.errors.load'))
@@ -1435,8 +1700,10 @@ async function openRouteTarget() {
   }
   if (activeTab.value !== 'accounts') return
   const ledgerEntryID = routeQueryID('ledger_entry_id')
-  await router.replace({ query: { tab: 'accounts' } })
   if (ledgerEntryID) {
+    const query = { ...route.query }
+    delete query.ledger_entry_id
+    await router.replace({ query })
     const response = await adminAPI.sharedPool.listLedgerEntries({ page: 1, page_size: 100, account_id: accountID })
     const entry = response.items.find((item) => item.id === ledgerEntryID)
     if (entry) await openLedgerEntry(entry)
@@ -1765,6 +2032,72 @@ watch(
     const accountID = routeQueryID('account_id')
     if (route.query.trace === '1' && accountID && (accountID !== traceAccountId.value || !showTracePanel.value)) void openAccountTrace(accountID, false)
     if (route.query.trace !== '1') showTracePanel.value = false
+  }
+)
+
+const syncSettlementFiltersFromRoute = () => {
+  const next = {
+    account_id: routeQueryID('account_id') || '',
+    uploader_user_id: routeQueryID('uploader_user_id') || '',
+    payer_user_id: routeQueryID('payer_user_id') || '',
+    purchase_source_id: routeQueryID('purchase_source_id') || '',
+    line_status: (['all', 'pending', 'paid', 'abnormal'].includes(queryString('settlement_line_status'))
+      ? queryString('settlement_line_status')
+      : 'all') as SettlementLineFilter
+  }
+  const changed = Object.entries(next).some(([key, value]) =>
+    String(settlementFilters[key as keyof typeof settlementFilters]) !== String(value)
+  )
+  if (changed) Object.assign(settlementFilters, next)
+  return changed
+}
+
+watch(
+  () => route.query.tab,
+  () => {
+    const tab = routeTab()
+    if (tab === activeTab.value) return
+    activeTab.value = tab
+    if (tab === 'settlement') syncSettlementFiltersFromRoute()
+    if (tab !== 'ledger') void loadActiveTab()
+  }
+)
+
+watch(
+  () => [
+    route.query.account_id,
+    route.query.uploader_user_id,
+    route.query.payer_user_id,
+    route.query.purchase_source_id,
+    route.query.settlement_line_status
+  ],
+  (next, previous) => {
+    if (activeTab.value === 'settlement') {
+      if (syncSettlementFiltersFromRoute()) void loadActiveTab()
+      return
+    }
+    if ((activeTab.value === 'overview' || activeTab.value === 'sources') && String(next[0] || '') !== String(previous?.[0] || '')) {
+      void loadActiveTab()
+    }
+  }
+)
+
+watch(
+  () => [
+    route.query.overview_page, route.query.overview_page_size, route.query.overview_recovery,
+    route.query.source_page, route.query.source_page_size,
+    route.query.settlement_page, route.query.settlement_page_size
+  ],
+  () => {
+    overviewPagination.page = queryPage('overview_page', 1)
+    overviewPagination.page_size = queryPage('overview_page_size', 10)
+    overviewRecoveryFilter.value = ['unrecovered', 'recovered', 'soon', 'no_data'].includes(queryString('overview_recovery'))
+      ? queryString('overview_recovery') as RecoveryFilter
+      : 'all'
+    sourcePagination.page = queryPage('source_page', 1)
+    sourcePagination.page_size = queryPage('source_page_size', 8)
+    settlementAccountPagination.page = queryPage('settlement_page', 1)
+    settlementAccountPagination.page_size = queryPage('settlement_page_size', 10)
   }
 )
 

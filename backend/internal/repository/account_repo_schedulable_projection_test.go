@@ -9,6 +9,7 @@ import (
 	"github.com/DATA-DOG/go-sqlmock"
 	dbent "github.com/Wei-Shaw/sub2api/ent"
 	_ "github.com/Wei-Shaw/sub2api/ent/runtime"
+	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/stretchr/testify/require"
 
 	"entgo.io/ent/dialect"
@@ -79,4 +80,56 @@ func TestListSchedulableAccountLoadsUsesSingleProjectionQuery(t *testing.T) {
 	_, orderClause, hasOrder := strings.Cut(normalized, " ORDER BY ")
 	require.True(t, hasOrder, "projection query must preserve schedulable account order: %s", normalized)
 	require.Contains(t, orderClause, `"priority" ASC`)
+}
+
+func TestAccountListStatusUsesEffectiveRuntimePredicates(t *testing.T) {
+	var capturedSQL string
+	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(captureEntQueryMatcher{actual: &capturedSQL}))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+
+	driver := entsql.OpenDB(dialect.Postgres, db)
+	client := dbent.NewClient(dbent.Driver(driver))
+	t.Cleanup(func() { _ = client.Close() })
+	repo := newAccountRepositoryWithSQL(client, db, nil)
+
+	mock.ExpectQuery("active account list count").
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+
+	_, err = repo.accountListFilteredQuery("", "", service.StatusActive, "", 0, "", nil, false, "", "").Count(context.Background())
+	require.NoError(t, err)
+	require.NoError(t, mock.ExpectationsWereMet())
+
+	normalized := normalizeSQLWhitespace(capturedSQL)
+	for _, predicateColumn := range []string{
+		"status",
+		"schedulable",
+		"expires_at",
+		"auto_pause_on_expired",
+		"overload_until",
+		"rate_limit_reset_at",
+		"temp_unschedulable_until",
+		"quota_limit",
+		"quota_used",
+		"quota_daily_limit",
+		"quota_daily_used",
+		"quota_daily_reset_at",
+		"quota_weekly_limit",
+		"quota_weekly_used",
+		"quota_weekly_reset_at",
+	} {
+		require.Contains(t, normalized, predicateColumn)
+	}
+
+	capturedSQL = ""
+	mock.ExpectQuery("overloaded account list count").
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+
+	_, err = repo.accountListFilteredQuery("", "", "overloaded", "", 0, "", nil, false, "", "").Count(context.Background())
+	require.NoError(t, err)
+	require.NoError(t, mock.ExpectationsWereMet())
+	normalized = normalizeSQLWhitespace(capturedSQL)
+	require.Contains(t, normalized, "overload_until")
+	require.Contains(t, normalized, "expires_at")
+	require.Contains(t, normalized, "auto_pause_on_expired")
 }

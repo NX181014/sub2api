@@ -2,6 +2,8 @@ package repository
 
 import (
 	"context"
+	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -51,10 +53,12 @@ func TestPoolCostRecognitionQueriesUsePricedTranches(t *testing.T) {
 		defer func() { _ = db.Close() }()
 		mock.ExpectQuery(`SELECT COUNT`).WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
 		mock.ExpectQuery(`WITH filtered AS`).WithArgs(20, 0).WillReturnRows(sqlmock.NewRows([]string{
-			"id", "name", "identity", "status", "uploader_id", "uploader", "uploader_username", "contributor_id", "contributor", "expected",
+			"id", "name", "identity", "status", "error", "schedulable", "rate_limited_at", "rate_limit_reset_at", "overload_until",
+			"temp_unschedulable_until", "temp_unschedulable_reason", "expires_at", "auto_pause_on_expired",
+			"uploader_id", "uploader", "uploader_username", "contributor_id", "contributor", "expected",
 			"usage", "purchase", "refund", "transferred", "written_off", "basis", "net", "tranches", "entries",
 			"lifecycle", "lifecycle_at", "payer_id", "payer", "source_id", "source", "order_no", "service_start", "service_end", "purchased_at",
-		}).AddRow(9, "account-9", nil, "active", nil, nil, nil, nil, nil, 2000,
+		}).AddRow(9, "account-9", nil, "active", "", true, nil, nil, nil, nil, "", nil, true, nil, nil, nil, nil, nil, 2000,
 			1000, 40000, 0, 0, 0, 40000, 40000, pricedTranchesJSON, 2,
 			"active", nil, nil, nil, nil, nil, nil, nil, nil, nil))
 
@@ -94,18 +98,95 @@ func TestPoolCostRecognitionQueriesUsePricedTranches(t *testing.T) {
 		defer func() { _ = db.Close() }()
 		end := time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)
 		mock.ExpectQuery(`WITH RECURSIVE pool_accounts AS`).WithArgs(end).WillReturnRows(sqlmock.NewRows([]string{
-			"id", "name", "identity", "uploader_id", "uploader_username", "uploaded_at", "source", "lifecycle", "basis", "value", "avg_tokens", "purchased_at", "banned_at",
+			"id", "name", "identity", "status", "error", "schedulable", "rate_limited_at", "rate_limit_reset_at", "overload_until",
+			"temp_unschedulable_until", "temp_unschedulable_reason", "expires_at", "auto_pause_on_expired",
+			"uploader_id", "uploader_username", "uploaded_at", "source", "lifecycle", "basis", "value", "avg_tokens", "purchased_at", "banned_at",
 			"refunded", "effective_days", "observation_days", "banned_loss", "first_recovery", "latest_recovery", "recovered",
 			"expected_tokens", "used_tokens", "remaining_tokens",
-		}).AddRow(9, "account-9", nil, nil, nil, end.AddDate(0, -2, 0), nil, "active", 40000, 10000, 100, nil, nil,
+		}).AddRow(9, "account-9", nil, "error", "credential expired", false, nil, nil, nil, nil, "", nil, true,
+			nil, nil, end.AddDate(0, -2, 0), nil, "active", 40000, 10000, 100, nil, nil,
 			false, 3, 7, 0, nil, nil, false, 2000, 1000, 1000))
 
 		items, err := NewPoolRepository(db).GetRecovery(context.Background(), end.AddDate(0, -1, 0), end)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(items) != 1 || items[0].UnrecoveredMinor != 30000 || items[0].EstimatedRecoveryDays == nil || *items[0].EstimatedRecoveryDays != 10 {
+		if len(items) != 1 || items[0].AvailabilityStatus != service.PoolAvailabilityError || items[0].UnrecoveredMinor != 30000 || items[0].EstimatedRecoveryDays == nil || *items[0].EstimatedRecoveryDays != 10 {
 			t.Fatalf("unexpected recovery overview: %#v", items)
 		}
 	})
+
+	t.Run("recovery overview account filter", func(t *testing.T) {
+		db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherRegexp))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = db.Close() }()
+		end := time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)
+		accountID := int64(9)
+		mock.ExpectQuery(`WITH RECURSIVE pool_accounts AS[\s\S]*AND a.id=\$2`).
+			WithArgs(end, accountID).
+			WillReturnRows(sqlmock.NewRows([]string{
+				"id", "name", "identity", "status", "error", "schedulable", "rate_limited_at", "rate_limit_reset_at", "overload_until",
+				"temp_unschedulable_until", "temp_unschedulable_reason", "expires_at", "auto_pause_on_expired",
+				"uploader_id", "uploader_username", "uploaded_at", "source", "lifecycle", "basis", "value", "avg_tokens", "purchased_at", "banned_at",
+				"refunded", "effective_days", "observation_days", "banned_loss", "first_recovery", "latest_recovery", "recovered",
+				"expected_tokens", "used_tokens", "remaining_tokens",
+			}).AddRow(9, "account-9", nil, "active", "", true, nil, nil, nil, nil, "", time.Unix(1, 0), true,
+				nil, nil, end.AddDate(0, -2, 0), nil, "active", 40000, 10000, 100, nil, nil,
+				false, 3, 7, 0, nil, nil, false, 2000, 1000, 1000))
+
+		items, err := NewPoolRepository(db).GetRecovery(context.Background(), end.AddDate(0, -1, 0), end, &accountID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(items) != 1 || items[0].AccountID != accountID || items[0].Schedulable || items[0].AvailabilityStatus != service.PoolAvailabilityManualUnschedulable {
+			t.Fatalf("unexpected filtered recovery overview: %#v", items)
+		}
+	})
+}
+
+func TestBuildCostSummaryWhereSeparatesRuntimeAndLifecycleFilters(t *testing.T) {
+	if !strings.Contains(poolRuntimeColumns, "AS error_message") || !strings.Contains(poolRuntimeColumns, "AS temp_unschedulable_reason") {
+		t.Fatalf("runtime columns must preserve names when selected through a CTE: %s", poolRuntimeColumns)
+	}
+	where, args := buildCostSummaryWhere(service.AccountCostSummaryFilter{
+		AccountStatus: "error", AvailabilityStatus: "rate_limited", LifecycleStatus: "retired",
+	})
+
+	for _, clause := range []string{
+		"a.deleted_at IS NULL",
+		"a.cost_sharing_enabled=TRUE OR EXISTS",
+		"a.status=$1",
+		"auto_pause_on_expired",
+		"rate_limit_reset_at>NOW()",
+		"=$2",
+		"account_lifecycle_events",
+		"=$3",
+	} {
+		if !strings.Contains(where, clause) {
+			t.Fatalf("missing %q in %s", clause, where)
+		}
+	}
+	if !reflect.DeepEqual(args, []any{"error", "rate_limited", "retired"}) {
+		t.Fatalf("unexpected args: %#v", args)
+	}
+}
+
+func TestListSourcesOnlyReturnsReferencesFromExistingAccounts(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+	mock.ExpectQuery(`(?s)FROM purchase_sources ps.*EXISTS.*a.deleted_at IS NULL.*c.purchase_source_id=ps.id`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "name", "website_url", "notes", "active", "created_at", "updated_at"}))
+
+	items, err := NewPoolRepository(db).ListSources(context.Background(), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 0 {
+		t.Fatalf("unexpected sources: %#v", items)
+	}
 }

@@ -450,8 +450,20 @@ func (s *AccountRepoSuite) TestListWithFilters() {
 			name: "filter_by_status_active_excludes_runtime_blocked_accounts",
 			setup: func(client *dbent.Client) {
 				mustCreateAccount(s.T(), client, &service.Account{Name: "active-normal", Status: service.StatusActive})
+				future := time.Now().Add(10 * time.Minute)
+				mustCreateAccount(s.T(), client, &service.Account{Name: "active-overloaded", Status: service.StatusActive, OverloadUntil: &future})
+				expired := mustCreateAccount(s.T(), client, &service.Account{Name: "active-expired", Status: service.StatusActive})
+				err := client.Account.UpdateOneID(expired.ID).
+					SetExpiresAt(time.Now().Add(-time.Minute)).
+					SetAutoPauseOnExpired(true).
+					Exec(context.Background())
+				s.Require().NoError(err)
+				mustCreateAccount(s.T(), client, &service.Account{
+					Name: "active-quota-exhausted", Status: service.StatusActive, Type: service.AccountTypeAPIKey,
+					Extra: map[string]any{"quota_limit": 1.0, "quota_used": 1.0},
+				})
 				rateLimited := mustCreateAccount(s.T(), client, &service.Account{Name: "active-rate-limited", Status: service.StatusActive})
-				err := client.Account.UpdateOneID(rateLimited.ID).
+				err = client.Account.UpdateOneID(rateLimited.ID).
 					SetRateLimitResetAt(time.Now().Add(10 * time.Minute)).
 					Exec(context.Background())
 				s.Require().NoError(err)
@@ -473,7 +485,7 @@ func (s *AccountRepoSuite) TestListWithFilters() {
 			},
 		},
 		{
-			name: "filter_by_status_unschedulable_excludes_rate_limited_and_temp_unschedulable",
+			name: "filter_by_status_unschedulable_uses_effective_state_precedence",
 			setup: func(client *dbent.Client) {
 				mustCreateAccount(s.T(), client, &service.Account{Name: "active-normal", Status: service.StatusActive, Schedulable: true})
 				unsched := mustCreateAccount(s.T(), client, &service.Account{Name: "active-unsched", Status: service.StatusActive})
@@ -493,15 +505,32 @@ func (s *AccountRepoSuite) TestListWithFilters() {
 					SetTempUnschedulableUntil(time.Now().Add(15 * time.Minute)).
 					Exec(context.Background())
 				s.Require().NoError(err)
+				expired := mustCreateAccount(s.T(), client, &service.Account{Name: "active-expired", Status: service.StatusActive})
+				err = client.Account.UpdateOneID(expired.ID).
+					SetExpiresAt(time.Now().Add(-time.Minute)).
+					SetAutoPauseOnExpired(true).
+					Exec(context.Background())
+				s.Require().NoError(err)
+				mustCreateAccount(s.T(), client, &service.Account{
+					Name: "active-quota-exhausted", Status: service.StatusActive, Type: service.AccountTypeAPIKey,
+					Extra: map[string]any{"quota_limit": 1.0, "quota_used": 1.0},
+				})
 			},
 			status:    "unschedulable",
-			wantCount: 1,
+			wantCount: 5,
 			validate: func(accounts []service.Account) {
-				s.Require().Equal("active-unsched", accounts[0].Name)
+				names := make([]string, 0, len(accounts))
+				for _, account := range accounts {
+					names = append(names, account.Name)
+				}
+				s.Require().ElementsMatch([]string{
+					"active-unsched", "active-rate-limited", "active-temp-unsched",
+					"active-expired", "active-quota-exhausted",
+				}, names)
 			},
 		},
 		{
-			name: "filter_by_status_rate_limited_excludes_temp_unschedulable",
+			name: "filter_by_status_rate_limited_wins_over_temp_unschedulable",
 			setup: func(client *dbent.Client) {
 				rateLimited := mustCreateAccount(s.T(), client, &service.Account{Name: "active-rate-limited", Status: service.StatusActive})
 				err := client.Account.UpdateOneID(rateLimited.ID).
@@ -516,9 +545,12 @@ func (s *AccountRepoSuite) TestListWithFilters() {
 				s.Require().NoError(err)
 			},
 			status:    "rate_limited",
-			wantCount: 1,
+			wantCount: 2,
 			validate: func(accounts []service.Account) {
-				s.Require().Equal("active-rate-limited", accounts[0].Name)
+				s.Require().ElementsMatch(
+					[]string{"active-rate-limited", "active-temp-unsched"},
+					[]string{accounts[0].Name, accounts[1].Name},
+				)
 			},
 		},
 		{
@@ -640,6 +672,24 @@ func (s *AccountRepoSuite) TestSelectionContractsFilterCompleteImportBatch() {
 	s.Require().Equal(int64(2), summary.Total)
 	s.Require().Equal([]string{service.PlatformAnthropic, service.PlatformOpenAI}, summary.Platforms)
 	s.Require().Equal([]string{service.AccountTypeAPIKey, service.AccountTypeOAuth}, summary.Types)
+}
+
+func (s *AccountRepoSuite) TestSelectionContractsFilterImportBatchScope() {
+	mustCreateAccount(s.T(), s.client, &service.Account{Name: "standalone-nil", Platform: service.PlatformOpenAI})
+	mustCreateAccount(s.T(), s.client, &service.Account{Name: "standalone-empty", Platform: service.PlatformAnthropic, Extra: map[string]any{"import_batch_id": ""}})
+	mustCreateAccount(s.T(), s.client, &service.Account{Name: "batched", Platform: service.PlatformGemini, Extra: map[string]any{"import_batch_id": "668f52b3-14af-4a5a-bde0-e923ed69299a"}})
+
+	standalone := service.AccountSelectionFilters{ImportBatchScope: "standalone"}
+	accounts, page, err := s.repo.ListWithSelectionFilters(s.ctx, pagination.PaginationParams{Page: 1, PageSize: 20}, standalone, false)
+	s.Require().NoError(err)
+	s.Require().Equal(int64(2), page.Total)
+	s.Require().ElementsMatch([]string{"standalone-nil", "standalone-empty"}, []string{accounts[0].Name, accounts[1].Name})
+
+	batched := service.AccountSelectionFilters{ImportBatchScope: "batched"}
+	accounts, page, err = s.repo.ListWithSelectionFilters(s.ctx, pagination.PaginationParams{Page: 1, PageSize: 20}, batched, false)
+	s.Require().NoError(err)
+	s.Require().Equal(int64(1), page.Total)
+	s.Require().Equal("batched", accounts[0].Name)
 }
 
 func (s *AccountRepoSuite) TestSelectionContractsFilterUnassignedUploader() {

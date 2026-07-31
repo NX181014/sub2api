@@ -120,6 +120,9 @@ export type { TLSFingerprintProfile, CreateProfileRequest, UpdateProfileRequest 
 export type { ContentModerationConfig, ContentModerationLog, ModerationMode } from './riskControl'
 export type {
   PoolPeriodType,
+  PoolAvailabilityStatus,
+  SharedPoolAccountRuntime,
+  SharedPoolAccountContext,
   SharedPoolOverview,
   SharedPoolAccountCost,
   SharedPoolSettlementPreview,

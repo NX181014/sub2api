@@ -20,10 +20,59 @@ var (
 	ErrPoolSettlementNotFound = infraerrors.NotFound("POOL_SETTLEMENT_NOT_FOUND", "pool settlement not found")
 )
 
+const (
+	PoolAvailabilityNormal              = "normal"
+	PoolAvailabilityError               = "error"
+	PoolAvailabilityRateLimited         = "rate_limited"
+	PoolAvailabilityOverloaded          = "overloaded"
+	PoolAvailabilityTempUnschedulable   = "temp_unschedulable"
+	PoolAvailabilityInactive            = "inactive"
+	PoolAvailabilityManualUnschedulable = "manual_unschedulable"
+)
+
+type PoolAccountRuntime struct {
+	AccountStatus           string     `json:"account_status"`
+	AvailabilityStatus      string     `json:"availability_status"`
+	Schedulable             bool       `json:"schedulable"`
+	ErrorMessage            string     `json:"error_message"`
+	RateLimitedAt           *time.Time `json:"rate_limited_at"`
+	RateLimitResetAt        *time.Time `json:"rate_limit_reset_at"`
+	OverloadUntil           *time.Time `json:"overload_until"`
+	TempUnschedulableUntil  *time.Time `json:"temp_unschedulable_until"`
+	TempUnschedulableReason string     `json:"temp_unschedulable_reason"`
+	ExpiresAt               *time.Time `json:"expires_at"`
+	AutoPauseOnExpired      bool       `json:"auto_pause_on_expired"`
+}
+
+func ResolvePoolAvailability(state PoolAccountRuntime, now time.Time) string {
+	switch {
+	case state.AccountStatus == StatusError:
+		return PoolAvailabilityError
+	case state.AccountStatus != StatusActive:
+		return PoolAvailabilityInactive
+	case !state.Schedulable:
+		return PoolAvailabilityManualUnschedulable
+	case state.AutoPauseOnExpired && state.ExpiresAt != nil && !now.Before(*state.ExpiresAt):
+		return PoolAvailabilityManualUnschedulable
+	case state.OverloadUntil != nil && state.OverloadUntil.After(now):
+		return PoolAvailabilityOverloaded
+	case state.RateLimitResetAt != nil && state.RateLimitResetAt.After(now):
+		return PoolAvailabilityRateLimited
+	case state.TempUnschedulableUntil != nil && state.TempUnschedulableUntil.After(now):
+		return PoolAvailabilityTempUnschedulable
+	default:
+		return PoolAvailabilityNormal
+	}
+}
+
 type PoolAccount struct {
+	PoolAccountRuntime
 	ID                    int64      `json:"id"`
 	Name                  string     `json:"name"`
 	Platform              string     `json:"platform"`
+	Type                  string     `json:"type"`
+	CreatedAt             time.Time  `json:"created_at"`
+	ImportBatchID         string     `json:"import_batch_id"`
 	ProviderIdentity      *string    `json:"provider_identity"`
 	ContributorUserID     *int64     `json:"contributor_user_id"`
 	ContributorEmail      *string    `json:"contributor_email"`
@@ -60,6 +109,7 @@ type CreatePurchaseSourceInput struct {
 }
 
 type AccountCostEntry struct {
+	PoolAccountRuntime
 	ID                 int64      `json:"id"`
 	AccountID          int64      `json:"account_id"`
 	AccountName        string     `json:"account_name"`
@@ -111,10 +161,10 @@ type CreateAccountCostInput struct {
 }
 
 type AccountCostSummary struct {
+	PoolAccountRuntime
 	AccountID               int64                `json:"account_id"`
 	AccountName             string               `json:"account_name"`
 	ProviderIdentity        *string              `json:"provider_identity"`
-	AccountStatus           string               `json:"account_status"`
 	UploaderUserID          *int64               `json:"uploader_user_id"`
 	UploaderEmail           *string              `json:"uploader_email"`
 	UploaderUsername        *string              `json:"uploader_username"`
@@ -173,6 +223,8 @@ type AccountCostSummaryFilter struct {
 	UploaderUnassigned bool
 	PayerUserID        *int64
 	PurchaseSourceID   *int64
+	AccountStatus      string
+	AvailabilityStatus string
 	LifecycleStatus    string
 	EntryType          string
 	HasCost            *bool
@@ -378,9 +430,11 @@ type PoolSettlement struct {
 	Lines            []PoolSettlementLine        `json:"lines"`
 	AccountCosts     []PoolSettlementAccountCost `json:"account_costs"`
 	AccountLines     []PoolSettlementAccountLine `json:"account_lines"`
+	AccountContexts  []PoolAccount               `json:"account_contexts"`
 }
 
 type AccountRecovery struct {
+	PoolAccountRuntime
 	AccountID              int64      `json:"account_id"`
 	AccountName            string     `json:"account_name"`
 	ProviderIdentity       *string    `json:"provider_identity"`
@@ -455,7 +509,7 @@ type PoolRecoveryOverview struct {
 type PoolRepository interface {
 	ListAccounts(ctx context.Context) ([]PoolAccount, error)
 	UpdateAccount(ctx context.Context, id int64, input UpdatePoolAccountInput) (*PoolAccount, error)
-	ListSources(ctx context.Context) ([]PurchaseSource, error)
+	ListSources(ctx context.Context, referencedOnly bool) ([]PurchaseSource, error)
 	CreateSource(ctx context.Context, input CreatePurchaseSourceInput) (*PurchaseSource, error)
 	ListCosts(ctx context.Context, accountID *int64) ([]AccountCostEntry, error)
 	CreateCost(ctx context.Context, input CreateAccountCostInput) (*AccountCostEntry, error)
@@ -477,7 +531,7 @@ type PoolRepository interface {
 	MarkSettlementPaid(ctx context.Context, id, actorID int64) error
 	ListSettlements(ctx context.Context, accountID *int64, limit, offset int) ([]PoolSettlement, int64, error)
 	GetSettlement(ctx context.Context, id int64) (*PoolSettlement, error)
-	GetRecovery(ctx context.Context, start, end time.Time) ([]AccountRecovery, error)
+	GetRecovery(ctx context.Context, start, end time.Time, accountID ...*int64) ([]AccountRecovery, error)
 }
 
 type PoolService struct {
@@ -517,8 +571,8 @@ func (s *PoolService) UpdateAccount(ctx context.Context, id int64, input UpdateP
 	return s.repo.UpdateAccount(ctx, id, input)
 }
 
-func (s *PoolService) ListSources(ctx context.Context) ([]PurchaseSource, error) {
-	return s.repo.ListSources(ctx)
+func (s *PoolService) ListSources(ctx context.Context, referencedOnly bool) ([]PurchaseSource, error) {
+	return s.repo.ListSources(ctx, referencedOnly)
 }
 
 func (s *PoolService) CreateSource(ctx context.Context, input CreatePurchaseSourceInput) (*PurchaseSource, error) {
@@ -563,6 +617,8 @@ func (s *PoolService) ListCostSummaries(ctx context.Context, filter AccountCostS
 		pageSize = 20
 	}
 	filter.Search = strings.TrimSpace(filter.Search)
+	filter.AccountStatus = strings.TrimSpace(filter.AccountStatus)
+	filter.AvailabilityStatus = strings.TrimSpace(filter.AvailabilityStatus)
 	filter.LifecycleStatus = strings.TrimSpace(filter.LifecycleStatus)
 	filter.EntryType = strings.TrimSpace(filter.EntryType)
 	items, total, err := s.repo.ListCostSummaries(ctx, filter, pageSize, (page-1)*pageSize)
@@ -583,6 +639,8 @@ func (s *PoolService) ListCostUploaderSummaries(ctx context.Context, filter Acco
 		pageSize = 20
 	}
 	filter.Search = strings.TrimSpace(filter.Search)
+	filter.AccountStatus = strings.TrimSpace(filter.AccountStatus)
+	filter.AvailabilityStatus = strings.TrimSpace(filter.AvailabilityStatus)
 	filter.LifecycleStatus = strings.TrimSpace(filter.LifecycleStatus)
 	filter.EntryType = strings.TrimSpace(filter.EntryType)
 	return s.repo.ListCostUploaderSummaries(ctx, filter, pageSize, (page-1)*pageSize)
@@ -1285,6 +1343,9 @@ func (s *PoolService) ListOwnPendingSettlements(ctx context.Context, userID int6
 			if line.UserID == userID && line.NetAmountMinor != 0 && line.ConfirmationStatus != "confirmed" {
 				item.Lines = []PoolSettlementLine{line}
 				item.CostSnapshot = nil
+				item.AccountCosts = nil
+				item.AccountLines = nil
+				item.AccountContexts = nil
 				item.FilterSnapshot = SettlementFilterSnapshot{}
 				pending = append(pending, item)
 				break
@@ -1330,11 +1391,14 @@ func (s *PoolService) MarkSettlementPaid(ctx context.Context, id, actorID int64)
 	return s.repo.GetSettlement(ctx, id)
 }
 
-func (s *PoolService) GetRecovery(ctx context.Context, start, end time.Time) (*PoolRecoveryOverview, error) {
+func (s *PoolService) GetRecovery(ctx context.Context, start, end time.Time, accountID ...*int64) (*PoolRecoveryOverview, error) {
 	if !end.After(start) {
 		return nil, infraerrors.BadRequest("INVALID_RECOVERY_PERIOD", "end_at must be after start_at")
 	}
-	accounts, err := s.repo.GetRecovery(ctx, start, end)
+	if len(accountID) > 0 && accountID[0] != nil && *accountID[0] <= 0 {
+		return nil, infraerrors.BadRequest("INVALID_ACCOUNT_ID", "invalid account id")
+	}
+	accounts, err := s.repo.GetRecovery(ctx, start, end, accountID...)
 	if err != nil {
 		return nil, err
 	}
