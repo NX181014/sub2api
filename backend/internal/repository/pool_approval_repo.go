@@ -246,21 +246,50 @@ func (r *poolApprovalRepository) GetAccountDeleteImpact(ctx context.Context, acc
 WITH RECURSIVE family AS (
   SELECT id,credentials FROM accounts WHERE (id=$1 OR parent_account_id=$1) AND deleted_at IS NULL
 ), doomed_costs(id) AS (
-  SELECT id FROM account_cost_entries WHERE account_id IN (SELECT id FROM family) OR related_account_id IN (SELECT id FROM family)
+  SELECT id FROM account_cost_entries WHERE account_id IN (SELECT id FROM family)
   UNION
   SELECT child.id FROM account_cost_entries child JOIN doomed_costs parent ON child.supersedes_id=parent.id
+), affected_settlements(id) AS (
+  SELECT settlement_id FROM pool_settlement_account_costs
+  WHERE account_id IN (SELECT id FROM family) OR cost_entry_id IN (SELECT id FROM doomed_costs)
+  UNION
+  SELECT settlement_id FROM pool_settlement_account_lines WHERE account_id IN (SELECT id FROM family)
+), settlement_accounts(settlement_id,account_id) AS (
+  SELECT settlement_id,account_id FROM pool_settlement_account_costs
+  WHERE account_id NOT IN (SELECT id FROM family) AND cost_entry_id NOT IN (SELECT id FROM doomed_costs)
+  UNION
+  SELECT settlement_id,account_id FROM pool_settlement_account_lines
+  WHERE account_id NOT IN (SELECT id FROM family)
+), orphaned_purchase_sources(id) AS (
+  SELECT source.id FROM purchase_sources source
+  WHERE NOT EXISTS (
+    SELECT 1 FROM account_cost_entries kept
+    WHERE kept.purchase_source_id=source.id
+      AND kept.id NOT IN (SELECT id FROM doomed_costs)
+  )
 )
 SELECT
   (SELECT COUNT(*) FROM family),
   (SELECT COALESCE(SUM(jsonb_object_length(CASE WHEN jsonb_typeof(credentials)='object' THEN credentials ELSE '{}'::jsonb END)),0) FROM family),
-  (SELECT COUNT(*) FROM scheduled_test_plans WHERE account_id IN (SELECT id FROM family)),
-  (SELECT COUNT(*) FROM doomed_costs),
-  (SELECT COUNT(*) FROM pool_settlements settlement WHERE
-    settlement.filter_snapshot->>'account_id' IN (SELECT id::text FROM family)
-    OR EXISTS (
-      SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(settlement.cost_snapshot)='array' THEN settlement.cost_snapshot ELSE '[]'::jsonb END) item
-      WHERE item->>'account_id' IN (SELECT id::text FROM family)
+  (SELECT COUNT(*) FROM scheduled_test_plans WHERE account_id IN (SELECT id FROM family))
+    + (SELECT COUNT(*) FROM scheduler_outbox outbox WHERE outbox.account_id IN (SELECT id FROM family) OR EXISTS (
+      SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(outbox.payload->'account_ids')='array' THEN outbox.payload->'account_ids' ELSE '[]'::jsonb END) item
+      WHERE item.value::text IN (SELECT id::text FROM family)
     )),
+  (SELECT COUNT(*) FROM doomed_costs),
+  (SELECT COUNT(*) FROM affected_settlements),
+  (SELECT COUNT(*) FROM pool_settlement_account_costs
+    WHERE account_id IN (SELECT id FROM family) OR cost_entry_id IN (SELECT id FROM doomed_costs)),
+  (SELECT COUNT(*) FROM pool_settlement_account_lines WHERE account_id IN (SELECT id FROM family)),
+  (SELECT COUNT(*) FROM affected_settlements affected WHERE EXISTS (
+    SELECT 1 FROM settlement_accounts account
+    WHERE account.settlement_id=affected.id
+  )),
+  (SELECT COUNT(*) FROM affected_settlements affected WHERE NOT EXISTS (
+    SELECT 1 FROM settlement_accounts account
+    WHERE account.settlement_id=affected.id
+  )),
+  (SELECT COUNT(*) FROM orphaned_purchase_sources),
   (SELECT COUNT(*) FROM account_groups WHERE account_id IN (SELECT id FROM family)),
   (SELECT COUNT(*) FROM account_lifecycle_events WHERE account_id IN (SELECT id FROM family) OR replacement_account_id IN (SELECT id FROM family)),
   (SELECT COUNT(*) FROM usage_logs WHERE account_id IN (SELECT id FROM family))`, accountID)
@@ -281,6 +310,11 @@ SELECT
 		&impact.SchedulingRecords,
 		&impact.CostEntries,
 		&impact.Settlements,
+		&impact.SettlementAccountCosts,
+		&impact.SettlementAccountLines,
+		&impact.MixedSettlements,
+		&impact.EmptySettlements,
+		&impact.PurchaseSources,
 		&impact.GroupLinks,
 		&impact.LifecycleEvents,
 		&impact.UsageRecords,
@@ -345,9 +379,9 @@ FROM account_cost_entries WHERE id=$1 FOR UPDATE`, update.CostID)
 
 	rows, err = exec.QueryContext(ctx, `
 SELECT EXISTS(
-  SELECT 1 FROM pool_settlements settlement
-  CROSS JOIN LATERAL jsonb_array_elements(COALESCE(settlement.cost_snapshot,'[]'::jsonb)) snapshot
-  WHERE settlement.status IN ('locked','paid') AND snapshot->>'entry_id'=$1::text
+  SELECT 1 FROM pool_settlement_account_costs account_cost
+  JOIN pool_settlements settlement ON settlement.id=account_cost.settlement_id
+  WHERE settlement.status IN ('locked','paid') AND account_cost.cost_entry_id=$1
 )`, update.CostID)
 	if err != nil {
 		return err

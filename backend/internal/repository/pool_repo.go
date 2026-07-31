@@ -849,7 +849,7 @@ ORDER BY c.id`, args...)
 	}
 
 	usageRows, err := r.db.QueryContext(ctx, `
-SELECT ul.user_id, u.email, u.username, SUM(ul.total_cost)::text
+SELECT a.id,ul.user_id,u.email,u.username,SUM(ul.total_cost)::text
 FROM usage_logs ul
 JOIN accounts a ON a.id=ul.account_id AND a.cost_sharing_enabled=TRUE
 JOIN users u ON u.id=ul.user_id AND u.deleted_at IS NULL
@@ -863,7 +863,7 @@ WHERE ul.created_at >= $1 AND ul.created_at < $2 AND ul.total_cost > 0
       AND ($5::bigint IS NULL OR c.payer_user_id=$5)
       AND ($6::bigint IS NULL OR c.purchase_source_id=$6)
   )
-GROUP BY ul.user_id,u.email,u.username ORDER BY ul.user_id`, args...)
+GROUP BY a.id,ul.user_id,u.email,u.username ORDER BY a.id,ul.user_id`, args...)
 	if err != nil {
 		return nil, nil, service.PoolUsageCoverage{}, nil, fmt.Errorf("load settlement usage: %w", err)
 	}
@@ -871,7 +871,7 @@ GROUP BY ul.user_id,u.email,u.username ORDER BY ul.user_id`, args...)
 	for usageRows.Next() {
 		var item service.PoolUsageWeight
 		var raw string
-		if err := usageRows.Scan(&item.UserID, &item.Email, &item.Username, &raw); err != nil {
+		if err := usageRows.Scan(&item.AccountID, &item.UserID, &item.Email, &item.Username, &raw); err != nil {
 			_ = usageRows.Close()
 			return nil, nil, service.PoolUsageCoverage{}, nil, err
 		}
@@ -916,16 +916,23 @@ WHERE ul.created_at >= $1 AND ul.created_at < $2
 		return nil, nil, service.PoolUsageCoverage{}, nil, fmt.Errorf("load settlement pricing coverage: %w", err)
 	}
 
-	var raw []byte
+	var priorID int64
 	var carryOut int64
-	err = r.db.QueryRowContext(ctx, `SELECT cost_snapshot,carry_out_minor FROM pool_settlements WHERE status IN ('locked','paid') AND period_end <= $1 AND filter_snapshot=$2::jsonb ORDER BY period_end DESC,id DESC LIMIT 1`, start, string(filterRaw)).Scan(&raw, &carryOut)
+	err = r.db.QueryRowContext(ctx, `SELECT id,carry_out_minor FROM pool_settlements WHERE status IN ('locked','paid') AND period_end <= $1 AND filter_snapshot=$2::jsonb ORDER BY period_end DESC,id DESC LIMIT 1`, start, string(filterRaw)).Scan(&priorID, &carryOut)
 	carry := make([]service.SettlementCostSnapshot, 0)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return nil, nil, service.PoolUsageCoverage{}, nil, fmt.Errorf("load settlement carry: %w", err)
 	}
 	if err == nil && carryOut != 0 {
-		if err := json.Unmarshal(raw, &carry); err != nil {
-			return nil, nil, service.PoolUsageCoverage{}, nil, fmt.Errorf("decode settlement carry: %w", err)
+		accountCosts, loadErr := r.loadSettlementAccountCosts(ctx, priorID)
+		if loadErr != nil {
+			return nil, nil, service.PoolUsageCoverage{}, nil, fmt.Errorf("load settlement carry: %w", loadErr)
+		}
+		for _, item := range accountCosts {
+			carry = append(carry, service.SettlementCostSnapshot{
+				Kind: item.Kind, EntryID: item.CostEntryID, AccountID: item.AccountID,
+				PayerUserID: item.PayerUserID, AmountMinor: item.AmountMinor,
+			})
 		}
 	}
 	return costs, weights, coverage, carry, nil
@@ -944,10 +951,10 @@ func (r *poolRepository) LockedAllocatedByCostEntry(ctx context.Context, ids []i
 		return result, nil
 	}
 	rows, err := r.db.QueryContext(ctx, `
-SELECT (item->>'entry_id')::bigint, COALESCE(SUM((item->>'amount_minor')::bigint),0)::bigint
-FROM pool_settlements s CROSS JOIN LATERAL jsonb_array_elements(s.cost_snapshot) item
-WHERE s.status IN ('locked','paid') AND item->>'kind'='period' AND (item->>'entry_id')::bigint=ANY($1)
-GROUP BY (item->>'entry_id')::bigint`, pq.Array(ids))
+SELECT c.cost_entry_id,COALESCE(SUM(c.amount_minor),0)::bigint
+FROM pool_settlement_account_costs c JOIN pool_settlements s ON s.id=c.settlement_id
+WHERE s.status IN ('locked','paid') AND c.kind='period' AND c.cost_entry_id=ANY($1)
+GROUP BY c.cost_entry_id`, pq.Array(ids))
 	if err != nil {
 		return nil, fmt.Errorf("sum locked cost allocations: %w", err)
 	}
@@ -986,13 +993,9 @@ ORDER BY id DESC LIMIT 1`, settlement.PeriodStart, settlement.PeriodEnd, string(
 	if _, err = tx.ExecContext(ctx, `DELETE FROM pool_settlements WHERE status='draft' AND period_start=$1 AND period_end=$2 AND filter_snapshot=$3::jsonb`, settlement.PeriodStart, settlement.PeriodEnd, string(filterRaw)); err != nil {
 		return nil, err
 	}
-	raw, err := json.Marshal(settlement.CostSnapshot)
-	if err != nil {
-		return nil, err
-	}
 	err = tx.QueryRowContext(ctx, `
 	INSERT INTO pool_settlements(period_type,period_start,period_end,timezone,status,period_cost_minor,carry_in_minor,carry_out_minor,total_cost_minor,total_usage_weight,pricing_coverage,unpriced_usage_count,fx_rate,formula_version,cost_snapshot,filter_snapshot,generated_by_user_id)
-	VALUES($1,$2,$3,$4,'draft',$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING id,created_at,updated_at`, settlement.PeriodType, settlement.PeriodStart, settlement.PeriodEnd, settlement.Timezone, settlement.PeriodCostMinor, settlement.CarryInMinor, settlement.CarryOutMinor, settlement.TotalCostMinor, settlement.TotalUsageWeight, settlement.PricingCoverage, settlement.UnpricedCount, settlement.FXRate, settlement.FormulaVersion, raw, string(filterRaw), settlement.GeneratedBy).Scan(&settlement.ID, &settlement.CreatedAt, &settlement.UpdatedAt)
+	VALUES($1,$2,$3,$4,'draft',$5,$6,$7,$8,$9,$10,$11,$12,$13,'[]'::jsonb,$14,$15) RETURNING id,created_at,updated_at`, settlement.PeriodType, settlement.PeriodStart, settlement.PeriodEnd, settlement.Timezone, settlement.PeriodCostMinor, settlement.CarryInMinor, settlement.CarryOutMinor, settlement.TotalCostMinor, settlement.TotalUsageWeight, settlement.PricingCoverage, settlement.UnpricedCount, settlement.FXRate, settlement.FormulaVersion, string(filterRaw), settlement.GeneratedBy).Scan(&settlement.ID, &settlement.CreatedAt, &settlement.UpdatedAt)
 	if err != nil {
 		return nil, fmt.Errorf("save draft settlement: %w", err)
 	}
@@ -1005,6 +1008,26 @@ INSERT INTO pool_settlement_lines(settlement_id,user_id,usage_weight,usage_share
 VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`, settlement.ID, line.UserID, line.UsageWeight, line.UsageShare, line.AllocatedCostMinor, line.ContributionCreditMinor, line.AdjustmentMinor, line.NetAmountMinor, line.PaymentStatus).Scan(&line.ID)
 		if err != nil {
 			return nil, fmt.Errorf("save settlement line: %w", err)
+		}
+	}
+	for i := range settlement.AccountCosts {
+		item := &settlement.AccountCosts[i]
+		item.SettlementID = settlement.ID
+		err = tx.QueryRowContext(ctx, `
+INSERT INTO pool_settlement_account_costs(settlement_id,account_id,cost_entry_id,kind,payer_user_id,amount_minor)
+VALUES($1,$2,$3,$4,$5,$6) RETURNING id`, settlement.ID, item.AccountID, item.CostEntryID, item.Kind, item.PayerUserID, item.AmountMinor).Scan(&item.ID)
+		if err != nil {
+			return nil, fmt.Errorf("save settlement account cost: %w", err)
+		}
+	}
+	for i := range settlement.AccountLines {
+		line := &settlement.AccountLines[i]
+		line.SettlementID = settlement.ID
+		err = tx.QueryRowContext(ctx, `
+INSERT INTO pool_settlement_account_lines(settlement_id,account_id,user_id,account_usage_weight,usage_share,allocated_cost_minor,contribution_credit_minor,adjustment_minor,net_amount_minor,trace_quality)
+VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`, settlement.ID, line.AccountID, line.UserID, line.AccountUsageWeight, line.UsageShare, line.AllocatedCostMinor, line.ContributionCreditMinor, line.AdjustmentMinor, line.NetAmountMinor, line.TraceQuality).Scan(&line.ID)
+		if err != nil {
+			return nil, fmt.Errorf("save settlement account line: %w", err)
 		}
 	}
 	if err = tx.Commit(); err != nil {
@@ -1022,7 +1045,7 @@ func (r *poolRepository) LockSettlement(ctx context.Context, id, actorID int64) 
 	if _, err = tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(73029191)`); err != nil {
 		return nil, err
 	}
-	if _, err = tx.ExecContext(ctx, `LOCK TABLE account_cost_entries, usage_logs, valuation_fx_rates, accounts, users, pool_settlements IN SHARE MODE`); err != nil {
+	if _, err = tx.ExecContext(ctx, `LOCK TABLE account_cost_entries, usage_logs, valuation_fx_rates, accounts, users, pool_settlements, pool_settlement_account_costs, pool_settlement_account_lines IN SHARE MODE`); err != nil {
 		return nil, fmt.Errorf("lock settlement inputs: %w", err)
 	}
 	var status string
@@ -1052,9 +1075,8 @@ func (r *poolRepository) LockSettlement(ctx context.Context, id, actorID int64) 
 	var inputsChanged bool
 	err = tx.QueryRowContext(ctx, `
 WITH draft_cost_ids AS (
-  SELECT (item->>'entry_id')::bigint id
-  FROM pool_settlements s CROSS JOIN LATERAL jsonb_array_elements(s.cost_snapshot) item
-  WHERE s.id=$1 AND item->>'kind'='period'
+	SELECT cost_entry_id id FROM pool_settlement_account_costs
+	WHERE settlement_id=$1 AND kind='period'
 ), current_cost_ids AS (
   SELECT c.id FROM account_cost_entries c JOIN accounts a ON a.id=c.account_id
 	WHERE a.cost_sharing_enabled=TRUE AND c.entry_type<>'write_off'
@@ -1064,7 +1086,7 @@ WITH draft_cost_ids AS (
     AND ($6::bigint IS NULL OR c.payer_user_id=$6)
     AND ($7::bigint IS NULL OR c.purchase_source_id=$7)
 ), current_weights AS (
-  SELECT ul.user_id,SUM(ul.total_cost)::numeric weight
+	SELECT a.id account_id,ul.user_id,SUM(ul.total_cost)::numeric weight
   FROM usage_logs ul
 	JOIN accounts a ON a.id=ul.account_id AND a.cost_sharing_enabled=TRUE
   JOIN users u ON u.id=ul.user_id AND u.deleted_at IS NULL
@@ -1078,9 +1100,10 @@ WITH draft_cost_ids AS (
         AND ($6::bigint IS NULL OR c.payer_user_id=$6)
         AND ($7::bigint IS NULL OR c.purchase_source_id=$7)
     )
-  GROUP BY ul.user_id
+	GROUP BY a.id,ul.user_id
 ), draft_weights AS (
-  SELECT user_id,usage_weight::numeric weight FROM pool_settlement_lines WHERE settlement_id=$1
+	SELECT account_id,user_id,account_usage_weight::numeric weight
+	FROM pool_settlement_account_lines WHERE settlement_id=$1
 ), current_coverage AS (
   SELECT COUNT(*)::bigint candidate_count,
          COUNT(*) FILTER (WHERE ul.total_cost <= 0)::bigint unpriced_count
@@ -1115,7 +1138,7 @@ SELECT
           UNION ALL
           (SELECT id FROM current_cost_ids EXCEPT SELECT id FROM draft_cost_ids))
   OR EXISTS (
-    SELECT 1 FROM current_weights c FULL JOIN draft_weights d USING(user_id)
+		SELECT 1 FROM current_weights c FULL JOIN draft_weights d USING(account_id,user_id)
     WHERE COALESCE(c.weight,0) <> COALESCE(d.weight,0)
   )
   OR EXISTS (
@@ -1137,12 +1160,13 @@ SELECT other.id
 FROM pool_settlements other
 WHERE other.status IN ('locked','paid') AND other.id<>$1
   AND other.period_start<$3 AND other.period_end>$2
-  AND EXISTS (
-    SELECT 1
-    FROM jsonb_array_elements((SELECT cost_snapshot FROM pool_settlements WHERE id=$1)) draft_item
-    CROSS JOIN jsonb_array_elements(other.cost_snapshot) other_item
-    WHERE (draft_item->>'entry_id')::bigint=(other_item->>'entry_id')::bigint
-  )
+	AND EXISTS (
+		SELECT 1
+		FROM pool_settlement_account_costs draft_item
+		JOIN pool_settlement_account_costs other_item ON other_item.settlement_id=other.id
+			AND other_item.cost_entry_id=draft_item.cost_entry_id
+		WHERE draft_item.settlement_id=$1
+	)
 LIMIT 1`, id, start, end).Scan(&conflictID)
 	if err == nil {
 		return nil, infraerrors.Conflict("SETTLEMENT_PERIOD_OVERLAP", fmt.Sprintf("settlement period overlaps locked settlement %d", conflictID))
@@ -1153,13 +1177,13 @@ LIMIT 1`, id, start, end).Scan(&conflictID)
 	var stale bool
 	err = tx.QueryRowContext(ctx, `
 WITH draft_items AS (
-  SELECT (item->>'entry_id')::bigint entry_id, SUM((item->>'amount_minor')::bigint)::bigint amount_minor
-  FROM pool_settlements s CROSS JOIN LATERAL jsonb_array_elements(s.cost_snapshot) item
-  WHERE s.id=$1 AND item->>'kind'='period' GROUP BY (item->>'entry_id')::bigint
+	SELECT cost_entry_id entry_id,SUM(amount_minor)::bigint amount_minor
+	FROM pool_settlement_account_costs
+	WHERE settlement_id=$1 AND kind='period' GROUP BY cost_entry_id
 ), locked_items AS (
-  SELECT (item->>'entry_id')::bigint entry_id, SUM((item->>'amount_minor')::bigint)::bigint amount_minor
-  FROM pool_settlements s CROSS JOIN LATERAL jsonb_array_elements(s.cost_snapshot) item
-  WHERE s.status IN ('locked','paid') AND item->>'kind'='period' GROUP BY (item->>'entry_id')::bigint
+	SELECT c.cost_entry_id entry_id,SUM(c.amount_minor)::bigint amount_minor
+	FROM pool_settlement_account_costs c JOIN pool_settlements s ON s.id=c.settlement_id
+	WHERE s.status IN ('locked','paid') AND c.kind='period' GROUP BY c.cost_entry_id
 )
 SELECT EXISTS (
   SELECT 1 FROM draft_items d JOIN account_cost_entries c ON c.id=d.entry_id
@@ -1282,18 +1306,73 @@ FROM pool_settlements`
 
 func scanSettlement(scanner interface{ Scan(...any) error }) (*service.PoolSettlement, error) {
 	var item service.PoolSettlement
-	var costRaw, filterRaw []byte
-	err := scanner.Scan(&item.ID, &item.PeriodType, &item.PeriodStart, &item.PeriodEnd, &item.Timezone, &item.Status, &item.PeriodCostMinor, &item.CarryInMinor, &item.CarryOutMinor, &item.TotalCostMinor, &item.TotalUsageWeight, &item.PricingCoverage, &item.UnpricedCount, &item.FXRate, &item.FormulaVersion, &costRaw, &filterRaw, &item.GeneratedBy, &item.LockedBy, &item.LockedAt, &item.PaidBy, &item.PaidAt, &item.CreatedAt, &item.UpdatedAt)
+	var legacyCostRaw, filterRaw []byte
+	err := scanner.Scan(&item.ID, &item.PeriodType, &item.PeriodStart, &item.PeriodEnd, &item.Timezone, &item.Status, &item.PeriodCostMinor, &item.CarryInMinor, &item.CarryOutMinor, &item.TotalCostMinor, &item.TotalUsageWeight, &item.PricingCoverage, &item.UnpricedCount, &item.FXRate, &item.FormulaVersion, &legacyCostRaw, &filterRaw, &item.GeneratedBy, &item.LockedBy, &item.LockedAt, &item.PaidBy, &item.PaidAt, &item.CreatedAt, &item.UpdatedAt)
 	if err != nil {
-		return nil, err
-	}
-	if err = json.Unmarshal(costRaw, &item.CostSnapshot); err != nil {
 		return nil, err
 	}
 	if err = json.Unmarshal(filterRaw, &item.FilterSnapshot); err != nil {
 		return nil, err
 	}
 	return &item, nil
+}
+
+func (r *poolRepository) loadSettlementAccountCosts(ctx context.Context, id int64) ([]service.PoolSettlementAccountCost, error) {
+	rows, err := r.db.QueryContext(ctx, `
+SELECT id,settlement_id,account_id,cost_entry_id,kind,payer_user_id,amount_minor
+FROM pool_settlement_account_costs WHERE settlement_id=$1 ORDER BY account_id,kind,cost_entry_id`, id)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	items := make([]service.PoolSettlementAccountCost, 0)
+	for rows.Next() {
+		var item service.PoolSettlementAccountCost
+		if err := rows.Scan(&item.ID, &item.SettlementID, &item.AccountID, &item.CostEntryID, &item.Kind, &item.PayerUserID, &item.AmountMinor); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func (r *poolRepository) loadSettlementCosts(ctx context.Context, item *service.PoolSettlement) error {
+	costs, err := r.loadSettlementAccountCosts(ctx, item.ID)
+	if err != nil {
+		return err
+	}
+	item.AccountCosts = costs
+	item.CostSnapshot = make([]service.SettlementCostSnapshot, 0, len(costs))
+	for _, cost := range costs {
+		item.CostSnapshot = append(item.CostSnapshot, service.SettlementCostSnapshot{
+			Kind: cost.Kind, EntryID: cost.CostEntryID, AccountID: cost.AccountID,
+			PayerUserID: cost.PayerUserID, AmountMinor: cost.AmountMinor,
+		})
+	}
+	return nil
+}
+
+func (r *poolRepository) loadSettlementAccountLines(ctx context.Context, id int64) ([]service.PoolSettlementAccountLine, error) {
+	rows, err := r.db.QueryContext(ctx, `
+SELECT l.id,l.settlement_id,l.account_id,l.user_id,u.email,u.username,l.account_usage_weight,l.usage_share,
+       l.allocated_cost_minor,l.contribution_credit_minor,l.adjustment_minor,l.net_amount_minor,l.trace_quality
+FROM pool_settlement_account_lines l JOIN users u ON u.id=l.user_id
+WHERE l.settlement_id=$1 ORDER BY l.account_id,l.user_id`, id)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	items := make([]service.PoolSettlementAccountLine, 0)
+	for rows.Next() {
+		var item service.PoolSettlementAccountLine
+		if err := rows.Scan(&item.ID, &item.SettlementID, &item.AccountID, &item.UserID, &item.UserEmail, &item.Username,
+			&item.AccountUsageWeight, &item.UsageShare, &item.AllocatedCostMinor, &item.ContributionCreditMinor,
+			&item.AdjustmentMinor, &item.NetAmountMinor, &item.TraceQuality); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
 }
 
 func (r *poolRepository) loadSettlementLines(ctx context.Context, id int64) ([]service.PoolSettlementLine, error) {
@@ -1323,16 +1402,34 @@ func (r *poolRepository) GetSettlement(ctx context.Context, id int64) (*service.
 	if err != nil {
 		return nil, err
 	}
+	if err = r.loadSettlementCosts(ctx, item); err != nil {
+		return nil, err
+	}
 	item.Lines, err = r.loadSettlementLines(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	item.AccountLines, err = r.loadSettlementAccountLines(ctx, id)
 	return item, err
 }
 
-func (r *poolRepository) ListSettlements(ctx context.Context, limit, offset int) ([]service.PoolSettlement, int64, error) {
+func (r *poolRepository) ListSettlements(ctx context.Context, accountID *int64, limit, offset int) ([]service.PoolSettlement, int64, error) {
 	var total int64
-	if err := r.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM pool_settlements`).Scan(&total); err != nil {
+	if err := r.db.QueryRowContext(ctx, `
+SELECT COUNT(*) FROM pool_settlements s
+WHERE ($1::bigint IS NULL OR EXISTS (
+  SELECT 1 FROM pool_settlement_account_costs c WHERE c.settlement_id=s.id AND c.account_id=$1
+  UNION
+  SELECT 1 FROM pool_settlement_account_lines l WHERE l.settlement_id=s.id AND l.account_id=$1
+))`, accountID).Scan(&total); err != nil {
 		return nil, 0, err
 	}
-	rows, err := r.db.QueryContext(ctx, settlementSelect+` ORDER BY period_start DESC,id DESC LIMIT $1 OFFSET $2`, limit, offset)
+	rows, err := r.db.QueryContext(ctx, settlementSelect+`
+WHERE ($1::bigint IS NULL OR EXISTS (
+  SELECT 1 FROM pool_settlement_account_costs c WHERE c.settlement_id=pool_settlements.id AND c.account_id=$1
+  UNION
+  SELECT 1 FROM pool_settlement_account_lines l WHERE l.settlement_id=pool_settlements.id AND l.account_id=$1
+)) ORDER BY period_start DESC,id DESC LIMIT $2 OFFSET $3`, accountID, limit, offset)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -1345,7 +1442,18 @@ func (r *poolRepository) ListSettlements(ctx context.Context, limit, offset int)
 		}
 		items = append(items, *item)
 	}
-	return items, total, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, 0, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, 0, err
+	}
+	for i := range items {
+		if err := r.loadSettlementCosts(ctx, &items[i]); err != nil {
+			return nil, 0, err
+		}
+	}
+	return items, total, nil
 }
 
 func (r *poolRepository) GetRecovery(ctx context.Context, start, end time.Time) ([]service.AccountRecovery, error) {

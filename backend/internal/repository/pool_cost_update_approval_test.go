@@ -56,8 +56,8 @@ func TestGetAccountDeleteImpactReturnsLifecycleCounts(t *testing.T) {
 	t.Cleanup(func() { _ = client.Close() })
 
 	mock.ExpectQuery(`WITH RECURSIVE family AS`).WithArgs(int64(7)).WillReturnRows(
-		sqlmock.NewRows([]string{"accounts", "credentials", "schedules", "costs", "settlements", "groups", "events", "usage"}).
-			AddRow(int64(2), int64(4), int64(1), int64(3), int64(2), int64(5), int64(6), int64(7)),
+		sqlmock.NewRows([]string{"accounts", "credentials", "schedules", "costs", "settlements", "settlement_costs", "settlement_lines", "mixed", "empty", "sources", "groups", "events", "usage"}).
+			AddRow(int64(2), int64(4), int64(1), int64(3), int64(2), int64(8), int64(9), int64(1), int64(1), int64(2), int64(5), int64(6), int64(7)),
 	)
 	repo, ok := NewPoolApprovalRepository(client).(interface {
 		GetAccountDeleteImpact(context.Context, int64) (*service.PoolAccountDeleteImpact, error)
@@ -71,6 +71,9 @@ func TestGetAccountDeleteImpactReturnsLifecycleCounts(t *testing.T) {
 	}
 	if impact.Accounts != 2 || impact.CredentialKeys != 4 || impact.UsageRecords != 7 {
 		t.Fatalf("unexpected delete impact: %#v", impact)
+	}
+	if impact.SettlementAccountCosts != 8 || impact.SettlementAccountLines != 9 || impact.MixedSettlements != 1 || impact.EmptySettlements != 1 || impact.PurchaseSources != 2 {
+		t.Fatalf("unexpected settlement delete impact: %#v", impact)
 	}
 	if err = mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)

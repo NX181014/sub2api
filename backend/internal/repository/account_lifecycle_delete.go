@@ -10,6 +10,7 @@ import (
 	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/lib/pq"
+	"github.com/shopspring/decimal"
 )
 
 type accountDeleteTxStarter interface {
@@ -93,6 +94,9 @@ func hardDeleteAccountFamily(ctx context.Context, exec accountDeleteExecutor, id
 	for i, id := range ids {
 		textIDs[i] = strconv.FormatInt(id, 10)
 	}
+	if err := hardDeleteAccountSettlements(ctx, exec, ids, textIDs); err != nil {
+		return err
+	}
 	if err := hardDeleteAccountUsage(ctx, exec, ids); err != nil {
 		return err
 	}
@@ -101,17 +105,18 @@ func hardDeleteAccountFamily(ctx context.Context, exec accountDeleteExecutor, id
 		sql  string
 		args []any
 	}{
-		{`DELETE FROM pool_settlements s WHERE s.filter_snapshot->>'account_id'=ANY($1::text[]) OR EXISTS (
-			SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(s.cost_snapshot)='array' THEN s.cost_snapshot ELSE '[]'::jsonb END) item
-			WHERE item->>'account_id'=ANY($1::text[]))`, []any{pq.Array(textIDs)}},
 		{`DELETE FROM batch_image_jobs WHERE account_id=ANY($1)`, []any{idArray}},
 		{`DELETE FROM ops_system_logs WHERE account_id=ANY($1)`, []any{idArray}},
 		{`DELETE FROM ops_error_logs WHERE account_id=ANY($1)`, []any{idArray}},
 		{`WITH RECURSIVE doomed(id) AS (
-			SELECT id FROM account_cost_entries WHERE account_id=ANY($1) OR related_account_id=ANY($1)
+			SELECT id FROM account_cost_entries WHERE account_id=ANY($1)
 			UNION
 			SELECT c.id FROM account_cost_entries c JOIN doomed d ON c.supersedes_id=d.id
 		) DELETE FROM account_cost_entries WHERE id IN (SELECT id FROM doomed)`, []any{idArray}},
+		{`UPDATE account_cost_entries SET related_account_id=NULL,updated_at=NOW()
+			WHERE related_account_id=ANY($1)`, []any{idArray}},
+		{`DELETE FROM purchase_sources ps WHERE NOT EXISTS (
+			SELECT 1 FROM account_cost_entries c WHERE c.purchase_source_id=ps.id)`, nil},
 		{`DELETE FROM account_lifecycle_events WHERE account_id=ANY($1) OR replacement_account_id=ANY($1)`, []any{idArray}},
 		{`DELETE FROM pool_approval_requests WHERE account_id=ANY($1)
 			OR payload#>>'{delete_options,ReplacementAccountID}'=ANY($2::text[])
@@ -146,6 +151,251 @@ func hardDeleteAccountFamily(ctx context.Context, exec accountDeleteExecutor, id
 		}
 	}
 	return nil
+}
+
+func hardDeleteAccountSettlements(ctx context.Context, exec accountDeleteExecutor, ids []int64, textIDs []string) error {
+	rows, err := exec.QueryContext(ctx, `
+WITH RECURSIVE doomed_costs(id) AS (
+  SELECT id FROM account_cost_entries WHERE account_id=ANY($2)
+  UNION
+  SELECT child.id FROM account_cost_entries child JOIN doomed_costs parent ON child.supersedes_id=parent.id
+)
+SELECT s.id
+FROM pool_settlements s
+WHERE s.filter_snapshot->>'account_id'=ANY($1::text[])
+   OR EXISTS (SELECT 1 FROM pool_settlement_account_costs c
+      WHERE c.settlement_id=s.id AND (c.account_id=ANY($2) OR c.cost_entry_id IN (SELECT id FROM doomed_costs)))
+   OR EXISTS (SELECT 1 FROM pool_settlement_account_lines l WHERE l.settlement_id=s.id AND l.account_id=ANY($2))
+ORDER BY s.id
+FOR UPDATE`, pq.Array(textIDs), pq.Array(ids))
+	if err != nil {
+		return err
+	}
+	settlementIDs := make([]int64, 0)
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		settlementIDs = append(settlementIDs, id)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return err
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	if len(settlementIDs) == 0 {
+		return nil
+	}
+	if _, err := exec.ExecContext(ctx, `
+WITH RECURSIVE doomed_costs(id) AS (
+  SELECT id FROM account_cost_entries WHERE account_id=ANY($1)
+  UNION
+  SELECT child.id FROM account_cost_entries child JOIN doomed_costs parent ON child.supersedes_id=parent.id
+)
+DELETE FROM pool_settlement_account_costs
+WHERE account_id=ANY($1) OR cost_entry_id IN (SELECT id FROM doomed_costs)`, pq.Array(ids)); err != nil {
+		return err
+	}
+	if _, err := exec.ExecContext(ctx, `DELETE FROM pool_settlement_account_lines WHERE account_id=ANY($1)`, pq.Array(ids)); err != nil {
+		return err
+	}
+	for _, settlementID := range settlementIDs {
+		if err := rebuildSettlementAfterAccountDelete(ctx, exec, settlementID, ids, textIDs); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func rebuildSettlementAfterAccountDelete(ctx context.Context, exec accountDeleteExecutor, settlementID int64, ids []int64, textIDs []string) error {
+	costRows, err := exec.QueryContext(ctx, `
+SELECT account_id,cost_entry_id,kind,payer_user_id,amount_minor
+FROM pool_settlement_account_costs WHERE settlement_id=$1 ORDER BY account_id,kind,cost_entry_id`, settlementID)
+	if err != nil {
+		return err
+	}
+	costs := make([]service.SettlementCostSnapshot, 0)
+	periodCost, carryIn := int64(0), int64(0)
+	for costRows.Next() {
+		var item service.SettlementCostSnapshot
+		if err := costRows.Scan(&item.AccountID, &item.EntryID, &item.Kind, &item.PayerUserID, &item.AmountMinor); err != nil {
+			_ = costRows.Close()
+			return err
+		}
+		if item.Kind == "carry" {
+			carryIn += item.AmountMinor
+		} else {
+			periodCost += item.AmountMinor
+		}
+		costs = append(costs, item)
+	}
+	if err := costRows.Err(); err != nil {
+		_ = costRows.Close()
+		return err
+	}
+	if err := costRows.Close(); err != nil {
+		return err
+	}
+	weightRows, err := exec.QueryContext(ctx, `
+SELECT account_id,user_id,account_usage_weight::text
+FROM pool_settlement_account_lines WHERE settlement_id=$1 ORDER BY account_id,user_id`, settlementID)
+	if err != nil {
+		return err
+	}
+	weights := make([]service.PoolUsageWeight, 0)
+	for weightRows.Next() {
+		var item service.PoolUsageWeight
+		var raw string
+		if err := weightRows.Scan(&item.AccountID, &item.UserID, &raw); err != nil {
+			_ = weightRows.Close()
+			return err
+		}
+		item.Weight, err = decimal.NewFromString(raw)
+		if err != nil {
+			_ = weightRows.Close()
+			return err
+		}
+		weights = append(weights, item)
+	}
+	if err := weightRows.Err(); err != nil {
+		_ = weightRows.Close()
+		return err
+	}
+	if err := weightRows.Close(); err != nil {
+		return err
+	}
+	if len(costs) == 0 && len(weights) == 0 {
+		_, err := exec.ExecContext(ctx, `DELETE FROM pool_settlements WHERE id=$1`, settlementID)
+		return err
+	}
+
+	lines, accountLines, totalWeight, carryOut := service.BuildSettlementAllocation(costs, weights)
+	var status string
+	var generatedBy int64
+	var lockedBy, paidBy sql.NullInt64
+	var lockedAt, paidAt sql.NullTime
+	headerRows, err := exec.QueryContext(ctx, `
+SELECT status,generated_by_user_id,locked_by_user_id,locked_at,paid_by_user_id,paid_at
+FROM pool_settlements WHERE id=$1`, settlementID)
+	if err != nil {
+		return err
+	}
+	if !headerRows.Next() {
+		_ = headerRows.Close()
+		return sql.ErrNoRows
+	}
+	if err := headerRows.Scan(&status, &generatedBy, &lockedBy, &lockedAt, &paidBy, &paidAt); err != nil {
+		_ = headerRows.Close()
+		return err
+	}
+	if err := headerRows.Close(); err != nil {
+		return err
+	}
+
+	var unpricedCount int64
+	var pricingCoverage string
+	coverageRows, err := exec.QueryContext(ctx, `
+WITH coverage AS (
+  SELECT COUNT(*) FILTER (WHERE ul.total_cost<=0)::bigint unpriced_count,
+         COALESCE(SUM(GREATEST(ul.input_tokens::bigint+ul.output_tokens::bigint+ul.cache_creation_tokens::bigint+
+           ul.cache_read_tokens::bigint+ul.image_output_tokens::bigint+ul.image_input_tokens::bigint,1)),0)::numeric material,
+         COALESCE(SUM(GREATEST(ul.input_tokens::bigint+ul.output_tokens::bigint+ul.cache_creation_tokens::bigint+
+           ul.cache_read_tokens::bigint+ul.image_output_tokens::bigint+ul.image_input_tokens::bigint,1))
+           FILTER (WHERE ul.total_cost<=0),0)::numeric unpriced_material
+  FROM pool_settlements s
+  JOIN usage_logs ul ON ul.created_at>=s.period_start AND ul.created_at<s.period_end
+  JOIN accounts a ON a.id=ul.account_id AND a.cost_sharing_enabled=TRUE AND NOT a.id=ANY($2)
+  JOIN users u ON u.id=ul.user_id AND u.deleted_at IS NULL
+  WHERE s.id=$1
+    AND (s.filter_snapshot->>'account_id' IS NULL OR a.id=(s.filter_snapshot->>'account_id')::bigint)
+    AND (s.filter_snapshot->>'uploader_user_id' IS NULL OR a.created_by_user_id=(s.filter_snapshot->>'uploader_user_id')::bigint)
+    AND EXISTS (
+      SELECT 1 FROM account_cost_entries c
+      WHERE c.account_id=a.id AND c.entry_type<>'write_off'
+        AND c.service_start<s.period_end::date AND c.service_end>s.period_start::date
+        AND (s.filter_snapshot->>'payer_user_id' IS NULL OR c.payer_user_id=(s.filter_snapshot->>'payer_user_id')::bigint)
+        AND (s.filter_snapshot->>'purchase_source_id' IS NULL OR c.purchase_source_id=(s.filter_snapshot->>'purchase_source_id')::bigint)
+    )
+    AND (ul.actual_cost>0 OR ul.total_cost>0
+      OR ul.input_tokens+ul.output_tokens+ul.cache_creation_tokens+ul.cache_read_tokens+ul.image_output_tokens+ul.image_input_tokens>0
+      OR ul.image_count>0 OR ul.video_count>0)
+)
+SELECT unpriced_count,
+       CASE WHEN material=0 THEN '1' ELSE ((material-unpriced_material)/material)::text END
+FROM coverage`, settlementID, pq.Array(ids))
+	if err != nil {
+		return err
+	}
+	if !coverageRows.Next() {
+		_ = coverageRows.Close()
+		return sql.ErrNoRows
+	}
+	if err := coverageRows.Scan(&unpricedCount, &pricingCoverage); err != nil {
+		_ = coverageRows.Close()
+		return err
+	}
+	if err := coverageRows.Close(); err != nil {
+		return err
+	}
+
+	if _, err := exec.ExecContext(ctx, `DELETE FROM pool_settlement_lines WHERE settlement_id=$1`, settlementID); err != nil {
+		return err
+	}
+	if _, err := exec.ExecContext(ctx, `DELETE FROM pool_settlement_account_lines WHERE settlement_id=$1`, settlementID); err != nil {
+		return err
+	}
+	for _, line := range lines {
+		paymentStatus, confirmationStatus := "unpaid", "pending"
+		var confirmedBy any
+		var confirmedAt any
+		if status == "paid" {
+			paymentStatus, confirmationStatus = "paid", "confirmed"
+			confirmedBy = generatedBy
+			confirmedAt = time.Now()
+			if lockedBy.Valid {
+				confirmedBy = lockedBy.Int64
+			}
+			if paidBy.Valid {
+				confirmedBy = paidBy.Int64
+			}
+			if lockedAt.Valid {
+				confirmedAt = lockedAt.Time
+			}
+			if paidAt.Valid {
+				confirmedAt = paidAt.Time
+			}
+		}
+		if _, err := exec.ExecContext(ctx, `
+INSERT INTO pool_settlement_lines(settlement_id,user_id,usage_weight,usage_share,allocated_cost_minor,
+  contribution_credit_minor,adjustment_minor,net_amount_minor,payment_status,confirmation_status,confirmed_by_user_id,confirmed_at)
+VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`, settlementID, line.UserID, line.UsageWeight, line.UsageShare,
+			line.AllocatedCostMinor, line.ContributionCreditMinor, line.AdjustmentMinor, line.NetAmountMinor,
+			paymentStatus, confirmationStatus, confirmedBy, confirmedAt); err != nil {
+			return err
+		}
+	}
+	for _, line := range accountLines {
+		if _, err := exec.ExecContext(ctx, `
+INSERT INTO pool_settlement_account_lines(settlement_id,account_id,user_id,account_usage_weight,usage_share,
+  allocated_cost_minor,contribution_credit_minor,adjustment_minor,net_amount_minor,trace_quality)
+VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`, settlementID, line.AccountID, line.UserID, line.AccountUsageWeight,
+			line.UsageShare, line.AllocatedCostMinor, line.ContributionCreditMinor, line.AdjustmentMinor,
+			line.NetAmountMinor, line.TraceQuality); err != nil {
+			return err
+		}
+	}
+	_, err = exec.ExecContext(ctx, `
+UPDATE pool_settlements
+SET period_cost_minor=$2,carry_in_minor=$3,carry_out_minor=$4,total_cost_minor=$5,total_usage_weight=$6,
+    pricing_coverage=$7,unpriced_usage_count=$8,cost_snapshot='[]'::jsonb,
+    filter_snapshot=CASE WHEN filter_snapshot->>'account_id'=ANY($9::text[]) THEN filter_snapshot-'account_id' ELSE filter_snapshot END,
+    updated_at=NOW()
+WHERE id=$1`, settlementID, periodCost, carryIn, carryOut, periodCost+carryIn, totalWeight.String(), pricingCoverage, unpricedCount, pq.Array(textIDs))
+	return err
 }
 
 func hardDeleteAccountUsage(ctx context.Context, exec accountDeleteExecutor, ids []int64) error {

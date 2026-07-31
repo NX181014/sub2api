@@ -61,7 +61,7 @@ export default {
       businessUpdate: '变更账号业务信息', businessUpdateFields: '变更字段：{fields}', businessCredential: '查看账号敏感凭证', businessDelete: '删除账号及其关联业务数据',
       businessGrouped: '涉及 {groups}，共 {count} 项业务变更',
       groups: { identity: '账号身份与归属', visibility: '可见范围', scheduling: '运行调度', capacity: '容量配置', cost_settlement: '成本结算', linked_data: '关联数据', credentials: '凭证信息' },
-      impacts: { accounts: '账号', credential_keys: '凭证键', scheduling_records: '调度记录', cost_entries: '成本记录', settlements: 'AA 结算', group_links: '分组关联', lifecycle_events: '生命周期记录', usage_records: '用量记录' },
+      impacts: { accounts: '账号', credential_keys: '凭证键', scheduling_records: '调度记录', cost_entries: '成本记录', settlements: '受影响结算', settlement_account_costs: 'AA 账号成本行', settlement_account_lines: 'AA 账号分摊行', mixed_settlements: '混合结算', empty_settlements: '空结算', purchase_sources: '采购来源', group_links: '分组关联', lifecycle_events: '生命周期记录', usage_records: '用量记录' },
       effects: { identity_changed: '账号识别与归属信息会更新', visibility_changed: '账号可见与分组范围会变化', scheduling_changed: '账号调度行为会变化', capacity_changed: '容量与回本计算会变化', settlement_changed: '成本或 AA 结算依据会变化', linked_data_changed: '账号关联业务数据会更新', credential_replacement: '凭证将更新，凭证值保持隐藏', credential_access: '批准后申请人可查看一次凭证', permanent_cleanup: '执行后账号及关联业务数据会永久清理' },
       updated: '已更新', showRemaining: '展开其余 {count} 项', technicalDetails: '技术详情', deleteImpactTitle: '执行后将清理以下关联记录',
       sensitiveValue: '敏感值已隐藏',

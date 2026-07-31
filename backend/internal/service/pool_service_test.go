@@ -50,6 +50,49 @@ func TestPoolSettlementMath(t *testing.T) {
 	require.Equal(t, map[int64]int64{1: 34, 2: 33, 3: 33}, allocated)
 }
 
+func TestBuildSettlementAllocationRollsUpExactly(t *testing.T) {
+	costs := []SettlementCostSnapshot{
+		{Kind: "period", EntryID: 101, AccountID: 1, PayerUserID: 1, AmountMinor: 60},
+		{Kind: "period", EntryID: 102, AccountID: 2, PayerUserID: 2, AmountMinor: 40},
+	}
+	weights := []PoolUsageWeight{
+		{AccountID: 1, UserID: 1, Weight: decimal.NewFromInt(1)},
+		{AccountID: 2, UserID: 1, Weight: decimal.NewFromInt(1)},
+		{AccountID: 2, UserID: 2, Weight: decimal.NewFromInt(1)},
+	}
+	lines, accountLines, totalWeight, carryOut := BuildSettlementAllocation(costs, weights)
+	require.Equal(t, "3", totalWeight.String())
+	require.Zero(t, carryOut)
+	require.Len(t, lines, 2)
+	require.Equal(t, int64(67), lines[0].AllocatedCostMinor)
+	require.Equal(t, int64(60), lines[0].ContributionCreditMinor)
+	require.Equal(t, int64(33), lines[1].AllocatedCostMinor)
+	require.Equal(t, int64(40), lines[1].ContributionCreditMinor)
+
+	byUserAllocated, byUserCredit := map[int64]int64{}, map[int64]int64{}
+	for _, line := range accountLines {
+		byUserAllocated[line.UserID] += line.AllocatedCostMinor
+		byUserCredit[line.UserID] += line.ContributionCreditMinor
+		require.Equal(t, "exact", line.TraceQuality)
+	}
+	require.Equal(t, map[int64]int64{1: 67, 2: 33}, byUserAllocated)
+	require.Equal(t, map[int64]int64{1: 60, 2: 40}, byUserCredit)
+	require.Equal(t, int64(34), accountLines[0].AllocatedCostMinor)
+	require.Equal(t, int64(33), accountLines[1].AllocatedCostMinor)
+}
+
+func TestBuildSettlementAllocationCarriesWhenThereIsNoUsage(t *testing.T) {
+	lines, accountLines, totalWeight, carryOut := BuildSettlementAllocation([]SettlementCostSnapshot{
+		{Kind: "period", EntryID: 101, AccountID: 1, PayerUserID: 9, AmountMinor: 100},
+	}, nil)
+	require.True(t, totalWeight.IsZero())
+	require.Equal(t, int64(100), carryOut)
+	require.Len(t, lines, 1)
+	require.Zero(t, lines[0].NetAmountMinor)
+	require.Len(t, accountLines, 1)
+	require.Zero(t, accountLines[0].NetAmountMinor)
+}
+
 func TestValidateSettlementFilter(t *testing.T) {
 	accountID, uploaderID, payerID, sourceID := int64(1), int64(2), int64(3), int64(4)
 	require.NoError(t, validateSettlementFilter(SettlementFilterSnapshot{

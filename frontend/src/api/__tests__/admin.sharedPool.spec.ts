@@ -16,6 +16,8 @@ import {
   listCostSummaries,
   listCostUploaderSummaries,
   listLedgerEntries,
+  listLifecycle,
+  listSettlements,
   listSources,
   markSettlementPaid,
   previewSettlement,
@@ -151,6 +153,20 @@ describe('admin shared-pool API', () => {
     })
   })
 
+  it('loads lifecycle history for exactly one account', async () => {
+    get.mockResolvedValueOnce({ data: [{ id: 1, account_id: 42, event_type: 'retired' }] })
+
+    await expect(listLifecycle(42)).resolves.toEqual([{ id: 1, account_id: 42, event_type: 'retired' }])
+    expect(get).toHaveBeenCalledWith('/admin/pool/lifecycle', { params: { account_id: 42 } })
+  })
+
+  it('filters settlements by account before mapping the requested page', async () => {
+    get.mockResolvedValueOnce({ data: { items: [], total: 0, page: 2, page_size: 20 } })
+
+    await expect(listSettlements({ page: 2, page_size: 20, account_id: 42 })).resolves.toMatchObject({ items: [], page: 2 })
+    expect(get).toHaveBeenCalledWith('/admin/pool/settlements', { params: { page: 2, page_size: 20, account_id: 42 } })
+  })
+
   it('confirms only the current member endpoint and maps confirmation state', async () => {
     const settlement = {
       id: 9, period_type: 'month', period_start: '2026-07-01T00:00:00Z', period_end: '2026-08-01T00:00:00Z',
@@ -170,6 +186,33 @@ describe('admin shared-pool API', () => {
     expect(post).toHaveBeenNthCalledWith(1, '/admin/pool/settlements/9/confirm')
     await expect(markSettlementPaid(9)).resolves.toMatchObject({ status: 'paid' })
     expect(post).toHaveBeenNthCalledWith(2, '/admin/pool/settlements/9/paid')
+  })
+
+  it('maps normalized account settlement details without changing user totals', async () => {
+    post.mockResolvedValueOnce({ data: {
+      id: 9, period_type: 'month', period_start: '2026-07-01T00:00:00Z', period_end: '2026-08-01T00:00:00Z',
+      status: 'draft', total_cost_minor: 1200, carry_out_minor: 0, total_usage_weight: '2',
+      pricing_coverage: '1', unpriced_usage_count: 0, fx_rate: '1',
+      lines: [{
+        user_id: 23, user_email: 'member@example.com', username: 'member', usage_weight: '2', usage_share: '1',
+        allocated_cost_minor: 1200, contribution_credit_minor: 0, adjustment_minor: 0, net_amount_minor: 1200,
+        payment_status: 'unpaid', confirmation_status: 'pending'
+      }],
+      account_costs: [{
+        id: 1, settlement_id: 9, account_id: 42, cost_entry_id: 7, kind: 'period', payer_user_id: 8, amount_minor: 1200
+      }],
+      account_lines: [{
+        id: 2, settlement_id: 9, account_id: 42, user_id: 23, user_email: 'member@example.com', username: 'member',
+        account_usage_weight: '2', usage_share: '1', allocated_cost_minor: 1200, contribution_credit_minor: 0,
+        adjustment_minor: 0, net_amount_minor: 1200, trace_quality: 'exact'
+      }]
+    } })
+
+    const result = await previewSettlement({ start: '2026-07-01', end: '2026-08-01', period_type: 'month' })
+
+    expect(result.lines[0]).toMatchObject({ user_id: 23, allocated_cost: 12, net_amount: 12 })
+    expect(result.account_costs[0]).toMatchObject({ account_id: 42, cost_entry_id: 7, amount: 12 })
+    expect(result.account_lines[0]).toMatchObject({ account_id: 42, user_id: 23, allocated_cost: 12, trace_quality: 'exact' })
   })
 
   it('sends the selected settlement scope to the draft endpoint', async () => {

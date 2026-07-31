@@ -97,14 +97,19 @@ type PoolApprovalBusinessImpact struct {
 }
 
 type PoolAccountDeleteImpact struct {
-	Accounts          int64
-	CredentialKeys    int64
-	SchedulingRecords int64
-	CostEntries       int64
-	Settlements       int64
-	GroupLinks        int64
-	LifecycleEvents   int64
-	UsageRecords      int64
+	Accounts               int64
+	CredentialKeys         int64
+	SchedulingRecords      int64
+	CostEntries            int64
+	Settlements            int64
+	SettlementAccountCosts int64
+	SettlementAccountLines int64
+	MixedSettlements       int64
+	EmptySettlements       int64
+	PurchaseSources        int64
+	GroupLinks             int64
+	LifecycleEvents        int64
+	UsageRecords           int64
 }
 
 // PoolApproval never serializes Payload: it can contain pending credential
@@ -800,6 +805,11 @@ func buildPoolApprovalBusinessSummary(action string, account *Account, changes P
 				{Key: "scheduling_records", Count: deleteImpact.SchedulingRecords},
 				{Key: "cost_entries", Count: deleteImpact.CostEntries},
 				{Key: "settlements", Count: deleteImpact.Settlements},
+				{Key: "settlement_account_costs", Count: deleteImpact.SettlementAccountCosts},
+				{Key: "settlement_account_lines", Count: deleteImpact.SettlementAccountLines},
+				{Key: "mixed_settlements", Count: deleteImpact.MixedSettlements},
+				{Key: "empty_settlements", Count: deleteImpact.EmptySettlements},
+				{Key: "purchase_sources", Count: deleteImpact.PurchaseSources},
 				{Key: "group_links", Count: deleteImpact.GroupLinks},
 				{Key: "lifecycle_events", Count: deleteImpact.LifecycleEvents},
 				{Key: "usage_records", Count: deleteImpact.UsageRecords},

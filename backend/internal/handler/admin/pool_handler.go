@@ -930,8 +930,12 @@ func (h *PoolHandler) RecalculateSettlement(c *gin.Context) {
 }
 
 func (h *PoolHandler) ListSettlements(c *gin.Context) {
+	accountID, ok := optionalPoolQueryID(c, "account_id")
+	if !ok {
+		return
+	}
 	page, pageSize := response.ParsePagination(c)
-	items, total, err := h.poolService.ListSettlements(c.Request.Context(), page, pageSize)
+	items, total, err := h.poolService.ListSettlements(c.Request.Context(), accountID, page, pageSize)
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return

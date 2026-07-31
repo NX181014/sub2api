@@ -169,12 +169,17 @@ func TestPoolApprovalBusinessSummaryGroupsChangesAndRedactsCredentials(t *testin
 func TestPoolApprovalBusinessSummaryIncludesDeleteImpact(t *testing.T) {
 	summary := buildPoolApprovalBusinessSummary(PoolApprovalDeleteAccount, &Account{ID: 7, Name: "doomed"}, PoolApprovalChangeSummary{}, &PoolAccountDeleteImpact{
 		Accounts: 2, CredentialKeys: 4, SchedulingRecords: 1, CostEntries: 3,
-		Settlements: 2, GroupLinks: 5, LifecycleEvents: 6, UsageRecords: 7,
+		Settlements: 2, SettlementAccountCosts: 8, SettlementAccountLines: 9,
+		MixedSettlements: 1, EmptySettlements: 1, PurchaseSources: 2,
+		GroupLinks: 5, LifecycleEvents: 6, UsageRecords: 7,
 	})
 	if !summary.HighRisk || summary.Action != PoolApprovalDeleteAccount {
 		t.Fatalf("delete must be high risk: %#v", summary)
 	}
-	if len(summary.Impacts) != 8 || summary.Impacts[0].Key != "accounts" || summary.Impacts[0].Count != 2 || summary.Impacts[7].Count != 7 {
+	if len(summary.Impacts) != 13 || summary.Impacts[0].Key != "accounts" || summary.Impacts[0].Count != 2 ||
+		summary.Impacts[5].Key != "settlement_account_costs" || summary.Impacts[5].Count != 8 ||
+		summary.Impacts[8].Key != "empty_settlements" || summary.Impacts[8].Count != 1 ||
+		summary.Impacts[12].Key != "usage_records" || summary.Impacts[12].Count != 7 {
 		t.Fatalf("unexpected delete impact: %#v", summary.Impacts)
 	}
 }

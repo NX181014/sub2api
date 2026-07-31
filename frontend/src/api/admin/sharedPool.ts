@@ -378,6 +378,20 @@ export interface RecordSharedPoolLifecycleRequest {
   transferred_cost?: number
 }
 
+export interface SharedPoolLifecycleEvent {
+  id: number
+  account_id: number
+  account_name: string
+  event_type: PoolLifecycleEventType
+  occurred_at: string
+  reason?: string | null
+  replacement_account_id?: number | null
+  transferred_cost_minor: number
+  source: string
+  created_by_user_id?: number | null
+  created_at: string
+}
+
 export interface SharedPoolSettlementLine {
   user_id: number
   user_name: string
@@ -393,6 +407,31 @@ export interface SharedPoolSettlementLine {
   confirmed_at?: string
 }
 
+export interface SharedPoolSettlementAccountCost {
+  id: number
+  settlement_id: number
+  account_id: number
+  cost_entry_id: number
+  kind: 'period' | 'carry'
+  payer_user_id: number
+  amount: number
+}
+
+export interface SharedPoolSettlementAccountLine {
+  id: number
+  settlement_id: number
+  account_id: number
+  user_id: number
+  user_name: string
+  account_usage_weight: number
+  usage_share: number
+  allocated_cost: number
+  contribution_credit: number
+  adjustment: number
+  net_amount: number
+  trace_quality: 'exact' | 'derived' | 'unavailable'
+}
+
 export interface SharedPoolSettlementPreview {
   id?: number
   status: PoolSettlementStatus
@@ -406,6 +445,8 @@ export interface SharedPoolSettlementPreview {
   unpriced_usage_count: number
   pricing_coverage: number
   lines: SharedPoolSettlementLine[]
+  account_costs: SharedPoolSettlementAccountCost[]
+  account_lines: SharedPoolSettlementAccountLine[]
 }
 
 export interface SharedPoolSourceStat {
@@ -555,6 +596,32 @@ interface RawSettlementLine {
   confirmed_at?: string
 }
 
+interface RawSettlementAccountCost {
+  id: number
+  settlement_id: number
+  account_id: number
+  cost_entry_id: number
+  kind: 'period' | 'carry'
+  payer_user_id: number
+  amount_minor: number
+}
+
+interface RawSettlementAccountLine {
+  id: number
+  settlement_id: number
+  account_id: number
+  user_id: number
+  user_email: string
+  username: string
+  account_usage_weight: string
+  usage_share: string
+  allocated_cost_minor: number
+  contribution_credit_minor: number
+  adjustment_minor: number
+  net_amount_minor: number
+  trace_quality: 'exact' | 'derived' | 'unavailable'
+}
+
 interface RawSettlement {
   id: number
   period_type: PoolPeriodType
@@ -568,6 +635,8 @@ interface RawSettlement {
   unpriced_usage_count: number
   fx_rate: string
   lines: RawSettlementLine[]
+  account_costs?: RawSettlementAccountCost[]
+  account_lines?: RawSettlementAccountLine[]
 }
 
 interface RawFXRate {
@@ -780,6 +849,13 @@ export async function recordLifecycleEvent(payload: RecordSharedPoolLifecycleReq
   })
 }
 
+export async function listLifecycle(accountId: number): Promise<SharedPoolLifecycleEvent[]> {
+  const { data } = await apiClient.get<SharedPoolLifecycleEvent[]>('/admin/pool/lifecycle', {
+    params: { account_id: accountId }
+  })
+  return data
+}
+
 export async function getLatestFXRate(): Promise<number> {
   const { data } = await apiClient.get<RawFXRate[]>('/admin/pool/fx-rates')
   return Number(data[0]?.rate || 1)
@@ -823,6 +899,29 @@ const mapSettlement = (raw: RawSettlement): SharedPoolSettlementPreview => {
       confirmation_status: line.confirmation_status === 'confirmed' ? 'confirmed' : 'pending',
       confirmed_by_user_id: line.confirmed_by_user_id,
       confirmed_at: line.confirmed_at
+    })),
+    account_costs: (raw.account_costs || []).map((cost) => ({
+      id: cost.id,
+      settlement_id: cost.settlement_id,
+      account_id: cost.account_id,
+      cost_entry_id: cost.cost_entry_id,
+      kind: cost.kind,
+      payer_user_id: cost.payer_user_id,
+      amount: minorToAmount(cost.amount_minor)
+    })),
+    account_lines: (raw.account_lines || []).map((line) => ({
+      id: line.id,
+      settlement_id: line.settlement_id,
+      account_id: line.account_id,
+      user_id: line.user_id,
+      user_name: line.username || line.user_email,
+      account_usage_weight: Number(line.account_usage_weight || 0) * fxRate,
+      usage_share: ratioToPercent(line.usage_share),
+      allocated_cost: minorToAmount(line.allocated_cost_minor),
+      contribution_credit: minorToAmount(line.contribution_credit_minor),
+      adjustment: minorToAmount(line.adjustment_minor),
+      net_amount: minorToAmount(line.net_amount_minor),
+      trace_quality: line.trace_quality
     }))
   }
 }
@@ -837,6 +936,16 @@ export async function previewSettlement(params: PoolPeriodParams): Promise<Share
     payer_user_id: params.payer_user_id,
     purchase_source_id: params.purchase_source_id
   })
+  return mapSettlement(data)
+}
+
+export async function listSettlements(params: { page?: number; page_size?: number; account_id?: number }): Promise<SharedPoolPaginated<SharedPoolSettlementPreview>> {
+  const { data } = await apiClient.get<SharedPoolPaginated<RawSettlement>>('/admin/pool/settlements', { params })
+  return { ...data, items: (data.items || []).map(mapSettlement) }
+}
+
+export async function getSettlement(id: number): Promise<SharedPoolSettlementPreview> {
+  const { data } = await apiClient.get<RawSettlement>(`/admin/pool/settlements/${id}`)
   return mapSettlement(data)
 }
 
@@ -999,9 +1108,12 @@ export default {
   createCost,
   createBatchCosts,
   recordLifecycleEvent,
+  listLifecycle,
   getLatestFXRate,
   saveFXRate,
   previewSettlement,
+  listSettlements,
+  getSettlement,
   lockSettlement,
   confirmSettlement,
   markSettlementPaid,

@@ -24,14 +24,17 @@ func TestDeleteAccountWithLifecycleHardDeletesFamily(t *testing.T) {
 	mock.ExpectQuery(`SELECT id\s+FROM accounts`).WithArgs(int64(7)).WillReturnRows(
 		sqlmock.NewRows([]string{"id"}).AddRow(int64(8)).AddRow(int64(7)),
 	)
+	mock.ExpectQuery(`SELECT s.id\s+FROM pool_settlements`).
+		WillReturnRows(sqlmock.NewRows([]string{"id"}))
 	mock.ExpectQuery(`SELECT MIN\(created_at\),MAX\(created_at\) FROM usage_logs`).
 		WillReturnRows(sqlmock.NewRows([]string{"min", "max"}).AddRow(nil, nil))
 	for _, query := range []string{
-		`DELETE FROM pool_settlements`,
 		`DELETE FROM batch_image_jobs`,
 		`DELETE FROM ops_system_logs`,
 		`DELETE FROM ops_error_logs`,
 		`WITH RECURSIVE doomed`,
+		`UPDATE account_cost_entries SET related_account_id=NULL`,
+		`DELETE FROM purchase_sources`,
 		`DELETE FROM account_lifecycle_events`,
 		`DELETE FROM pool_approval_requests`,
 		`UPDATE channel_account_stats_pricing_rules`,
@@ -58,9 +61,9 @@ func TestDeleteAccountWithLifecycleRollsBackWhenCleanupFails(t *testing.T) {
 	mock.ExpectQuery(`SELECT id\s+FROM accounts`).WithArgs(int64(7)).WillReturnRows(
 		sqlmock.NewRows([]string{"id"}).AddRow(int64(7)),
 	)
-	mock.ExpectQuery(`SELECT MIN\(created_at\),MAX\(created_at\) FROM usage_logs`).
-		WillReturnRows(sqlmock.NewRows([]string{"min", "max"}).AddRow(nil, nil))
-	mock.ExpectExec(`DELETE FROM pool_settlements`).WillReturnError(context.Canceled)
+	mock.ExpectQuery(`SELECT s.id\s+FROM pool_settlements`).
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(int64(51)))
+	mock.ExpectExec(`DELETE FROM pool_settlement_account_costs`).WillReturnError(context.Canceled)
 	mock.ExpectRollback()
 
 	_, err := repo.DeleteAccountWithLifecycle(context.Background(), 7, service.AccountDeleteOptions{})
@@ -76,6 +79,53 @@ func TestDeleteAccountWithLifecycleReturnsNotFound(t *testing.T) {
 
 	_, err := repo.DeleteAccountWithLifecycle(context.Background(), 99, service.AccountDeleteOptions{})
 	require.ErrorIs(t, err, service.ErrAccountNotFound)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestHardDeleteAccountSettlementsKeepsMixedSettlement(t *testing.T) {
+	repo, mock := newAccountLifecycleDeleteTestRepo(t)
+	mock.ExpectQuery(`SELECT s.id\s+FROM pool_settlements`).
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(int64(51)))
+	mock.ExpectExec(`DELETE FROM pool_settlement_account_costs`).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(`DELETE FROM pool_settlement_account_lines`).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery(`SELECT account_id,cost_entry_id,kind,payer_user_id,amount_minor`).
+		WithArgs(int64(51)).
+		WillReturnRows(sqlmock.NewRows([]string{"account_id", "cost_entry_id", "kind", "payer_user_id", "amount_minor"}).
+			AddRow(int64(2), int64(102), "period", int64(20), int64(100)))
+	mock.ExpectQuery(`SELECT account_id,user_id,account_usage_weight::text`).
+		WithArgs(int64(51)).
+		WillReturnRows(sqlmock.NewRows([]string{"account_id", "user_id", "account_usage_weight"}).
+			AddRow(int64(2), int64(20), "3"))
+	mock.ExpectQuery(`SELECT status,generated_by_user_id`).WithArgs(int64(51)).
+		WillReturnRows(sqlmock.NewRows([]string{"status", "generated_by_user_id", "locked_by_user_id", "locked_at", "paid_by_user_id", "paid_at"}).
+			AddRow("draft", int64(20), nil, nil, nil, nil))
+	mock.ExpectQuery(`WITH coverage AS`).WithArgs(int64(51), sqlmock.AnyArg()).
+		WillReturnRows(sqlmock.NewRows([]string{"unpriced_count", "pricing_coverage"}).AddRow(int64(0), "1"))
+	mock.ExpectExec(`DELETE FROM pool_settlement_lines`).WithArgs(int64(51)).WillReturnResult(sqlmock.NewResult(0, 2))
+	mock.ExpectExec(`DELETE FROM pool_settlement_account_lines`).WithArgs(int64(51)).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(`INSERT INTO pool_settlement_lines`).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(`INSERT INTO pool_settlement_account_lines`).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(`UPDATE pool_settlements`).WillReturnResult(sqlmock.NewResult(0, 1))
+
+	err := hardDeleteAccountSettlements(context.Background(), repo.sql, []int64{1}, []string{"1"})
+	require.NoError(t, err)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestHardDeleteAccountSettlementsDeletesOnlyEmptySettlement(t *testing.T) {
+	repo, mock := newAccountLifecycleDeleteTestRepo(t)
+	mock.ExpectQuery(`SELECT s.id\s+FROM pool_settlements`).
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(int64(51)))
+	mock.ExpectExec(`DELETE FROM pool_settlement_account_costs`).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(`DELETE FROM pool_settlement_account_lines`).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery(`SELECT account_id,cost_entry_id,kind,payer_user_id,amount_minor`).
+		WillReturnRows(sqlmock.NewRows([]string{"account_id", "cost_entry_id", "kind", "payer_user_id", "amount_minor"}))
+	mock.ExpectQuery(`SELECT account_id,user_id,account_usage_weight::text`).
+		WillReturnRows(sqlmock.NewRows([]string{"account_id", "user_id", "account_usage_weight"}))
+	mock.ExpectExec(`DELETE FROM pool_settlements WHERE id=\$1`).WithArgs(int64(51)).WillReturnResult(sqlmock.NewResult(0, 1))
+
+	err := hardDeleteAccountSettlements(context.Background(), repo.sql, []int64{1}, []string{"1"})
+	require.NoError(t, err)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 

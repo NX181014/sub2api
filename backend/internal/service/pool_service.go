@@ -274,10 +274,11 @@ type SettlementFilterSnapshot struct {
 }
 
 type PoolUsageWeight struct {
-	UserID   int64
-	Email    string
-	Username string
-	Weight   decimal.Decimal
+	AccountID int64
+	UserID    int64
+	Email     string
+	Username  string
+	Weight    decimal.Decimal
 }
 
 type PoolUsageCoverage struct {
@@ -305,6 +306,32 @@ type SettlementCostSnapshot struct {
 	AmountMinor int64  `json:"amount_minor"`
 }
 
+type PoolSettlementAccountCost struct {
+	ID           int64  `json:"id"`
+	SettlementID int64  `json:"settlement_id"`
+	AccountID    int64  `json:"account_id"`
+	CostEntryID  int64  `json:"cost_entry_id"`
+	Kind         string `json:"kind"`
+	PayerUserID  int64  `json:"payer_user_id"`
+	AmountMinor  int64  `json:"amount_minor"`
+}
+
+type PoolSettlementAccountLine struct {
+	ID                      int64  `json:"id"`
+	SettlementID            int64  `json:"settlement_id"`
+	AccountID               int64  `json:"account_id"`
+	UserID                  int64  `json:"user_id"`
+	UserEmail               string `json:"user_email"`
+	Username                string `json:"username"`
+	AccountUsageWeight      string `json:"account_usage_weight"`
+	UsageShare              string `json:"usage_share"`
+	AllocatedCostMinor      int64  `json:"allocated_cost_minor"`
+	ContributionCreditMinor int64  `json:"contribution_credit_minor"`
+	AdjustmentMinor         int64  `json:"adjustment_minor"`
+	NetAmountMinor          int64  `json:"net_amount_minor"`
+	TraceQuality            string `json:"trace_quality"`
+}
+
 type PoolSettlementLine struct {
 	ID                      int64      `json:"id"`
 	SettlementID            int64      `json:"settlement_id"`
@@ -324,31 +351,33 @@ type PoolSettlementLine struct {
 }
 
 type PoolSettlement struct {
-	ID               int64                    `json:"id"`
-	PeriodType       string                   `json:"period_type"`
-	PeriodStart      time.Time                `json:"period_start"`
-	PeriodEnd        time.Time                `json:"period_end"`
-	Timezone         string                   `json:"timezone"`
-	Status           string                   `json:"status"`
-	PeriodCostMinor  int64                    `json:"period_cost_minor"`
-	CarryInMinor     int64                    `json:"carry_in_minor"`
-	CarryOutMinor    int64                    `json:"carry_out_minor"`
-	TotalCostMinor   int64                    `json:"total_cost_minor"`
-	TotalUsageWeight string                   `json:"total_usage_weight"`
-	PricingCoverage  string                   `json:"pricing_coverage"`
-	UnpricedCount    int64                    `json:"unpriced_usage_count"`
-	FXRate           string                   `json:"fx_rate"`
-	FormulaVersion   string                   `json:"formula_version"`
-	CostSnapshot     []SettlementCostSnapshot `json:"cost_snapshot"`
-	FilterSnapshot   SettlementFilterSnapshot `json:"filter_snapshot"`
-	GeneratedBy      int64                    `json:"generated_by_user_id"`
-	LockedBy         *int64                   `json:"locked_by_user_id"`
-	LockedAt         *time.Time               `json:"locked_at"`
-	PaidBy           *int64                   `json:"paid_by_user_id"`
-	PaidAt           *time.Time               `json:"paid_at"`
-	CreatedAt        time.Time                `json:"created_at"`
-	UpdatedAt        time.Time                `json:"updated_at"`
-	Lines            []PoolSettlementLine     `json:"lines"`
+	ID               int64                       `json:"id"`
+	PeriodType       string                      `json:"period_type"`
+	PeriodStart      time.Time                   `json:"period_start"`
+	PeriodEnd        time.Time                   `json:"period_end"`
+	Timezone         string                      `json:"timezone"`
+	Status           string                      `json:"status"`
+	PeriodCostMinor  int64                       `json:"period_cost_minor"`
+	CarryInMinor     int64                       `json:"carry_in_minor"`
+	CarryOutMinor    int64                       `json:"carry_out_minor"`
+	TotalCostMinor   int64                       `json:"total_cost_minor"`
+	TotalUsageWeight string                      `json:"total_usage_weight"`
+	PricingCoverage  string                      `json:"pricing_coverage"`
+	UnpricedCount    int64                       `json:"unpriced_usage_count"`
+	FXRate           string                      `json:"fx_rate"`
+	FormulaVersion   string                      `json:"formula_version"`
+	CostSnapshot     []SettlementCostSnapshot    `json:"cost_snapshot"`
+	FilterSnapshot   SettlementFilterSnapshot    `json:"filter_snapshot"`
+	GeneratedBy      int64                       `json:"generated_by_user_id"`
+	LockedBy         *int64                      `json:"locked_by_user_id"`
+	LockedAt         *time.Time                  `json:"locked_at"`
+	PaidBy           *int64                      `json:"paid_by_user_id"`
+	PaidAt           *time.Time                  `json:"paid_at"`
+	CreatedAt        time.Time                   `json:"created_at"`
+	UpdatedAt        time.Time                   `json:"updated_at"`
+	Lines            []PoolSettlementLine        `json:"lines"`
+	AccountCosts     []PoolSettlementAccountCost `json:"account_costs"`
+	AccountLines     []PoolSettlementAccountLine `json:"account_lines"`
 }
 
 type AccountRecovery struct {
@@ -446,7 +475,7 @@ type PoolRepository interface {
 	LockSettlement(ctx context.Context, id, actorID int64) (*PoolSettlement, error)
 	ConfirmSettlementLine(ctx context.Context, id, userID, actorID int64) error
 	MarkSettlementPaid(ctx context.Context, id, actorID int64) error
-	ListSettlements(ctx context.Context, limit, offset int) ([]PoolSettlement, int64, error)
+	ListSettlements(ctx context.Context, accountID *int64, limit, offset int) ([]PoolSettlement, int64, error)
 	GetSettlement(ctx context.Context, id int64) (*PoolSettlement, error)
 	GetRecovery(ctx context.Context, start, end time.Time) ([]AccountRecovery, error)
 }
@@ -959,7 +988,6 @@ func (s *PoolService) RecalculateSettlement(ctx context.Context, period Settleme
 	}
 
 	snapshot := make([]SettlementCostSnapshot, 0, len(costs)+len(carrySnapshot))
-	credits := make(map[int64]int64)
 	periodCost := int64(0)
 	for _, item := range costs {
 		amount := proratedCostMinor(item, period.Start, period.End, allocated[item.EntryID])
@@ -967,55 +995,21 @@ func (s *PoolService) RecalculateSettlement(ctx context.Context, period Settleme
 			continue
 		}
 		periodCost += amount
-		credits[item.PayerUserID] += amount
 		snapshot = append(snapshot, SettlementCostSnapshot{Kind: "period", EntryID: item.EntryID, AccountID: item.AccountID, PayerUserID: item.PayerUserID, AmountMinor: amount})
 	}
 	carryIn := int64(0)
 	for _, item := range carrySnapshot {
 		item.Kind = "carry"
 		carryIn += item.AmountMinor
-		credits[item.PayerUserID] += item.AmountMinor
 		snapshot = append(snapshot, item)
 	}
 	totalCost := periodCost + carryIn
-	weightMap := make(map[int64]decimal.Decimal, len(weights))
-	users := make(map[int64]PoolUsageWeight, len(weights)+len(credits))
-	for _, item := range weights {
-		weightMap[item.UserID] = item.Weight
-		users[item.UserID] = item
-	}
-	for userID := range credits {
-		if _, ok := users[userID]; !ok {
-			users[userID] = PoolUsageWeight{UserID: userID}
-		}
-	}
-	allocations, totalWeight := AllocateLargestRemainder(totalCost, weightMap)
-	carryOut := int64(0)
-	if totalWeight.IsZero() {
-		carryOut = totalCost
-	}
-	lines := make([]PoolSettlementLine, 0, len(users))
-	userIDs := make([]int64, 0, len(users))
-	for id := range users {
-		userIDs = append(userIDs, id)
-	}
-	sort.Slice(userIDs, func(i, j int) bool { return userIDs[i] < userIDs[j] })
-	for _, userID := range userIDs {
-		user := users[userID]
-		share := decimal.Zero
-		if !totalWeight.IsZero() {
-			share = user.Weight.Div(totalWeight)
-		}
-		allocatedCost := allocations[userID]
-		credit := credits[userID]
-		if carryOut != 0 {
-			allocatedCost, credit = 0, 0
-		}
-		lines = append(lines, PoolSettlementLine{
-			UserID: userID, UserEmail: user.Email, Username: user.Username,
-			UsageWeight: user.Weight.String(), UsageShare: share.String(),
-			AllocatedCostMinor: allocatedCost, ContributionCreditMinor: credit,
-			NetAmountMinor: allocatedCost - credit, PaymentStatus: "unpaid",
+	lines, accountLines, totalWeight, carryOut := BuildSettlementAllocation(snapshot, weights)
+	accountCosts := make([]PoolSettlementAccountCost, 0, len(snapshot))
+	for _, item := range snapshot {
+		accountCosts = append(accountCosts, PoolSettlementAccountCost{
+			AccountID: item.AccountID, CostEntryID: item.EntryID, Kind: item.Kind,
+			PayerUserID: item.PayerUserID, AmountMinor: item.AmountMinor,
 		})
 	}
 	fxRate, err := s.repo.LatestFXRate(ctx, period.End)
@@ -1032,7 +1026,8 @@ func (s *PoolService) RecalculateSettlement(ctx context.Context, period Settleme
 		Status: "draft", PeriodCostMinor: periodCost, CarryInMinor: carryIn, CarryOutMinor: carryOut,
 		TotalCostMinor: totalCost, TotalUsageWeight: totalWeight.String(), PricingCoverage: pricingCoverage.String(),
 		UnpricedCount: coverage.UnpricedCount, FXRate: fxRate.String(),
-		FormulaVersion: "v1", CostSnapshot: snapshot, FilterSnapshot: period.Filter, GeneratedBy: actorID, Lines: lines,
+		FormulaVersion: "v1", CostSnapshot: snapshot, FilterSnapshot: period.Filter, GeneratedBy: actorID,
+		Lines: lines, AccountCosts: accountCosts, AccountLines: accountLines,
 	}
 	return s.repo.SaveDraftSettlement(ctx, settlement)
 }
@@ -1140,6 +1135,102 @@ func AllocateLargestRemainder(totalMinor int64, weights map[int64]decimal.Decima
 	return result, totalWeight
 }
 
+// BuildSettlementAllocation keeps the v1 user totals and adds an exact account trace beneath them.
+func BuildSettlementAllocation(costs []SettlementCostSnapshot, weights []PoolUsageWeight) ([]PoolSettlementLine, []PoolSettlementAccountLine, decimal.Decimal, int64) {
+	userWeights := make(map[int64]decimal.Decimal)
+	accountWeights := make(map[int64]map[int64]decimal.Decimal)
+	users := make(map[int64]PoolUsageWeight)
+	credits := make(map[int64]int64)
+	accountCredits := make(map[int64]map[int64]int64)
+	totalCost := int64(0)
+	for _, item := range weights {
+		userWeights[item.UserID] = userWeights[item.UserID].Add(item.Weight)
+		if accountWeights[item.UserID] == nil {
+			accountWeights[item.UserID] = make(map[int64]decimal.Decimal)
+		}
+		accountWeights[item.UserID][item.AccountID] = accountWeights[item.UserID][item.AccountID].Add(item.Weight)
+		users[item.UserID] = item
+	}
+	for _, item := range costs {
+		totalCost += item.AmountMinor
+		credits[item.PayerUserID] += item.AmountMinor
+		if accountCredits[item.PayerUserID] == nil {
+			accountCredits[item.PayerUserID] = make(map[int64]int64)
+		}
+		accountCredits[item.PayerUserID][item.AccountID] += item.AmountMinor
+		if _, ok := users[item.PayerUserID]; !ok {
+			users[item.PayerUserID] = PoolUsageWeight{UserID: item.PayerUserID}
+		}
+	}
+	allocations, totalWeight := AllocateLargestRemainder(totalCost, userWeights)
+	carryOut := int64(0)
+	if totalWeight.IsZero() {
+		carryOut = totalCost
+	}
+	userIDs := make([]int64, 0, len(users))
+	for userID := range users {
+		userIDs = append(userIDs, userID)
+	}
+	sort.Slice(userIDs, func(i, j int) bool { return userIDs[i] < userIDs[j] })
+	lines := make([]PoolSettlementLine, 0, len(userIDs))
+	accountLines := make([]PoolSettlementAccountLine, 0, len(weights)+len(costs))
+	for _, userID := range userIDs {
+		user := users[userID]
+		weight := userWeights[userID]
+		share := decimal.Zero
+		if !totalWeight.IsZero() {
+			share = weight.Div(totalWeight)
+		}
+		allocatedCost, credit := allocations[userID], credits[userID]
+		if carryOut != 0 {
+			allocatedCost, credit = 0, 0
+		}
+		lines = append(lines, PoolSettlementLine{
+			UserID: userID, UserEmail: user.Email, Username: user.Username,
+			UsageWeight: weight.String(), UsageShare: share.String(),
+			AllocatedCostMinor: allocatedCost, ContributionCreditMinor: credit,
+			NetAmountMinor: allocatedCost - credit, PaymentStatus: "unpaid",
+		})
+		accountAllocations, _ := AllocateLargestRemainder(allocatedCost, accountWeights[userID])
+		accountIDs := make(map[int64]struct{}, len(accountWeights[userID])+len(accountCredits[userID]))
+		for accountID := range accountWeights[userID] {
+			accountIDs[accountID] = struct{}{}
+		}
+		for accountID := range accountCredits[userID] {
+			accountIDs[accountID] = struct{}{}
+		}
+		orderedAccountIDs := make([]int64, 0, len(accountIDs))
+		for accountID := range accountIDs {
+			orderedAccountIDs = append(orderedAccountIDs, accountID)
+		}
+		sort.Slice(orderedAccountIDs, func(i, j int) bool { return orderedAccountIDs[i] < orderedAccountIDs[j] })
+		for _, accountID := range orderedAccountIDs {
+			accountWeight := accountWeights[userID][accountID]
+			accountShare := decimal.Zero
+			if !totalWeight.IsZero() {
+				accountShare = accountWeight.Div(totalWeight)
+			}
+			accountAllocated, accountCredit := accountAllocations[accountID], accountCredits[userID][accountID]
+			if carryOut != 0 {
+				accountAllocated, accountCredit = 0, 0
+			}
+			accountLines = append(accountLines, PoolSettlementAccountLine{
+				AccountID: accountID, UserID: userID, UserEmail: user.Email, Username: user.Username,
+				AccountUsageWeight: accountWeight.String(), UsageShare: accountShare.String(),
+				AllocatedCostMinor: accountAllocated, ContributionCreditMinor: accountCredit,
+				NetAmountMinor: accountAllocated - accountCredit, TraceQuality: "exact",
+			})
+		}
+	}
+	sort.Slice(accountLines, func(i, j int) bool {
+		if accountLines[i].AccountID == accountLines[j].AccountID {
+			return accountLines[i].UserID < accountLines[j].UserID
+		}
+		return accountLines[i].AccountID < accountLines[j].AccountID
+	})
+	return lines, accountLines, totalWeight, carryOut
+}
+
 func (s *PoolService) LockSettlement(ctx context.Context, id, actorID int64) (*PoolSettlement, error) {
 	item, err := s.repo.GetSettlement(ctx, id)
 	if err != nil {
@@ -1163,14 +1254,14 @@ func (s *PoolService) LockSettlement(ctx context.Context, id, actorID int64) (*P
 	return s.repo.LockSettlement(ctx, fresh.ID, actorID)
 }
 
-func (s *PoolService) ListSettlements(ctx context.Context, page, pageSize int) ([]PoolSettlement, int64, error) {
+func (s *PoolService) ListSettlements(ctx context.Context, accountID *int64, page, pageSize int) ([]PoolSettlement, int64, error) {
 	if page < 1 {
 		page = 1
 	}
 	if pageSize < 1 || pageSize > 100 {
 		pageSize = 20
 	}
-	return s.repo.ListSettlements(ctx, pageSize, (page-1)*pageSize)
+	return s.repo.ListSettlements(ctx, accountID, pageSize, (page-1)*pageSize)
 }
 
 func (s *PoolService) GetSettlement(ctx context.Context, id int64) (*PoolSettlement, error) {
@@ -1181,7 +1272,7 @@ func (s *PoolService) ListOwnPendingSettlements(ctx context.Context, userID int6
 	if userID <= 0 {
 		return nil, infraerrors.BadRequest("SETTLEMENT_CONFIRMATION_ACTOR_REQUIRED", "a signed-in member is required")
 	}
-	items, _, err := s.repo.ListSettlements(ctx, 1000, 0)
+	items, _, err := s.repo.ListSettlements(ctx, nil, 1000, 0)
 	if err != nil {
 		return nil, err
 	}

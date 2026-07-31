@@ -61,7 +61,7 @@
             <div v-if="uploaderAccountStates[uploaderGroupKey(group)]?.loading" class="flex min-h-24 items-center justify-center"><LoadingSpinner /></div>
             <article v-for="row in uploaderAccountStates[uploaderGroupKey(group)]?.items || []" :key="row.account_id" class="p-3 sm:p-4">
               <div class="flex min-w-0 items-start justify-between gap-3">
-                <div class="min-w-0"><p class="truncate text-sm font-semibold" :title="row.account_name">{{ row.account_name }}</p><p class="truncate text-xs text-gray-500 dark:text-gray-400" :title="row.provider_identity || ''">{{ row.provider_identity || '-' }}</p></div>
+                <div class="min-w-0"><button type="button" class="block min-h-11 max-w-full truncate text-left text-sm font-semibold text-primary-600 hover:underline dark:text-primary-400" :title="row.account_name" @click="emit('trace-account', row.account_id)">{{ row.account_name }}</button><p class="truncate text-xs text-gray-500 dark:text-gray-400" :title="row.provider_identity || ''">{{ row.provider_identity || '-' }}</p></div>
                 <StatusBadge :status="statusPresentation(row.latest_lifecycle_status).badge" :label="t(`admin.sharedPool.status.${statusPresentation(row.latest_lifecycle_status).key}`)" />
               </div>
               <dl class="mt-3 grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
@@ -109,24 +109,24 @@
       </div>
       <div class="hidden md:block">
         <DataTable :columns="entryColumns" :data="entries" row-key="id" :loading="loading">
-          <template #cell-account_name="{ row }"><span class="font-medium text-gray-900 dark:text-white">{{ row.account_name }}</span></template>
+          <template #cell-account_name="{ row }"><button type="button" class="min-h-11 font-medium text-primary-600 hover:underline dark:text-primary-400" @click="emit('trace-account', row.account_id)">{{ row.account_name }}</button></template>
           <template #cell-entry_type="{ row }">{{ t(`admin.sharedPool.entryTypes.${row.entry_type}`) }}</template>
           <template #cell-original_amount="{ row }"><span class="tabular-nums">{{ formatMoney(Number(row.original_amount), row.currency) }}</span></template>
           <template #cell-cny_amount_minor="{ row }"><span class="block tabular-nums">{{ formatMinor(row.cny_amount_minor) }}</span><span class="block whitespace-nowrap text-xs text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.page.fxRateAt', { currency: row.currency, rate: row.fx_rate, date: dateOnly(row.paid_at) }) }}</span></template>
           <template #cell-service_start="{ row }"><span class="whitespace-nowrap">{{ dateOnly(row.service_start) }} - {{ dateOnly(row.service_end) }}</span></template>
           <template #cell-created_at="{ row }">{{ dateOnly(row.created_at || row.paid_at) }}</template>
 		  <template #cell-actions="{ row }">
-			<button v-if="isEditableEntry(row)" type="button" class="btn btn-secondary btn-sm min-h-9" @click="emit('edit-entry', row)">{{ t('common.edit') }}</button>
+			<button v-if="isEditableEntry(row)" type="button" class="btn btn-secondary btn-sm min-h-11" @click="emit('edit-entry', row)">{{ t('common.edit') }}</button>
 		  </template>
         </DataTable>
       </div>
       <div class="space-y-3 p-3 md:hidden">
         <article v-for="row in entries" :key="row.id" class="rounded-md border border-gray-200 p-3 text-sm dark:border-dark-700">
-          <div class="flex min-w-0 items-start justify-between gap-3"><span class="min-w-0 truncate font-semibold" :title="row.account_name">{{ row.account_name }}</span><span class="shrink-0 font-medium tabular-nums">{{ formatMoney(Number(row.original_amount), row.currency) }}</span></div>
+          <div class="flex min-w-0 items-start justify-between gap-3"><button type="button" class="min-h-11 min-w-0 truncate text-left font-semibold text-primary-600 dark:text-primary-400" :title="row.account_name" @click="emit('trace-account', row.account_id)">{{ row.account_name }}</button><span class="shrink-0 font-medium tabular-nums">{{ formatMoney(Number(row.original_amount), row.currency) }}</span></div>
           <div class="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-gray-500 dark:text-gray-400">
             <span>{{ t(`admin.sharedPool.entryTypes.${row.entry_type}`) }}</span><span>{{ row.purchase_source || '-' }}</span><span>{{ row.payer_email || '-' }}</span><span>{{ dateOnly(row.paid_at) }}</span>
           </div>
-		  <button v-if="isEditableEntry(row)" type="button" class="mt-3 min-h-10 w-full border-t border-gray-100 pt-2 text-sm font-medium text-primary-600 dark:border-dark-700 dark:text-primary-400" @click="emit('edit-entry', row)">{{ t('common.edit') }}</button>
+		  <button v-if="isEditableEntry(row)" type="button" class="mt-3 min-h-11 w-full border-t border-gray-100 pt-2 text-sm font-medium text-primary-600 dark:border-dark-700 dark:text-primary-400" @click="emit('edit-entry', row)">{{ t('common.edit') }}</button>
         </article>
         <EmptyState v-if="!loading && !entries.length" :title="t('admin.sharedPool.ledger.emptyEntries')" />
       </div>
@@ -235,6 +235,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRoute, useRouter } from 'vue-router'
 import { adminAPI } from '@/api/admin'
 import type { Account } from '@/types'
 import type {
@@ -279,11 +280,23 @@ const props = withDefaults(defineProps<{
 const emit = defineEmits<{
   (event: 'edit-entry', entry: SharedPoolLedgerEntry): void
   (event: 'open-account', accountId: number): void
+  (event: 'trace-account', accountId: number): void
 }>()
 
 const { t, te, locale } = useI18n()
 const appStore = useAppStore()
-const activeView = ref<LedgerView>('summary')
+const route = useRoute()
+const router = useRouter()
+const queryText = (key: string) => {
+  const value = route.query[key]
+  return String(Array.isArray(value) ? value[0] || '' : value || '')
+}
+const queryID = (key: string) => {
+  const value = Number(queryText(key))
+  return Number.isSafeInteger(value) && value > 0 ? value : 0
+}
+const queryPage = (key: string, fallback: number) => queryID(key) || fallback
+const activeView = ref<LedgerView>(queryText('ledger_view') === 'entries' ? 'entries' : 'summary')
 const loading = ref(false)
 const submitting = ref(false)
 const uploaderSummaries = ref<SharedPoolCostUploaderSummary[]>([])
@@ -301,10 +314,26 @@ const batchStep = ref(1)
 const batchErrors = ref<string[]>([])
 const overrides = reactive<Record<number, BatchCostOverride>>({})
 
-const summaryPagination = reactive({ page: 1, page_size: 20, total: 0 })
-const entryPagination = reactive({ page: 1, page_size: 20, total: 0 })
-const summaryFilters = reactive({ search: '', uploader_user_id: 0, payer_user_id: 0, purchase_source_id: 0, lifecycle_status: '', has_cost: '' })
-const entryFilters = reactive<{ search: string; account_id: number; uploader_user_id: number; payer_user_id: number; purchase_source_id: number; entry_type: PoolCostEntryType | ''; start_date: string; end_date: string }>({ search: '', account_id: 0, uploader_user_id: 0, payer_user_id: 0, purchase_source_id: 0, entry_type: '', start_date: '', end_date: '' })
+const summaryPagination = reactive({ page: queryPage('ledger_summary_page', 1), page_size: queryPage('ledger_summary_page_size', 20), total: 0 })
+const entryPagination = reactive({ page: queryPage('ledger_entry_page', 1), page_size: queryPage('ledger_entry_page_size', 20), total: 0 })
+const summaryFilters = reactive({
+  search: queryText('ledger_summary_search'),
+  uploader_user_id: queryID('uploader_user_id') || props.initialUploaderUserId,
+  payer_user_id: queryID('payer_user_id'),
+  purchase_source_id: queryID('purchase_source_id') || props.initialPurchaseSourceId,
+  lifecycle_status: queryText('ledger_lifecycle_status'),
+  has_cost: queryText('ledger_has_cost')
+})
+const entryFilters = reactive<{ search: string; account_id: number; uploader_user_id: number; payer_user_id: number; purchase_source_id: number; entry_type: PoolCostEntryType | ''; start_date: string; end_date: string }>({
+  search: queryText('ledger_entry_search'),
+  account_id: queryID('account_id') || props.initialAccountId,
+  uploader_user_id: queryID('uploader_user_id') || props.initialUploaderUserId,
+  payer_user_id: queryID('payer_user_id'),
+  purchase_source_id: queryID('purchase_source_id') || props.initialPurchaseSourceId,
+  entry_type: queryText('ledger_entry_type') as PoolCostEntryType | '',
+  start_date: queryText('ledger_entry_start'),
+  end_date: queryText('ledger_entry_end')
+})
 
 const today = () => formatDateLocalInput(new Date())
 const nextMonth = () => {
@@ -508,14 +537,46 @@ async function loadEntries() {
 }
 
 const loadActiveView = () => activeView.value === 'summary' ? loadSummary() : loadEntries()
-function switchView(view: LedgerView) { activeView.value = view; void loadActiveView() }
-function applySummaryFilters() { summaryPagination.page = 1; void loadSummary() }
-function applyEntryFilters() { entryPagination.page = 1; void loadEntries() }
-function changeSummaryPage(page: number) { summaryPagination.page = page; void loadSummary() }
-function changeSummaryPageSize(size: number) { summaryPagination.page_size = size; summaryPagination.page = 1; void loadSummary() }
-function changeEntryPage(page: number) { entryPagination.page = page; void loadEntries() }
-function changeEntryPageSize(size: number) { entryPagination.page_size = size; entryPagination.page = 1; void loadEntries() }
-function showAccountEntries(accountId: number) { entryFilters.account_id = accountId; entryPagination.page = 1; activeView.value = 'entries'; void loadEntries() }
+async function replaceLedgerQuery(values: Record<string, string | number | undefined>) {
+  const query = { ...route.query }
+  for (const [key, value] of Object.entries(values)) {
+    if (value !== undefined && value !== '') query[key] = String(value)
+    else delete query[key]
+  }
+  await router.replace({ query })
+}
+const syncSummaryQuery = () => replaceLedgerQuery({
+  ledger_view: 'summary',
+  ledger_summary_page: summaryPagination.page,
+  ledger_summary_page_size: summaryPagination.page_size,
+  ledger_summary_search: summaryFilters.search.trim() || undefined,
+  uploader_user_id: summaryFilters.uploader_user_id || undefined,
+  payer_user_id: summaryFilters.payer_user_id || undefined,
+  purchase_source_id: summaryFilters.purchase_source_id || undefined,
+  ledger_lifecycle_status: summaryFilters.lifecycle_status || undefined,
+  ledger_has_cost: summaryFilters.has_cost || undefined
+})
+const syncEntryQuery = () => replaceLedgerQuery({
+  ledger_view: 'entries',
+  ledger_entry_page: entryPagination.page,
+  ledger_entry_page_size: entryPagination.page_size,
+  ledger_entry_search: entryFilters.search.trim() || undefined,
+  account_id: entryFilters.account_id || undefined,
+  uploader_user_id: entryFilters.uploader_user_id || undefined,
+  payer_user_id: entryFilters.payer_user_id || undefined,
+  purchase_source_id: entryFilters.purchase_source_id || undefined,
+  ledger_entry_type: entryFilters.entry_type || undefined,
+  ledger_entry_start: entryFilters.start_date || undefined,
+  ledger_entry_end: entryFilters.end_date || undefined
+})
+async function switchView(view: LedgerView) { activeView.value = view; await (view === 'summary' ? syncSummaryQuery() : syncEntryQuery()); await loadActiveView() }
+async function applySummaryFilters() { summaryPagination.page = 1; await syncSummaryQuery(); await loadSummary() }
+async function applyEntryFilters() { entryPagination.page = 1; await syncEntryQuery(); await loadEntries() }
+async function changeSummaryPage(page: number) { summaryPagination.page = page; await syncSummaryQuery(); await loadSummary() }
+async function changeSummaryPageSize(size: number) { summaryPagination.page_size = size; summaryPagination.page = 1; await syncSummaryQuery(); await loadSummary() }
+async function changeEntryPage(page: number) { entryPagination.page = page; await syncEntryQuery(); await loadEntries() }
+async function changeEntryPageSize(size: number) { entryPagination.page_size = size; entryPagination.page = 1; await syncEntryQuery(); await loadEntries() }
+async function showAccountEntries(accountId: number) { entryFilters.account_id = accountId; entryPagination.page = 1; activeView.value = 'entries'; await syncEntryQuery(); await loadEntries() }
 
 async function loadBatchAccounts(search = accountSearch.value) {
   try {
@@ -627,10 +688,7 @@ async function submitBatch() {
 }
 
 onMounted(async () => {
-  entryFilters.account_id = props.initialAccountId
-  summaryFilters.purchase_source_id = props.initialPurchaseSourceId
-  summaryFilters.uploader_user_id = props.initialUploaderUserId
-  if (props.initialAccountId) activeView.value = 'entries'
+  if (props.initialAccountId && !queryText('ledger_view')) activeView.value = 'entries'
   try { await loadReferences() } catch (error: any) { appStore.showError(error?.message || t('admin.sharedPool.ledger.errors.options')) }
   await loadActiveView()
 })
