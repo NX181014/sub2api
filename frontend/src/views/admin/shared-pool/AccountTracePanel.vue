@@ -15,11 +15,11 @@
         aria-labelledby="account-trace-title"
         tabindex="-1"
       >
-        <header class="shrink-0 border-b border-gray-200 px-4 py-3 dark:border-dark-700 sm:px-5">
+        <header class="shrink-0 border-b border-gray-200 bg-gray-50/80 px-4 py-3 dark:border-dark-700 dark:bg-dark-900 sm:px-5">
           <div class="flex min-w-0 items-start justify-between gap-3">
             <div class="min-w-0">
               <p class="text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.actions.poolRecord') }}</p>
-              <h2 id="account-trace-title" class="mt-0.5 truncate text-base font-semibold text-gray-900 dark:text-white">
+              <h2 id="account-trace-title" class="mt-0.5 max-w-[220px] truncate text-base font-semibold text-gray-900 dark:text-white" :title="account?.name || `#${accountId}`">
                 {{ account?.name || `#${accountId}` }}
               </h2>
               <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">#{{ accountId }}</p>
@@ -35,28 +35,28 @@
             </button>
           </div>
 
-          <div v-if="account" class="mt-3 grid grid-cols-2 gap-x-4 gap-y-3 text-sm sm:grid-cols-3">
-            <div>
+          <div v-if="account" class="mt-3 grid grid-cols-2 gap-2 text-sm sm:grid-cols-3">
+            <div class="rounded-lg border border-gray-200 bg-white p-2.5 dark:border-dark-700 dark:bg-dark-800">
               <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.accounts.columns.platformType') }}</p>
               <PlatformTypeBadge class="mt-1" :platform="account.platform" :type="account.type" />
             </div>
-            <div>
+            <div class="rounded-lg border border-gray-200 bg-white p-2.5 dark:border-dark-700 dark:bg-dark-800">
               <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.columns.uploader') }}</p>
               <p class="mt-1 truncate font-medium" :title="uploaderName">{{ uploaderName }}</p>
             </div>
-            <div>
+            <div class="rounded-lg border border-gray-200 bg-white p-2.5 dark:border-dark-700 dark:bg-dark-800">
               <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.page.importBatch') }}</p>
               <p class="mt-1 truncate font-medium">{{ importBatch }}</p>
             </div>
-            <div>
+            <div class="rounded-lg border border-gray-200 bg-white p-2.5 dark:border-dark-700 dark:bg-dark-800">
               <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.columns.uploadedAt') }}</p>
               <p class="mt-1 whitespace-nowrap font-medium">{{ formatDate(account.created_at) }}</p>
             </div>
-            <div>
+            <div class="rounded-lg border border-gray-200 bg-white p-2.5 dark:border-dark-700 dark:bg-dark-800">
               <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.accounts.columns.status') }}</p>
               <AccountStatusIndicator class="mt-1" :account="account" />
             </div>
-            <div>
+            <div class="rounded-lg border border-gray-200 bg-white p-2.5 dark:border-dark-700 dark:bg-dark-800">
               <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.accounts.columns.schedulable') }}</p>
               <StatusBadge
                 class="mt-1"
@@ -64,13 +64,26 @@
                 :label="t(effectiveSchedulable ? 'admin.accounts.schedulableEnabled' : 'admin.accounts.schedulableDisabled')"
               />
             </div>
-            <div>
+            <div class="rounded-lg border border-gray-200 bg-white p-2.5 dark:border-dark-700 dark:bg-dark-800">
               <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.approval.impacts.lifecycle_events') }}</p>
               <StatusBadge class="mt-1" :status="lifecycleState.badge" :label="lifecycleState.label" />
             </div>
-            <p v-if="runtimeReason" class="col-span-2 break-words text-xs text-amber-700 dark:text-amber-300 sm:col-span-3">
+            <p v-if="runtimeReason" class="col-span-2 rounded-lg border border-amber-200 bg-amber-50 p-2.5 text-xs break-words text-amber-700 dark:border-amber-800/60 dark:bg-amber-900/20 dark:text-amber-300 sm:col-span-3">
               {{ runtimeReason }}
             </p>
+          </div>
+
+          <div v-if="account" class="mt-3 rounded-xl border border-primary-100 bg-white p-3 shadow-sm dark:border-primary-900/40 dark:bg-dark-800">
+            <div class="flex items-center justify-between gap-2">
+              <div>
+                <p class="text-sm font-semibold text-gray-900 dark:text-white">{{ t('admin.accounts.columns.usageWindows') }}</p>
+                <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.accounts.usageWindowsHint') }}</p>
+              </div>
+              <AccountCapacityCell class="shrink-0" :account="account" />
+            </div>
+            <div class="mt-3 rounded-lg bg-gray-50 px-3 py-2.5 dark:bg-dark-900/70">
+              <AccountUsageCell :account="account" />
+            </div>
           </div>
         </header>
 
@@ -227,6 +240,8 @@ import type {
   SharedPoolSettlementPreview
 } from '@/api/admin/sharedPool'
 import AccountStatusIndicator from '@/components/account/AccountStatusIndicator.vue'
+import AccountCapacityCell from '@/components/account/AccountCapacityCell.vue'
+import AccountUsageCell from '@/components/account/AccountUsageCell.vue'
 import { DataTable, EmptyState, LoadingSpinner, Pagination } from '@/components/common'
 import PlatformTypeBadge from '@/components/common/PlatformTypeBadge.vue'
 import StatusBadge from '@/components/common/StatusBadge.vue'

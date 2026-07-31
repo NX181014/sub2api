@@ -1,7 +1,7 @@
 <template>
-  <div class="account-filter-controls space-y-2">
+  <div class="account-filter-controls min-w-0 flex-1 space-y-3 rounded-xl border border-gray-200 bg-white p-3 shadow-sm dark:border-dark-700 dark:bg-dark-800/70 sm:p-3.5">
     <div class="flex flex-wrap items-start gap-3">
-      <div class="w-full sm:w-64">
+      <div class="min-w-0 w-full sm:w-[220px]">
         <SearchInput
           :model-value="searchQuery"
           :placeholder="t('admin.accounts.searchAccounts')"
@@ -36,8 +36,9 @@
     <div v-if="activeFilterCount || resultAccountCount || resultBatchCount" class="flex flex-wrap items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
       <span class="font-medium text-gray-700 dark:text-gray-200">{{ t('admin.accounts.resultSummary', { accounts: resultAccountCount, batches: resultBatchCount }) }}</span>
       <template v-for="chip in activeChips" :key="chip.key">
-        <button type="button" class="inline-flex items-center gap-1 rounded-full bg-primary-50 px-2 py-1 text-primary-700 hover:bg-primary-100 dark:bg-primary-900/30 dark:text-primary-300" @click="clearChip(chip.key)">
-          {{ chip.label }}: {{ chip.value }} <span aria-hidden="true">×</span>
+        <button type="button" class="inline-flex min-h-8 items-center gap-1 rounded-full bg-primary-50 px-2.5 py-1 text-primary-700 hover:bg-primary-100 dark:bg-primary-900/30 dark:text-primary-300" @click="clearChip(chip.key)">
+          <Icon name="x" size="xs" class="shrink-0" aria-hidden="true" />
+          {{ chip.label }}: {{ chip.value }}
         </button>
       </template>
     </div>
@@ -49,6 +50,7 @@ import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Select from '@/components/common/Select.vue'
 import SearchInput from '@/components/common/SearchInput.vue'
+import Icon from '@/components/icons/Icon.vue'
 import type { AdminGroup } from '@/types'
 
 const props = withDefaults(defineProps<{
@@ -141,4 +143,5 @@ const uploaderOpts = computed(() => [
 .account-filter-controls .btn {
   min-height: 2.75rem;
 }
+
 </style>

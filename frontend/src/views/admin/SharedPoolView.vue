@@ -1,13 +1,13 @@
 <template>
   <AppLayout>
-    <div class="min-w-0 space-y-5">
-      <div class="card min-w-0">
-        <div class="scrollbar-hide flex overflow-x-auto border-b border-gray-200 px-2 dark:border-dark-700 sm:px-4">
+    <div class="shared-pool-shell min-w-0 space-y-4">
+      <div class="min-w-0 overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm dark:border-dark-700 dark:bg-dark-800/70">
+        <div class="scrollbar-hide flex min-h-12 overflow-x-auto border-b border-gray-200 px-1 dark:border-dark-700 sm:px-3">
           <button
             v-for="tab in tabs"
             :key="tab.key"
             type="button"
-            class="-mb-px inline-flex min-h-11 shrink-0 items-center gap-1.5 border-b-2 px-3 text-sm font-medium transition-colors sm:px-4"
+            class="-mb-px inline-flex min-h-12 shrink-0 items-center gap-1.5 border-b-2 px-3 text-sm font-medium transition-colors sm:px-4"
             :class="activeTab === tab.key
               ? 'border-primary-500 text-primary-600 dark:text-primary-400'
               : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700 dark:text-gray-400 dark:hover:border-dark-500 dark:hover:text-gray-200'"
@@ -18,12 +18,12 @@
           </button>
         </div>
 
-        <div v-if="activeTab !== 'accounts' && activeTab !== 'ledger'" class="flex flex-col gap-3 p-4 lg:flex-row lg:items-center">
-          <div class="flex min-w-0 flex-1 flex-col gap-3 sm:flex-row sm:items-center">
-            <label for="pool-period-type" class="shrink-0 text-sm font-medium text-gray-700 dark:text-gray-300">
-              {{ t('admin.sharedPool.period.label') }}
-            </label>
+        <div v-if="activeTab !== 'accounts' && activeTab !== 'ledger'" class="flex flex-col gap-3 bg-gray-50/60 p-3 dark:bg-dark-900/20 sm:p-4 lg:flex-row lg:items-end">
+          <div class="flex min-w-0 flex-1 flex-col gap-3 sm:flex-row sm:items-end">
             <div class="w-full sm:w-36">
+              <label for="pool-period-type" class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-300">
+                {{ t('admin.sharedPool.period.label') }}
+              </label>
               <Select
                 id="pool-period-type"
                 v-model="periodType"
@@ -32,11 +32,16 @@
                 @change="handlePeriodTypeChange"
               />
             </div>
-            <DateRangePicker
-              v-model:start-date="startDate"
-              v-model:end-date="endDate"
-              @change="handleDateRangeChange"
-            />
+            <div class="min-w-0">
+              <DateRangePicker
+                v-model:start-date="startDate"
+                v-model:end-date="endDate"
+                @change="handleDateRangeChange"
+              />
+              <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                {{ t('admin.sharedPool.period.timezone') }}
+              </p>
+            </div>
           </div>
           <div class="flex flex-wrap items-center justify-end gap-2">
             <label for="pool-fx-rate" class="text-xs font-medium text-gray-600 dark:text-gray-300">
@@ -61,9 +66,6 @@
               <LoadingSpinner v-if="savingFXRate" size="sm" />
               <Icon v-else name="check" size="sm" />
             </button>
-            <span class="text-xs text-gray-500 dark:text-gray-400">
-              {{ t('admin.sharedPool.period.timezone') }}
-            </span>
             <button type="button" class="btn btn-secondary min-h-11 px-3" :disabled="loading" @click="loadActiveTab">
               <Icon name="refresh" size="sm" :class="loading ? 'animate-spin' : ''" />
               <span>{{ t('common.refresh') }}</span>
@@ -2113,3 +2115,9 @@ onMounted(async () => {
     .catch((error: any) => appStore.showError(error?.message || t('admin.sharedPool.errors.fxRate')))
 })
 </script>
+
+<style scoped>
+.shared-pool-shell :deep(.date-picker-trigger) {
+  min-height: 2.75rem;
+}
+</style>

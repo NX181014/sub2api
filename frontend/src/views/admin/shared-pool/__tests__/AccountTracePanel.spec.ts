@@ -100,6 +100,8 @@ function mountPanel(panelSettlement = settlement) {
           props: ['account'],
           template: '<span>runtime-status:{{ account.status }}</span>'
         },
+        AccountUsageCell: { template: '<div data-test="account-usage-window">usage-window</div>' },
+        AccountCapacityCell: { template: '<div data-test="account-capacity">capacity</div>' },
         PlatformTypeBadge: true,
         Icon: true,
         LoadingSpinner: true,
@@ -125,6 +127,8 @@ describe('AccountTracePanel', () => {
     expect(wrapper.text()).toContain('admin.sharedPool.event.recovered')
     expect(wrapper.text()).toContain('credential expired')
     expect(wrapper.text()).toContain('admin.sharedPool.intake.pendingNotice')
+    expect(wrapper.find('[data-test="account-usage-window"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="account-capacity"]').exists()).toBe(true)
 
     await wrapper.get('button[role="tab"]:nth-of-type(2)').trigger('click')
     await wrapper.get('[data-test="next-settlement"]').trigger('click')

@@ -198,10 +198,10 @@
         <div :class="embedded ? 'flex min-h-0 flex-1 flex-col lg:flex-row' : 'contents'">
           <aside
             v-if="embedded"
-            class="shrink-0 border-b border-gray-200 bg-gray-50/60 dark:border-dark-700 dark:bg-dark-900/30 lg:w-72 lg:border-b-0 lg:border-r"
+            class="workbench-sidebar shrink-0 border-b border-gray-200 bg-gray-50/60 dark:border-dark-700 dark:bg-dark-900/30 lg:border-b-0 lg:border-r"
             :aria-label="t('admin.accounts.importBatchGroup')"
           >
-            <div class="flex items-start gap-2 overflow-x-auto p-3 lg:block lg:h-full lg:space-y-1 lg:overflow-y-auto">
+            <div class="flex items-start gap-2 overflow-x-auto p-3 lg:block lg:h-full lg:space-y-2 lg:overflow-y-auto">
               <button
                 type="button"
                 data-test="workbench-all"
@@ -259,7 +259,7 @@
           </aside>
 
           <section class="flex min-h-0 min-w-0 flex-1 flex-col">
-            <header v-if="embedded" class="flex flex-wrap items-start justify-between gap-3 border-b border-gray-200 px-4 py-3 dark:border-dark-700">
+            <header v-if="embedded" class="workbench-header flex flex-wrap items-start justify-between gap-3 border-b border-gray-200 px-4 py-3 dark:border-dark-700">
               <div class="min-w-0">
                 <h2 class="truncate text-base font-semibold text-gray-900 dark:text-white" :title="workbenchTitle">{{ workbenchTitle }}</h2>
                 <p class="mt-0.5 truncate text-xs text-gray-500 dark:text-gray-400" :title="workbenchSubtitle">{{ workbenchSubtitle }}</p>
@@ -297,7 +297,7 @@
           @toggle-page="togglePageSelection"
           @toggle-schedulable="handleBulkToggleSchedulable"
         />
-        <div ref="accountTableRef" class="flex min-h-0 flex-1 flex-col overflow-hidden">
+        <div ref="accountTableRef" class="account-workbench-table flex min-h-0 flex-1 flex-col overflow-hidden">
         <DataTable
           ref="dataTableRef"
           :columns="cols"
@@ -309,11 +309,11 @@
           default-sort-key="created_at"
           default-sort-order="desc"
           :sort-storage-key="ACCOUNT_SORT_STORAGE_KEY"
-          :estimate-row-height="156"
+          :estimate-row-height="168"
           :overscan="5"
           :virtualize-threshold="50"
           :mobile-column-keys="embedded
-            ? ['select', 'name', 'id', 'status', 'schedulable', 'capacity', 'platform_type', 'groups', 'usage', 'actions']
+            ? ['select', 'name', 'status', 'usage', 'capacity', 'schedulable', 'platform_type', 'groups', 'id', 'actions']
             : ['select', 'uploader', 'usage', 'pool_record', 'status']"
         >
           <template #header-select>
@@ -505,13 +505,14 @@
             </div>
           </template>
           <template #cell-usage="{ row }">
-            <AccountUsageCell
-              v-if="!isImportBatchRow(row)"
-              :account="row"
-              :today-stats="todayStatsByAccountId[String(row.id)] ?? null"
-              :today-stats-loading="todayStatsLoading"
-              :manual-refresh-token="usageManualRefreshToken"
-            />
+            <div v-if="!isImportBatchRow(row)" class="account-usage-card">
+              <AccountUsageCell
+                :account="row"
+                :today-stats="todayStatsByAccountId[String(row.id)] ?? null"
+                :today-stats-loading="todayStatsLoading"
+                :manual-refresh-token="usageManualRefreshToken"
+              />
+            </div>
           </template>
           <template #cell-pool_record="{ row }">
             <button
@@ -1340,7 +1341,7 @@ const DEFAULT_HIDDEN_COLUMNS = embedded
     ]
 const HIDDEN_COLUMNS_KEY = 'account-hidden-columns'
 const HIDDEN_COLUMNS_VERSION_KEY = 'account-hidden-columns-version'
-const HIDDEN_COLUMNS_CURRENT_VERSION = embedded ? 'shared-pool-workbench-v1' : 'scheduler-score-hidden-by-default'
+const HIDDEN_COLUMNS_CURRENT_VERSION = embedded ? 'shared-pool-workbench-v2' : 'scheduler-score-hidden-by-default'
 
 // Sorting settings
 const ACCOUNT_SORT_STORAGE_KEY = 'account-table-sort-v2'
@@ -2659,17 +2660,17 @@ function getAntigravityTierClass(row: any): string {
 const allColumns = computed(() => {
   const c = [
     { key: 'select', label: '', sortable: false },
-    { key: 'name', label: t('admin.accounts.columns.name'), sortable: true },
+    { key: 'name', label: t('admin.accounts.columns.name'), sortable: true, class: 'min-w-[180px] max-w-[220px]' },
     { key: 'id', label: t('admin.accounts.columns.id'), sortable: false },
-    { key: 'status', label: t('admin.accounts.columns.status'), sortable: true },
-    { key: 'schedulable', label: t('admin.accounts.columns.schedulable'), sortable: true },
-    { key: 'capacity', label: t('admin.accounts.columns.capacity'), sortable: false },
+    { key: 'status', label: t('admin.accounts.columns.status'), sortable: true, class: 'min-w-[128px]' },
+    { key: 'usage', label: t('admin.accounts.columns.usageWindows'), sortable: false, class: 'min-w-[260px]' },
+    { key: 'capacity', label: t('admin.accounts.columns.capacity'), sortable: false, class: 'min-w-[100px]' },
+    { key: 'schedulable', label: t('admin.accounts.columns.schedulable'), sortable: true, class: 'min-w-[92px]' },
     { key: 'platform_type', label: t('admin.accounts.columns.platformType'), sortable: false }
   ]
   if (!authStore.isSimpleMode) {
     c.push({ key: 'groups', label: t('admin.accounts.columns.groups'), sortable: false })
   }
-  c.push({ key: 'usage', label: t('admin.accounts.columns.usageWindows'), sortable: false })
   c.push(
     { key: 'uploader', label: t('admin.sharedPool.columns.uploader'), sortable: false },
     { key: 'today_stats', label: t('admin.accounts.columns.todayStats'), sortable: false },
@@ -3714,18 +3715,67 @@ onUnmounted(() => {
 }
 
 .workbench-nav-item {
-  @apply flex min-h-11 min-w-48 items-center justify-between gap-3 rounded-md px-3 py-2 text-left text-sm text-gray-700 transition-colors hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-dark-700 lg:min-w-0 lg:w-full;
+  @apply flex min-h-11 min-w-48 items-center justify-between gap-3 rounded-xl border border-transparent px-3 py-2 text-left text-sm text-gray-700 transition-colors hover:border-gray-200 hover:bg-white dark:text-gray-200 dark:hover:border-dark-600 dark:hover:bg-dark-800 lg:min-w-0 lg:w-full;
 }
 
 .workbench-nav-item-active {
-  @apply bg-white text-primary-700 shadow-sm ring-1 ring-gray-200 dark:bg-dark-800 dark:text-primary-300 dark:ring-dark-600;
+  @apply border-primary-200 bg-white text-primary-700 shadow-sm ring-1 ring-primary-100 dark:border-primary-700/60 dark:bg-dark-800 dark:text-primary-300 dark:ring-primary-900/40;
 }
 
 .workbench-batch-item {
-  @apply flex min-h-11 min-w-64 items-center justify-between gap-3 rounded-md px-3 py-2 text-left text-sm transition-colors hover:bg-gray-100 dark:hover:bg-dark-700 lg:mt-1 lg:min-w-0 lg:w-full;
+  @apply flex min-h-11 min-w-64 items-center justify-between gap-3 rounded-xl border border-gray-200/80 bg-white/70 px-3 py-2 text-left text-sm transition-colors hover:border-gray-300 hover:bg-white dark:border-dark-700 dark:bg-dark-800/70 dark:hover:border-dark-600 dark:hover:bg-dark-700 lg:min-w-0 lg:w-full;
 }
 
 .workbench-batch-item-active {
-  @apply bg-gray-100 ring-1 ring-gray-200 dark:bg-dark-700 dark:ring-dark-600;
+  @apply border-primary-200 bg-primary-50/60 ring-1 ring-primary-100 dark:border-primary-700/60 dark:bg-primary-900/20 dark:ring-primary-900/40;
+}
+
+.workbench-sidebar {
+  flex-basis: auto;
+}
+
+@media (min-width: 1024px) {
+  .workbench-sidebar {
+    flex-basis: clamp(244px, 16vw, 276px);
+  }
+}
+
+.account-usage-card {
+  @apply min-w-[232px] rounded-xl border border-gray-200/80 bg-gray-50/70 px-3 py-2 dark:border-dark-700 dark:bg-dark-800/60;
+}
+
+/* Keep desktop rows readable as compact cards while DataTable owns pagination and virtualization. */
+.account-workbench-table :deep(.table-wrapper table) {
+  border-collapse: separate;
+  border-spacing: 0 8px;
+}
+
+.account-workbench-table :deep(.table-body) {
+  background: transparent;
+}
+
+.account-workbench-table :deep(.table-body tr[data-row-id]) {
+  box-shadow: 0 1px 2px rgb(15 23 42 / 0.05);
+}
+
+.account-workbench-table :deep(.table-body tr[data-row-id] td) {
+  border-top: 1px solid rgb(226 232 240 / 0.9);
+  border-bottom: 1px solid rgb(226 232 240 / 0.9);
+  background: rgb(255 255 255 / 0.96);
+}
+
+.account-workbench-table :deep(.table-body tr[data-row-id] td:first-child) {
+  border-left: 1px solid rgb(226 232 240 / 0.9);
+  border-radius: 12px 0 0 12px;
+}
+
+.account-workbench-table :deep(.table-body tr[data-row-id] td:last-child) {
+  border-right: 1px solid rgb(226 232 240 / 0.9);
+  border-radius: 0 12px 12px 0;
+}
+
+.dark .account-workbench-table :deep(.table-body tr[data-row-id] td) {
+  border-color: rgb(71 85 105 / 0.7);
+  background: rgb(30 41 59 / 0.78);
 }
 </style>
