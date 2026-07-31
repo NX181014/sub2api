@@ -107,6 +107,24 @@ func (s *sparkShadowRepoStub) Delete(_ context.Context, id int64) error {
 	delete(s.mockAccountRepoForGemini.accountsByID, id)
 	return nil
 }
+
+func (s *sparkShadowRepoStub) DeleteAccountWithLifecycle(ctx context.Context, id int64, _ AccountDeleteOptions) (*AccountDeleteResult, error) {
+	if _, ok := s.accounts[id]; !ok {
+		return nil, ErrAccountNotFound
+	}
+	shadows, err := s.ListShadowsByParent(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	affected := make([]int64, 0, len(shadows)+1)
+	for _, shadow := range shadows {
+		affected = append(affected, shadow.ID)
+		_ = s.Delete(ctx, shadow.ID)
+	}
+	affected = append(affected, id)
+	_ = s.Delete(ctx, id)
+	return &AccountDeleteResult{AccountID: id, AffectedAccountIDs: affected}, nil
+}
 func (s *sparkShadowRepoStub) BatchUpdateLastUsed(_ context.Context, _ map[int64]time.Time) error {
 	return nil
 }
@@ -611,6 +629,40 @@ func TestDeleteAccount_CascadeToShadow(t *testing.T) {
 	_, ok = repo.accounts[shadowID]
 	require.False(t, ok, "shadow account should be cascade-deleted")
 	require.ElementsMatch(t, []int64{parent.ID, shadowID}, invalidator.accountIDs)
+}
+
+type softDeletedLifecycleRepoStub struct {
+	*sparkShadowRepoStub
+	deletedID int64
+}
+
+func (s *softDeletedLifecycleRepoStub) GetByID(context.Context, int64) (*Account, error) {
+	return nil, ErrAccountNotFound
+}
+
+func (s *softDeletedLifecycleRepoStub) DeleteAccountWithLifecycle(_ context.Context, id int64, _ AccountDeleteOptions) (*AccountDeleteResult, error) {
+	s.deletedID = id
+	return &AccountDeleteResult{AccountID: id, AffectedAccountIDs: []int64{id}}, nil
+}
+
+func TestDeleteAccount_SoftDeletedTargetStillUsesLifecycle(t *testing.T) {
+	repo := &softDeletedLifecycleRepoStub{sparkShadowRepoStub: newSparkShadowRepoStub()}
+	svc := &adminServiceImpl{accountRepo: repo, tokenCacheInvalidator: &accountDeleteTokenInvalidator{}}
+
+	result, err := svc.DeleteAccountWithOptions(context.Background(), 27, AccountDeleteOptions{})
+
+	require.NoError(t, err)
+	require.Equal(t, int64(27), repo.deletedID)
+	require.Equal(t, []int64{27}, result.AffectedAccountIDs)
+}
+
+func TestDeleteAccount_RequiresLifecycleRepository(t *testing.T) {
+	svc := &adminServiceImpl{accountRepo: &mockAccountRepoForGemini{}}
+
+	_, err := svc.DeleteAccountWithOptions(context.Background(), 27, AccountDeleteOptions{})
+
+	require.Error(t, err)
+	require.Equal(t, http.StatusInternalServerError, infraerrors.Code(err))
 }
 
 type accountDeleteTokenInvalidator struct {

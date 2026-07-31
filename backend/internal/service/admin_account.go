@@ -1286,28 +1286,25 @@ type accountLifecycleDeleteRepository interface {
 }
 
 func (s *adminServiceImpl) DeleteAccountWithOptions(ctx context.Context, id int64, options AccountDeleteOptions) (*AccountDeleteResult, error) {
+	repo, ok := s.accountRepo.(accountLifecycleDeleteRepository)
+	if !ok {
+		return nil, infraerrors.InternalServer("ACCOUNT_LIFECYCLE_DELETE_UNAVAILABLE", "account lifecycle deletion service is not configured")
+	}
 	cacheTargets, err := s.accountDeleteCacheTargets(ctx, id)
+	if err != nil && !errors.Is(err, ErrAccountNotFound) {
+		return nil, err
+	}
+	result, err := repo.DeleteAccountWithLifecycle(ctx, id, options)
 	if err != nil {
 		return nil, err
 	}
-	if repo, ok := s.accountRepo.(accountLifecycleDeleteRepository); ok {
-		result, err := repo.DeleteAccountWithLifecycle(ctx, id, options)
-		if err != nil {
-			return nil, err
+	if s.runtimeBlocker != nil {
+		for _, accountID := range result.AffectedAccountIDs {
+			s.runtimeBlocker.ClearAccountSchedulingBlock(accountID)
 		}
-		if s.runtimeBlocker != nil {
-			for _, accountID := range result.AffectedAccountIDs {
-				s.runtimeBlocker.ClearAccountSchedulingBlock(accountID)
-			}
-		}
-		s.invalidateDeletedAccountTokens(ctx, cacheTargets)
-		return result, nil
-	}
-	if err := s.deleteAccountLegacy(ctx, id); err != nil {
-		return nil, err
 	}
 	s.invalidateDeletedAccountTokens(ctx, cacheTargets)
-	return &AccountDeleteResult{AccountID: id, AffectedAccountIDs: []int64{id}}, nil
+	return result, nil
 }
 
 func (s *adminServiceImpl) accountDeleteCacheTargets(ctx context.Context, id int64) ([]*Account, error) {
