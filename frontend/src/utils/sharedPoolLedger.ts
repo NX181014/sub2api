@@ -1,4 +1,8 @@
-import type { SharedPoolBatchAmountMode } from '@/api/admin/sharedPool'
+import type {
+  SharedPoolAccountCost,
+  SharedPoolBatchAmountMode,
+  SharedPoolSettlementLine
+} from '@/api/admin/sharedPool'
 
 export type BatchAllocationMode = 'equal' | 'manual'
 
@@ -7,6 +11,28 @@ export const DEFAULT_EXPECTED_TOKEN_COUNT = 20 * TOKENS_PER_MILLION
 
 export const tokensToMillions = (tokens: number): number => tokens / TOKENS_PER_MILLION
 export const millionsToTokens = (millions: number): number => Math.round(millions * TOKENS_PER_MILLION)
+
+export type RecoveryFilter = 'all' | 'unrecovered' | 'recovered' | 'soon' | 'no_data'
+export type SettlementLineFilter = 'all' | 'pending' | 'paid' | 'abnormal'
+
+export function recoveryState(account: SharedPoolAccountCost): Exclude<RecoveryFilter, 'all'> {
+  if (account.currently_recovered || account.roi_rate >= 100 || (account.purchase_cost > 0 && account.remaining_cost <= 0)) return 'recovered'
+  if (account.purchase_cost <= 0 || (account.usage_value <= 0 && !account.estimated_recovery_days)) return 'no_data'
+  // ponytail: UI-only 80%/30-day threshold; replace it if the API gains a canonical payback state.
+  if (account.roi_rate >= 80 || (account.estimated_recovery_days != null && account.estimated_recovery_days <= 30)) return 'soon'
+  return 'unrecovered'
+}
+
+export const filterRecoveryAccounts = (accounts: SharedPoolAccountCost[], filter: RecoveryFilter) =>
+  filter === 'all' ? accounts : accounts.filter((account) => recoveryState(account) === filter)
+
+export function settlementLineState(line: SharedPoolSettlementLine): Exclude<SettlementLineFilter, 'all'> {
+  if (![line.usage_weight, line.usage_share, line.allocated_cost, line.contribution_credit, line.net_amount].every(Number.isFinite)) return 'abnormal'
+  return line.payment_status === 'paid' ? 'paid' : 'pending'
+}
+
+export const filterSettlementLines = (lines: SharedPoolSettlementLine[], filter: SettlementLineFilter) =>
+  filter === 'all' ? lines : lines.filter((line) => settlementLineState(line) === filter)
 
 export interface BatchCostOverride {
   originalAmount?: number | '' | null

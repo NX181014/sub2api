@@ -7,6 +7,34 @@ export type PoolLifecycleEventType = 'banned_confirmed' | 'recovered' | 'refund'
 export type PoolCostEntryType = 'purchase' | 'renewal' | 'topup' | 'price_version' | 'refund' | 'adjustment' | 'replacement_in' | 'replacement_out' | 'write_off'
 export type PoolApprovalAction = 'UPDATE_ACCOUNT' | 'VIEW_CREDENTIAL' | 'DELETE_ACCOUNT'
 export type PoolApprovalStatus = 'pending' | 'approved' | 'rejected' | 'expired' | 'consumed'
+export type PoolApprovalScope = 'reviewable' | 'mine' | 'processed'
+
+export interface PoolApprovalBusinessChange {
+  key: string
+  before?: unknown
+  after?: unknown
+  sensitive?: boolean
+  impact: string
+}
+
+export interface PoolApprovalBusinessSummary {
+  action: PoolApprovalAction
+  object: { type: 'account'; id: number; name: string }
+  scope?: string[]
+  groups?: Array<{ key: string; items: PoolApprovalBusinessChange[] }>
+  impacts?: Array<{ key: string; count: number }>
+  high_risk: boolean
+}
+
+export interface PoolApprovalChanges {
+  [key: string]: unknown
+  before?: Record<string, unknown>
+  after?: Record<string, unknown>
+  fields?: Record<string, { before?: unknown; after?: unknown }>
+  credential_keys?: string[]
+  extra_keys?: string[]
+  business?: PoolApprovalBusinessSummary
+}
 
 export interface PoolApproval {
   id: number
@@ -27,7 +55,7 @@ export interface PoolApproval {
   reveal_expires_at?: string | null
   revealed_at?: string | null
   is_primary_bypass?: boolean
-  changes?: Record<string, unknown> | null
+  changes?: PoolApprovalChanges | null
 }
 
 export interface PoolApprovalList {
@@ -931,6 +959,8 @@ export async function listApprovals(params: {
   action_type?: PoolApprovalAction
   account_id?: number
   requested_by_user_id?: number
+  scope?: PoolApprovalScope
+  high_risk?: boolean
   page?: number
   page_size?: number
 } = {}): Promise<PoolApprovalList> {

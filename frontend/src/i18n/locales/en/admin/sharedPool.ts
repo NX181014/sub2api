@@ -1,5 +1,13 @@
 export default {
   sharedPool: {
+    page: {
+      recoveryFilter: 'Payback Status',
+      coverage: 'Coverage: {start} to {end} · {count} accounts',
+      recoveryStates: { all: 'All payback states', unrecovered: 'Unrecovered', recovered: 'Recovered', soon: 'Near payback', no_data: 'No data' },
+      lineStatus: 'Settlement Status', allSettlementStates: 'All settlement states', pendingPayment: 'Pending', paidPayment: 'Paid', abnormal: 'Abnormal',
+      importBatch: 'Import Batch', singleImport: 'Single import', purchaseDate: 'Purchase Date', deadline: 'Service End',
+      fxRateAt: '1 {currency} = {rate} CNY · {date}'
+    },
     title: 'Shared Account Pool',
     description: 'Track account costs, allocate usage, and monitor payback',
     tabs: { overview: 'Payback', accounts: 'Accounts', ledger: 'Cost Ledger', settlement: 'Cost Sharing', sources: 'Sources' },
@@ -45,10 +53,17 @@ export default {
       type: 'Request Type', requester: 'Requester', status: 'Status', requestedAt: 'Requested At', details: 'View changes',
 		updateAccount: 'Account update', viewCredential: 'View credentials', deleteAccount: 'Delete account',
       pending: 'Pending', approved: 'Approved', rejected: 'Rejected', expired: 'Expired', consumed: 'Viewed', empty: 'No approval requests',
+      scopes: { reviewable: 'For my review', mine: 'Submitted by me', processed: 'Processed' },
+      queueSummary: '{pending} pending, including {highRisk} high-risk requests',
       field: 'Field', before: 'Before', after: 'After', decisionReason: 'Decision note', decisionReasonHint: 'Optional when approving; required when rejecting',
       triggerReason: 'Why approval is required', requestNote: 'Request note',
       triggerUpdate: 'Account business information changes require review by another administrator', triggerCredential: 'Sensitive credential access requires review by another administrator', triggerDelete: 'Deleting an account and its related data is a high-risk operation',
       businessUpdate: 'Update account business information', businessUpdateFields: 'Fields changed: {fields}', businessCredential: 'View sensitive account credentials', businessDelete: 'Delete the account and its related business data',
+      businessGrouped: '{count} business changes across {groups}',
+      groups: { identity: 'Account identity and ownership', visibility: 'Visibility', scheduling: 'Scheduling', capacity: 'Capacity', cost_settlement: 'Cost and settlement', linked_data: 'Related data', credentials: 'Credentials' },
+      impacts: { accounts: 'Accounts', credential_keys: 'Credential keys', scheduling_records: 'Scheduling records', cost_entries: 'Cost entries', settlements: 'AA settlements', group_links: 'Group links', lifecycle_events: 'Lifecycle records', usage_records: 'Usage records' },
+      effects: { identity_changed: 'Account identity or ownership information will change', visibility_changed: 'Account visibility or group scope will change', scheduling_changed: 'Account scheduling behavior will change', capacity_changed: 'Capacity and payback calculations will change', settlement_changed: 'Cost or AA settlement inputs will change', linked_data_changed: 'Related business data will change', credential_replacement: 'Credentials will be updated while values remain hidden', credential_access: 'The requester can reveal credentials once after approval', permanent_cleanup: 'The account and related business data will be permanently removed' },
+      updated: 'Updated', showRemaining: 'Show {count} more', technicalDetails: 'Technical details', deleteImpactTitle: 'The following related records will be removed',
       sensitiveValue: 'Sensitive value hidden',
       reasons: { deleteAccountReason: 'Request to delete the account', updateAccountReason: 'Request to update account information', reauthorizeReason: 'Request to update account authorization credentials', updatePoolReason: 'Request to update shared-pool account metadata', updateCostReason: 'Request to update a shared-pool cost record', credentialAccessReason: 'Administrator request to view credentials' },
       fieldLabels: { name: 'Account name', notes: 'Notes', type: 'Account type', proxy: 'Proxy', concurrency: 'Concurrency', priority: 'Priority', rateMultiplier: 'Billing multiplier', loadFactor: 'Load factor', status: 'Account status', groups: 'Groups', expiresAt: 'Expires at', autoPauseOnExpired: 'Pause when expired', providerIdentity: 'Provider identity', contributor: 'Contributor', uploader: 'Uploader', costSharingEnabled: 'Include in cost sharing', credentialKeys: 'Credential key names changed', extraKeys: 'Extra fields changed', deleteAccount: 'Delete account', costEntry: 'Cost entry', payer: 'Payer', purchaseSource: 'Purchase source', costType: 'Cost type', costAmount: 'Cost amount', currency: 'Currency', fxRate: 'FX rate', serviceStart: 'Service start', serviceEnd: 'Service end', warrantyEnd: 'Warranty end', paidAt: 'Paid at', orderNo: 'Order number', purchaseUrl: 'Purchase URL', note: 'Cost note', expectedTokens: 'Expected tokens' },
@@ -57,7 +72,8 @@ export default {
       approveSuccess: 'Request approved', rejectSuccess: 'Request rejected', credentialSubmitted: 'Credential access submitted for another administrator to review',
       credentialTitle: 'Account credentials · {name}', credentialHint: 'Enter the purpose. The requester, reviewer, purpose, and access time are audited.',
       purpose: 'Purpose', purposeHint: 'For example: diagnose upstream authentication failure', revealWarning: 'Credentials are shown once and cleared automatically after 60 seconds. Do not forward or save them to shared locations.',
-      loadFailed: 'Failed to load approvals', decisionFailed: 'Failed to decide approval', submitFailed: 'Failed to submit approval', revealFailed: 'Failed to reveal credentials'
+      loadFailed: 'Failed to load approvals', decisionFailed: 'Failed to decide approval', submitFailed: 'Failed to submit approval', revealFailed: 'Failed to reveal credentials',
+      errors: { stale: 'The account changed after this request was submitted. Submit a new request.', decided: 'This request has already been processed. Refresh the approval list.', conflict: 'This account already has a pending approval request.' }
     },
     intake: {
       title: 'Shared-Pool Record', pending: 'Pending',

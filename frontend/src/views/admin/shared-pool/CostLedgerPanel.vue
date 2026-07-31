@@ -70,6 +70,12 @@
                 <div><dt class="text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.ledger.recognizedCost') }}</dt><dd class="mt-1 font-medium tabular-nums">{{ formatMinor(row.recognized_cost_minor) }}</dd></div>
                 <div><dt class="text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.columns.remaining') }}</dt><dd class="mt-1 font-medium tabular-nums text-amber-600 dark:text-amber-400">{{ formatMinor(row.remaining_cost_minor) }}</dd></div>
               </dl>
+              <dl class="mt-3 grid grid-cols-2 gap-2 border-t border-gray-100 pt-2 text-xs dark:border-dark-700 sm:grid-cols-4">
+                <div><dt class="text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.ledger.payer') }}</dt><dd class="mt-1 truncate font-medium" :title="row.latest_payer_email || ''">{{ row.latest_payer_email || '-' }}</dd></div>
+                <div><dt class="text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.columns.source') }}</dt><dd class="mt-1 truncate font-medium" :title="row.latest_purchase_source || ''">{{ row.latest_purchase_source || '-' }}</dd></div>
+                <div><dt class="text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.page.purchaseDate') }}</dt><dd class="mt-1 font-medium">{{ dateOnly(row.purchased_at) }}</dd></div>
+                <div><dt class="text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.page.deadline') }}</dt><dd class="mt-1 font-medium">{{ dateOnly(row.latest_service_end) }}</dd></div>
+              </dl>
               <div class="mt-3 grid grid-cols-2 border-t border-gray-100 pt-2 dark:border-dark-700">
                 <button type="button" class="min-h-11 text-sm font-medium text-primary-600 dark:text-primary-400" @click="emit('open-account', row.account_id)">{{ t('admin.sharedPool.actions.poolRecord') }}</button>
                 <button type="button" class="min-h-11 border-l border-gray-100 text-sm font-medium text-primary-600 dark:border-dark-700 dark:text-primary-400" @click="showAccountEntries(row.account_id)">{{ t('admin.sharedPool.ledger.viewEntries') }}</button>
@@ -106,7 +112,7 @@
           <template #cell-account_name="{ row }"><span class="font-medium text-gray-900 dark:text-white">{{ row.account_name }}</span></template>
           <template #cell-entry_type="{ row }">{{ t(`admin.sharedPool.entryTypes.${row.entry_type}`) }}</template>
           <template #cell-original_amount="{ row }"><span class="tabular-nums">{{ formatMoney(Number(row.original_amount), row.currency) }}</span></template>
-          <template #cell-cny_amount_minor="{ row }"><span class="tabular-nums">{{ formatMinor(row.cny_amount_minor) }}</span></template>
+          <template #cell-cny_amount_minor="{ row }"><span class="block tabular-nums">{{ formatMinor(row.cny_amount_minor) }}</span><span class="block whitespace-nowrap text-xs text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.page.fxRateAt', { currency: row.currency, rate: row.fx_rate, date: dateOnly(row.paid_at) }) }}</span></template>
           <template #cell-service_start="{ row }"><span class="whitespace-nowrap">{{ dateOnly(row.service_start) }} - {{ dateOnly(row.service_end) }}</span></template>
           <template #cell-created_at="{ row }">{{ dateOnly(row.created_at || row.paid_at) }}</template>
 		  <template #cell-actions="{ row }">
@@ -262,9 +268,11 @@ type LedgerView = 'summary' | 'entries'
 type AccountChoice = Pick<Account, 'id' | 'name'>
 type UploaderAccountState = { items: SharedPoolCostSummary[]; page: number; pageSize: number; total: number; loading: boolean }
 const props = withDefaults(defineProps<{
+  initialAccountId?: number
   initialPurchaseSourceId?: number
   initialUploaderUserId?: number
 }>(), {
+  initialAccountId: 0,
   initialPurchaseSourceId: 0,
   initialUploaderUserId: 0
 })
@@ -619,10 +627,12 @@ async function submitBatch() {
 }
 
 onMounted(async () => {
+  entryFilters.account_id = props.initialAccountId
   summaryFilters.purchase_source_id = props.initialPurchaseSourceId
   summaryFilters.uploader_user_id = props.initialUploaderUserId
+  if (props.initialAccountId) activeView.value = 'entries'
   try { await loadReferences() } catch (error: any) { appStore.showError(error?.message || t('admin.sharedPool.ledger.errors.options')) }
-  await loadSummary()
+  await loadActiveView()
 })
 
 defineExpose({ reload: loadActiveView })

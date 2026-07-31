@@ -34,6 +34,7 @@ const (
 var (
 	ErrPoolApprovalNotFound = infraerrors.NotFound("POOL_APPROVAL_NOT_FOUND", "approval request not found")
 	ErrPoolApprovalConflict = infraerrors.Conflict("POOL_APPROVAL_CONFLICT", "an active approval request already exists")
+	ErrPoolApprovalStale    = infraerrors.Conflict("POOL_APPROVAL_STALE", "account state changed after the request was created")
 )
 
 type PoolApprovalPayload struct {
@@ -59,6 +60,51 @@ type PoolApprovalChangeSummary struct {
 	Fields         map[string]PoolApprovalValueChange `json:"fields,omitempty"`
 	CredentialKeys []string                           `json:"credential_keys,omitempty"`
 	ExtraKeys      []string                           `json:"extra_keys,omitempty"`
+	Business       PoolApprovalBusinessSummary        `json:"business"`
+}
+
+type PoolApprovalBusinessSummary struct {
+	Action   string                       `json:"action"`
+	Object   PoolApprovalBusinessObject   `json:"object"`
+	Scope    []string                     `json:"scope,omitempty"`
+	Groups   []PoolApprovalBusinessGroup  `json:"groups,omitempty"`
+	Impacts  []PoolApprovalBusinessImpact `json:"impacts,omitempty"`
+	HighRisk bool                         `json:"high_risk"`
+}
+
+type PoolApprovalBusinessObject struct {
+	Type string `json:"type"`
+	ID   int64  `json:"id"`
+	Name string `json:"name"`
+}
+
+type PoolApprovalBusinessGroup struct {
+	Key   string                       `json:"key"`
+	Items []PoolApprovalBusinessChange `json:"items"`
+}
+
+type PoolApprovalBusinessChange struct {
+	Key       string `json:"key"`
+	Before    any    `json:"before,omitempty"`
+	After     any    `json:"after,omitempty"`
+	Sensitive bool   `json:"sensitive,omitempty"`
+	Impact    string `json:"impact"`
+}
+
+type PoolApprovalBusinessImpact struct {
+	Key   string `json:"key"`
+	Count int64  `json:"count"`
+}
+
+type PoolAccountDeleteImpact struct {
+	Accounts          int64
+	CredentialKeys    int64
+	SchedulingRecords int64
+	CostEntries       int64
+	Settlements       int64
+	GroupLinks        int64
+	LifecycleEvents   int64
+	UsageRecords      int64
 }
 
 // PoolApproval never serializes Payload: it can contain pending credential
@@ -91,6 +137,9 @@ type PoolApprovalFilter struct {
 	ActionType        string
 	AccountID         *int64
 	RequestedByUserID *int64
+	Scope             string
+	ActorID           int64
+	HighRisk          *bool
 }
 
 type CreatePoolApprovalInput struct {
@@ -128,6 +177,10 @@ type PoolApprovalRepository interface {
 	MarkExpired(ctx context.Context, id int64, reason string) error
 	LoadCredentials(ctx context.Context, accountID int64) (map[string]any, error)
 	ConsumeReveal(ctx context.Context, id int64, revealedAt time.Time) error
+}
+
+type poolApprovalDeleteImpactReader interface {
+	GetAccountDeleteImpact(ctx context.Context, accountID int64) (*PoolAccountDeleteImpact, error)
 }
 
 func (s *PoolService) IsPrimaryAdmin(ctx context.Context, userID int64) bool {
@@ -180,12 +233,24 @@ func (s *PoolService) CreateApproval(ctx context.Context, input CreatePoolApprov
 		return nil, infraerrors.BadRequest("INVALID_APPROVAL_PAYLOAD", "approval payload is not serializable")
 	}
 	now := time.Now().UTC()
+	summary := buildPoolApprovalSummary(account, poolState, costBefore, input.Payload)
+	var deleteImpact *PoolAccountDeleteImpact
+	if input.Payload.DeleteOptions != nil {
+		deleteImpact = &PoolAccountDeleteImpact{Accounts: 1, CredentialKeys: int64(len(account.Credentials))}
+		if reader, ok := s.approvalRepo.(poolApprovalDeleteImpactReader); ok {
+			deleteImpact, err = reader.GetAccountDeleteImpact(ctx, input.AccountID)
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
+	summary.Business = buildPoolApprovalBusinessSummary(input.ActionType, account, summary, deleteImpact)
 	created, err := s.approvalRepo.CreateApproval(ctx, &PoolApproval{
 		ActionType: input.ActionType, AccountID: input.AccountID, Status: PoolApprovalPending,
 		Reason: input.Reason, BaseRevision: revision, RequestedByUserID: input.RequesterID,
 		RequestedAt: now, ExpiresAt: now.Add(poolApprovalPendingTTL),
 		PrimaryBypass: primaryBypass,
-		Changes:       buildPoolApprovalSummary(account, poolState, costBefore, input.Payload),
+		Changes:       summary,
 		Payload:       payload,
 	})
 	if err != nil {
@@ -276,6 +341,17 @@ func (s *PoolService) ListApprovals(ctx context.Context, filter PoolApprovalFilt
 	}
 	filter.Status = strings.ToLower(strings.TrimSpace(filter.Status))
 	filter.ActionType = strings.ToUpper(strings.TrimSpace(filter.ActionType))
+	filter.Scope = strings.ToLower(strings.TrimSpace(filter.Scope))
+	if filter.Scope != "" {
+		if filter.ActorID <= 0 {
+			return nil, 0, infraerrors.BadRequest("INVALID_APPROVAL_SCOPE", "approval scope requires an actor")
+		}
+		switch filter.Scope {
+		case "reviewable", "mine", "processed":
+		default:
+			return nil, 0, infraerrors.BadRequest("INVALID_APPROVAL_SCOPE", "approval scope must be reviewable, mine, or processed")
+		}
+	}
 	return s.approvalRepo.ListApprovals(ctx, filter, pageSize, (page-1)*pageSize)
 }
 
@@ -340,7 +416,7 @@ func (s *PoolService) decideApproval(ctx context.Context, id, actorID int64, rea
 		if err := tx.Commit(); err != nil {
 			return nil, err
 		}
-		return s.approvalRepo.GetApproval(ctx, id, false)
+		return nil, ErrPoolApprovalStale
 	}
 
 	if err := s.approvalRepo.LockAccount(txCtx, item.AccountID); err != nil {
@@ -704,6 +780,91 @@ func buildPoolApprovalSummary(account *Account, pool *PoolApprovalAccountState, 
 		result.Fields = nil
 	}
 	return result
+}
+
+func buildPoolApprovalBusinessSummary(action string, account *Account, changes PoolApprovalChangeSummary, deleteImpact *PoolAccountDeleteImpact) PoolApprovalBusinessSummary {
+	result := PoolApprovalBusinessSummary{
+		Action:   action,
+		Object:   PoolApprovalBusinessObject{Type: "account", ID: account.ID, Name: account.Name},
+		HighRisk: action == PoolApprovalDeleteAccount || action == PoolApprovalViewCredential || len(changes.CredentialKeys) > 0,
+	}
+	if action == PoolApprovalDeleteAccount {
+		result.Scope = []string{"credentials", "scheduling", "cost_settlement", "linked_data"}
+		result.Groups = []PoolApprovalBusinessGroup{{Key: "linked_data", Items: []PoolApprovalBusinessChange{{
+			Key: "delete_account", Before: false, After: true, Impact: "permanent_cleanup",
+		}}}}
+		if deleteImpact != nil {
+			result.Impacts = []PoolApprovalBusinessImpact{
+				{Key: "accounts", Count: deleteImpact.Accounts},
+				{Key: "credential_keys", Count: deleteImpact.CredentialKeys},
+				{Key: "scheduling_records", Count: deleteImpact.SchedulingRecords},
+				{Key: "cost_entries", Count: deleteImpact.CostEntries},
+				{Key: "settlements", Count: deleteImpact.Settlements},
+				{Key: "group_links", Count: deleteImpact.GroupLinks},
+				{Key: "lifecycle_events", Count: deleteImpact.LifecycleEvents},
+				{Key: "usage_records", Count: deleteImpact.UsageRecords},
+			}
+		}
+		return result
+	}
+	if action == PoolApprovalViewCredential {
+		result.Scope = []string{"credentials"}
+		result.Groups = []PoolApprovalBusinessGroup{{Key: "credentials", Items: []PoolApprovalBusinessChange{{
+			Key: "credentials", Sensitive: true, Impact: "credential_access",
+		}}}}
+		return result
+	}
+
+	grouped := make(map[string][]PoolApprovalBusinessChange)
+	keys := make([]string, 0, len(changes.Fields))
+	for key := range changes.Fields {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		change := changes.Fields[key]
+		group, impact := poolApprovalBusinessGroup(key)
+		grouped[group] = append(grouped[group], PoolApprovalBusinessChange{
+			Key: key, Before: change.Before, After: change.After,
+			Sensitive: key == "provider_identity", Impact: impact,
+		})
+	}
+	for _, key := range changes.CredentialKeys {
+		grouped["credentials"] = append(grouped["credentials"], PoolApprovalBusinessChange{
+			Key: key, After: "updated", Sensitive: true, Impact: "credential_replacement",
+		})
+	}
+	for _, key := range changes.ExtraKeys {
+		grouped["linked_data"] = append(grouped["linked_data"], PoolApprovalBusinessChange{
+			Key: key, After: "updated", Impact: "linked_data_changed",
+		})
+	}
+	for _, group := range []string{"identity", "visibility", "scheduling", "capacity", "cost_settlement", "linked_data", "credentials"} {
+		items := grouped[group]
+		if len(items) == 0 {
+			continue
+		}
+		result.Scope = append(result.Scope, group)
+		result.Groups = append(result.Groups, PoolApprovalBusinessGroup{Key: group, Items: items})
+	}
+	return result
+}
+
+func poolApprovalBusinessGroup(field string) (string, string) {
+	switch field {
+	case "group_ids":
+		return "visibility", "visibility_changed"
+	case "status", "proxy_id", "concurrency", "priority", "rate_multiplier", "load_factor", "expires_at", "auto_pause_on_expired":
+		return "scheduling", "scheduling_changed"
+	case "cost_expected_token_count":
+		return "capacity", "capacity_changed"
+	case "cost_entry_id", "cost_payer_user_id", "cost_purchase_source_id", "cost_entry_type", "cost_original_amount", "cost_currency", "cost_fx_rate", "cost_service_start", "cost_service_end", "cost_warranty_end", "cost_paid_at", "cost_order_no", "cost_purchase_url", "cost_note":
+		return "cost_settlement", "settlement_changed"
+	case "delete_account":
+		return "linked_data", "permanent_cleanup"
+	default:
+		return "identity", "identity_changed"
+	}
 }
 
 func approvalSummaryValue(value any) any {

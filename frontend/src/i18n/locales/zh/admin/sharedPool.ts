@@ -1,5 +1,13 @@
 export default {
   sharedPool: {
+    page: {
+      recoveryFilter: '回本状态',
+      coverage: '统计覆盖：{start} 至 {end} · {count} 个账号',
+      recoveryStates: { all: '全部回本状态', unrecovered: '未回本', recovered: '已回本', soon: '即将回本', no_data: '无数据' },
+      lineStatus: '结算状态', allSettlementStates: '全部结算状态', pendingPayment: '待结算', paidPayment: '已结算', abnormal: '异常',
+      importBatch: '导入批次', singleImport: '单独导入', purchaseDate: '采购日期', deadline: '服务截止',
+      fxRateAt: '1 {currency} = {rate} CNY · {date}'
+    },
     title: '共享号池',
     description: '记录账号成本、按用量结算并跟踪回本情况',
     tabs: { overview: '回本概览', accounts: '账号列表', ledger: '成本台账', settlement: 'AA 结算', sources: '采购来源' },
@@ -45,10 +53,17 @@ export default {
       type: '申请类型', requester: '申请人', status: '状态', requestedAt: '申请时间', details: '查看差异',
 		updateAccount: '账号信息变更', viewCredential: '查看凭证', deleteAccount: '删除账号',
       pending: '待审核', approved: '已批准', rejected: '已驳回', expired: '已过期', consumed: '已查看', empty: '暂无审批申请',
+      scopes: { reviewable: '待我审批', mine: '我提交的', processed: '已处理' },
+      queueSummary: '待办 {pending} 项，其中高风险 {highRisk} 项',
       field: '字段', before: '变更前', after: '变更后', decisionReason: '审批意见', decisionReasonHint: '批准可选填，驳回时必须填写原因',
       triggerReason: '触发审批原因', requestNote: '申请说明',
       triggerUpdate: '账号业务信息变更需要其他管理员复核', triggerCredential: '敏感凭证查看需要其他管理员复核', triggerDelete: '删除账号及关联数据属于高风险操作',
       businessUpdate: '变更账号业务信息', businessUpdateFields: '变更字段：{fields}', businessCredential: '查看账号敏感凭证', businessDelete: '删除账号及其关联业务数据',
+      businessGrouped: '涉及 {groups}，共 {count} 项业务变更',
+      groups: { identity: '账号身份与归属', visibility: '可见范围', scheduling: '运行调度', capacity: '容量配置', cost_settlement: '成本结算', linked_data: '关联数据', credentials: '凭证信息' },
+      impacts: { accounts: '账号', credential_keys: '凭证键', scheduling_records: '调度记录', cost_entries: '成本记录', settlements: 'AA 结算', group_links: '分组关联', lifecycle_events: '生命周期记录', usage_records: '用量记录' },
+      effects: { identity_changed: '账号识别与归属信息会更新', visibility_changed: '账号可见与分组范围会变化', scheduling_changed: '账号调度行为会变化', capacity_changed: '容量与回本计算会变化', settlement_changed: '成本或 AA 结算依据会变化', linked_data_changed: '账号关联业务数据会更新', credential_replacement: '凭证将更新，凭证值保持隐藏', credential_access: '批准后申请人可查看一次凭证', permanent_cleanup: '执行后账号及关联业务数据会永久清理' },
+      updated: '已更新', showRemaining: '展开其余 {count} 项', technicalDetails: '技术详情', deleteImpactTitle: '执行后将清理以下关联记录',
       sensitiveValue: '敏感值已隐藏',
       reasons: { deleteAccountReason: '申请删除账号', updateAccountReason: '申请变更账号信息', reauthorizeReason: '申请更新账号授权凭证', updatePoolReason: '申请变更号池账号资料', updateCostReason: '申请变更号池成本记录', credentialAccessReason: '管理员申请查看凭证' },
       fieldLabels: { name: '账号名称', notes: '备注', type: '账号类型', proxy: '代理', concurrency: '并发数', priority: '优先级', rateMultiplier: '计费倍率', loadFactor: '负载系数', status: '账号状态', groups: '所属分组', expiresAt: '过期时间', autoPauseOnExpired: '过期自动暂停', providerIdentity: '上游账号身份', contributor: '贡献人', uploader: '上传人', costSharingEnabled: '参与 AA 结算', credentialKeys: '变更的凭证键名', extraKeys: '变更的扩展字段', deleteAccount: '删除账号', costEntry: '成本记录', payer: '付款人', purchaseSource: '采购来源', costType: '成本类型', costAmount: '成本金额', currency: '币种', fxRate: '汇率', serviceStart: '服务开始', serviceEnd: '服务结束', warrantyEnd: '质保截止', paidAt: '付款时间', orderNo: '订单号', purchaseUrl: '采购链接', note: '成本备注', expectedTokens: '预期 Token 数' },
@@ -57,7 +72,8 @@ export default {
       approveSuccess: '申请已批准', rejectSuccess: '申请已驳回', credentialSubmitted: '凭证查看申请已提交，等待其他管理员审核',
       credentialTitle: '账号凭证 · {name}', credentialHint: '填写本次查看用途；完整用途、申请人、审批人和查看时间都会留痕。',
       purpose: '查看用途', purposeHint: '例如：排查上游认证失败', revealWarning: '凭证只显示一次，并将在 60 秒后自动清除。请勿转发或保存到公共位置。',
-      loadFailed: '加载审批申请失败', decisionFailed: '处理审批申请失败', submitFailed: '提交审批申请失败', revealFailed: '查看账号凭证失败'
+      loadFailed: '加载审批申请失败', decisionFailed: '处理审批申请失败', submitFailed: '提交审批申请失败', revealFailed: '查看账号凭证失败',
+      errors: { stale: '申请后账号状态已变化，请重新提交。', decided: '该申请已处理，请刷新审批列表。', conflict: '该账号已有待审批申请，请先处理现有申请。' }
     },
     intake: {
       title: '共享号池资料', pending: '待补录',

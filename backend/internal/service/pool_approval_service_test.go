@@ -145,6 +145,40 @@ func TestPoolApprovalSummaryRedactsCredentialAndProviderValues(t *testing.T) {
 	}
 }
 
+func TestPoolApprovalBusinessSummaryGroupsChangesAndRedactsCredentials(t *testing.T) {
+	changes := PoolApprovalChangeSummary{
+		Fields: map[string]PoolApprovalValueChange{
+			"status":               {Before: "active", After: "disabled"},
+			"cost_original_amount": {Before: "10.00", After: "12.00"},
+		},
+		CredentialKeys: []string{"access_token"},
+	}
+	summary := buildPoolApprovalBusinessSummary(PoolApprovalUpdateAccount, &Account{ID: 9, Name: "pool-account"}, changes, nil)
+	if !summary.HighRisk || summary.Object.ID != 9 || summary.Object.Name != "pool-account" {
+		t.Fatalf("unexpected business object: %#v", summary)
+	}
+	if strings.Join(summary.Scope, ",") != "scheduling,cost_settlement,credentials" {
+		t.Fatalf("unexpected scope order: %#v", summary.Scope)
+	}
+	credential := summary.Groups[len(summary.Groups)-1].Items[0]
+	if !credential.Sensitive || credential.Before != nil || credential.After != "updated" {
+		t.Fatalf("credential summary must expose only the key and update marker: %#v", credential)
+	}
+}
+
+func TestPoolApprovalBusinessSummaryIncludesDeleteImpact(t *testing.T) {
+	summary := buildPoolApprovalBusinessSummary(PoolApprovalDeleteAccount, &Account{ID: 7, Name: "doomed"}, PoolApprovalChangeSummary{}, &PoolAccountDeleteImpact{
+		Accounts: 2, CredentialKeys: 4, SchedulingRecords: 1, CostEntries: 3,
+		Settlements: 2, GroupLinks: 5, LifecycleEvents: 6, UsageRecords: 7,
+	})
+	if !summary.HighRisk || summary.Action != PoolApprovalDeleteAccount {
+		t.Fatalf("delete must be high risk: %#v", summary)
+	}
+	if len(summary.Impacts) != 8 || summary.Impacts[0].Key != "accounts" || summary.Impacts[0].Count != 2 || summary.Impacts[7].Count != 7 {
+		t.Fatalf("unexpected delete impact: %#v", summary.Impacts)
+	}
+}
+
 func TestPoolApprovalDecisionRequiresDifferentAdminExceptPrimaryBypass(t *testing.T) {
 	item := &PoolApproval{RequestedByUserID: 10}
 	if err := validatePoolApprovalDecisionActor(item, 11, false); err != nil {

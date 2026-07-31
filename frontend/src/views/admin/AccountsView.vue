@@ -8,6 +8,8 @@
             :filters="params"
             :groups="groups"
             :uploaders="uploaderOptions"
+            :result-account-count="visibleResultAccountCount"
+            :result-batch-count="visibleResultBatchCount"
             @update:filters="handleFiltersChange"
             @update:search-query="handleSearchChange"
             @clear="clearFilters"
@@ -196,6 +198,7 @@
         <AccountBulkActionsBar
           v-if="selIds.length > 0 || hasEffectiveFilters"
           :selected-ids="selIds"
+          :selected-batch-count="selectedBatchCount"
           :filtered-count="pagination.total"
           :has-active-filters="hasEffectiveFilters"
           :hidden-selected-count="hiddenSelectedCount"
@@ -293,11 +296,10 @@
               </HelpTooltip>
               <span v-else class="font-medium text-gray-900 dark:text-white">{{ value }}</span>
               <span
-                v-if="accountDisplayEmail(row)"
-                class="text-xs text-gray-500 dark:text-gray-400 truncate max-w-[200px]"
-                :title="accountDisplayEmail(row) + (row.parent_chatgpt_account_id ? ' · ' + row.parent_chatgpt_account_id : '')"
+                class="max-w-[220px] truncate text-xs text-gray-500 dark:text-gray-400"
+                :title="accountIdentitySubtitle(row)"
               >
-                {{ accountDisplayEmail(row) }}
+                {{ accountIdentitySubtitle(row) }}
               </span>
             </div>
           </template>
@@ -317,13 +319,15 @@
                 <span class="mt-1 block max-w-56 truncate text-xs text-gray-500 dark:text-gray-400 md:hidden" :title="row.names">{{ row.names }}</span>
               </span>
             </button>
-            <div v-else class="min-w-0" :class="isImportBatchChild(row) ? 'border-l-2 border-emerald-200 pl-3 dark:border-emerald-800 md:border-0 md:pl-0' : ''">
-              <p class="max-w-52 truncate font-medium text-gray-900 dark:text-white" :title="accountUploader(row)">
-                {{ accountUploader(row) }}
-              </p>
-              <p class="max-w-52 truncate text-xs text-gray-500 dark:text-gray-400 md:hidden" :title="row.name">
+            <div v-else-if="isImportBatchChild(row)" class="min-w-0 border-l-2 border-emerald-200 pl-3 dark:border-emerald-800 md:border-0 md:pl-0">
+              <p class="max-w-52 truncate font-medium text-gray-900 dark:text-white md:hidden" :title="row.name">
                 {{ row.name }} · #{{ row.id }}
               </p>
+              <span class="hidden text-xs text-gray-400 dark:text-gray-500 md:inline">—</span>
+            </div>
+            <div v-else class="min-w-0">
+              <p class="max-w-52 truncate font-medium text-gray-900 dark:text-white" :title="accountUploader(row)">{{ accountUploader(row) }}</p>
+              <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.accounts.standaloneImport') }}</p>
             </div>
           </template>
           <template #cell-notes="{ row, value }">
@@ -372,6 +376,9 @@
               >
                 {{ item.label }} {{ item.count }}
               </span>
+              <span v-if="!importBatchStatusItems(row).length" class="inline-flex rounded bg-gray-100 px-1.5 py-0.5 text-[10px] font-medium text-gray-600 dark:bg-dark-700 dark:text-gray-300">
+                {{ t('admin.accounts.status.notChecked') }}
+              </span>
             </div>
             <div v-else class="flex items-center gap-1.5">
               <AccountStatusIndicator :account="row" @show-temp-unsched="handleShowTempUnsched" />
@@ -379,7 +386,7 @@
           </template>
           <template #cell-schedulable="{ row }">
             <span v-if="isImportBatchRow(row)" class="text-xs font-medium tabular-nums text-gray-600 dark:text-gray-300">
-              {{ row.schedulableCount }}/{{ row.matchedCount }}
+              {{ t('admin.accounts.importBatchSchedulable', { current: row.schedulableCount, total: row.matchedCount }) }}
             </span>
             <button v-else @click="handleToggleSchedulable(row)" :disabled="togglingSchedulable === row.id" class="relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 dark:focus:ring-offset-dark-800" :class="[row.schedulable ? 'bg-primary-500 hover:bg-primary-600' : 'bg-gray-200 hover:bg-gray-300 dark:bg-dark-600 dark:hover:bg-dark-500']" :title="row.schedulable ? t('admin.accounts.schedulableEnabled') : t('admin.accounts.schedulableDisabled')">
               <span class="pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out" :class="[row.schedulable ? 'translate-x-4' : 'translate-x-0']" />
@@ -543,18 +550,6 @@
                 <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10" /></svg>
                 <span class="text-xs">{{ t('common.edit') }}</span>
               </button>
-              <button @click="openCredentialRequest(row)" class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-amber-50 hover:text-amber-600 dark:hover:bg-amber-900/20 dark:hover:text-amber-400">
-                <Icon name="lock" size="sm" />
-                <span class="text-xs">{{ t('admin.sharedPool.approval.viewCredential') }}</span>
-              </button>
-              <button @click="emit('pool-record', row)" class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-emerald-50 hover:text-emerald-600 dark:hover:bg-emerald-900/20 dark:hover:text-emerald-400">
-                <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M2.25 18.75a60.07 60.07 0 0115.797 0M6 6.75h12M6 10.5h12M6 14.25h12M3.75 5.25v10.5A1.5 1.5 0 005.25 17.25h13.5a1.5 1.5 0 001.5-1.5V5.25a1.5 1.5 0 00-1.5-1.5H5.25a1.5 1.5 0 00-1.5 1.5z" /></svg>
-                <span class="text-xs">{{ t('admin.sharedPool.actions.poolRecord') }}</span>
-              </button>
-              <button @click="handleDelete(row)" class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20 dark:hover:text-red-400">
-                <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" /></svg>
-                <span class="text-xs">{{ t('common.delete') }}</span>
-              </button>
               <button @click="openMenu(row, $event)" class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-900 dark:hover:bg-dark-700 dark:hover:text-white">
                 <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M6.75 12a.75.75 0 11-1.5 0 .75.75 0 011.5 0zM12.75 12a.75.75 0 11-1.5 0 .75.75 0 011.5 0zM18.75 12a.75.75 0 11-1.5 0 .75.75 0 011.5 0z" /></svg>
                 <span class="text-xs">{{ t('common.more') }}</span>
@@ -572,7 +567,7 @@
     <AccountTestModal :show="showTest" :account="testingAcc" @close="closeTestModal" />
     <AccountStatsModal :show="showStats" :account="statsAcc" @close="closeStatsModal" />
     <ScheduledTestsPanel :show="showSchedulePanel" :account-id="scheduleAcc?.id ?? null" :model-options="scheduleModelOptions" @close="closeSchedulePanel" />
-    <AccountActionMenu :show="menu.show" :account="menu.acc" :position="menu.pos" @close="menu.show = false" @test="handleTest" @stats="handleViewStats" @schedule="handleSchedule" @duplicate="handleDuplicateAccount" @reauth="handleReAuth" @refresh-token="handleRefresh" @recover-state="handleRecoverState" @reset-quota="handleResetQuota" @set-privacy="handleSetPrivacy" @create-spark-shadow="handleCreateSparkShadow" />
+    <AccountActionMenu :show="menu.show" :account="menu.acc" :position="menu.pos" @close="menu.show = false" @test="handleTest" @stats="handleViewStats" @schedule="handleSchedule" @duplicate="handleDuplicateAccount" @reauth="handleReAuth" @refresh-token="handleRefresh" @recover-state="handleRecoverState" @reset-quota="handleResetQuota" @set-privacy="handleSetPrivacy" @create-spark-shadow="handleCreateSparkShadow" @credential="openCredentialRequest" @pool-record="emit('pool-record', $event)" @delete="handleDelete" />
     <SyncFromCrsModal :show="showSync" @close="showSync = false" @synced="reload" />
     <ImportDataModal :show="showImportData" @close="showImportData = false" @imported="handleDataImported" />
     <BulkEditAccountModal
@@ -621,13 +616,31 @@
       @close="closeApprovalCenter"
     >
       <div class="space-y-4">
-        <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <p class="text-sm text-gray-500 dark:text-gray-400">
-            {{ t('admin.sharedPool.approval.subtitle') }}
-          </p>
-          <div class="flex items-center gap-2">
+        <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <p class="text-sm text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.approval.subtitle') }}</p>
+            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              {{ t('admin.sharedPool.approval.queueSummary', { pending: pendingApprovalCount, highRisk: highRiskApprovalCount }) }}
+            </p>
+          </div>
+          <div class="flex flex-wrap items-center gap-2">
+            <div class="flex rounded-lg border border-gray-200 p-1 dark:border-dark-700" role="tablist">
+              <button
+                v-for="scope in approvalScopes"
+                :key="scope"
+                type="button"
+                class="min-h-9 rounded-md px-3 text-xs font-medium transition-colors"
+                :class="approvalScope === scope ? 'bg-primary-600 text-white' : 'text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-dark-700'"
+                role="tab"
+                :aria-selected="approvalScope === scope"
+                @click="changeApprovalScope(scope)"
+              >
+                {{ t(`admin.sharedPool.approval.scopes.${scope}`) }}
+                <span v-if="scope === 'reviewable' && pendingApprovalCount" class="ml-1">{{ pendingApprovalCount }}</span>
+              </button>
+            </div>
             <label for="approval-status-filter" class="sr-only">{{ t('admin.sharedPool.approval.status') }}</label>
-            <select id="approval-status-filter" v-model="approvalStatusFilter" class="input min-h-11 w-36" @change="changeApprovalFilter">
+            <select v-if="approvalScope !== 'reviewable'" id="approval-status-filter" v-model="approvalStatusFilter" class="input min-h-11 w-36" @change="changeApprovalFilter">
               <option value="pending">{{ t('admin.sharedPool.approval.pending') }}</option>
               <option value="approved">{{ t('admin.sharedPool.approval.approved') }}</option>
               <option value="rejected">{{ t('admin.sharedPool.approval.rejected') }}</option>
@@ -703,7 +716,15 @@
             <StatusBadge :status="approvalStatusBadge(selectedApproval.status)" :label="approvalStatusLabel(selectedApproval.status)" />
           </div>
 
-          <dl class="mt-3 grid gap-2 text-sm sm:grid-cols-2">
+          <dl class="mt-3 grid gap-2 text-sm sm:grid-cols-2 lg:grid-cols-4">
+            <div>
+              <dt class="font-medium text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.approval.requester') }}</dt>
+              <dd class="mt-0.5 break-all text-gray-900 dark:text-white">{{ selectedApproval.requested_by_email || `#${selectedApproval.requested_by_user_id}` }}</dd>
+            </div>
+            <div>
+              <dt class="font-medium text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.approval.requestedAt') }}</dt>
+              <dd class="mt-0.5 text-gray-900 dark:text-white">{{ formatDateTime(selectedApproval.requested_at) }}</dd>
+            </div>
             <div>
               <dt class="font-medium text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.approval.triggerReason') }}</dt>
               <dd class="mt-0.5 text-gray-900 dark:text-white">{{ approvalTriggerReason(selectedApproval.action_type) }}</dd>
@@ -714,7 +735,50 @@
             </div>
           </dl>
 
-          <div v-if="approvalDiffRows.length" class="mt-4 overflow-hidden rounded-lg border border-gray-200 dark:border-dark-700">
+          <div v-if="approvalBusinessGroups.length" class="mt-4 grid gap-3 lg:grid-cols-2">
+            <article v-for="group in approvalBusinessGroups" :key="group.key" class="rounded-lg border border-gray-200 bg-white p-3 dark:border-dark-700 dark:bg-dark-800/60">
+              <h5 class="text-sm font-semibold text-gray-900 dark:text-white">
+                {{ approvalGroupLabel(group.key) }} · {{ group.items.length }}
+              </h5>
+              <div class="mt-2 space-y-2">
+                <div v-for="change in group.items.slice(0, 3)" :key="change.key" class="rounded-md bg-gray-50 px-3 py-2 text-sm dark:bg-dark-900/50">
+                  <p class="font-medium text-gray-800 dark:text-gray-100">{{ approvalFieldLabel(change.key) }}</p>
+                  <p class="mt-0.5 break-all text-gray-600 dark:text-gray-300">
+                    {{ approvalBusinessChangeValue(change, 'before') }} → {{ approvalBusinessChangeValue(change, 'after') }}
+                  </p>
+                  <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ approvalBusinessChangeImpact(change) }}</p>
+                </div>
+                <details v-if="group.items.length > 3" class="text-sm">
+                  <summary class="cursor-pointer py-1 font-medium text-primary-600 dark:text-primary-400">
+                    {{ t('admin.sharedPool.approval.showRemaining', { count: group.items.length - 3 }) }}
+                  </summary>
+                  <div class="mt-2 space-y-2">
+                    <div v-for="change in group.items.slice(3)" :key="change.key" class="rounded-md bg-gray-50 px-3 py-2 dark:bg-dark-900/50">
+                      <p class="font-medium text-gray-800 dark:text-gray-100">{{ approvalFieldLabel(change.key) }}</p>
+                      <p class="mt-0.5 break-all text-gray-600 dark:text-gray-300">{{ approvalBusinessChangeValue(change, 'before') }} → {{ approvalBusinessChangeValue(change, 'after') }}</p>
+                      <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ approvalBusinessChangeImpact(change) }}</p>
+                    </div>
+                  </div>
+                </details>
+              </div>
+            </article>
+          </div>
+
+          <div v-if="approvalBusinessImpacts.length" class="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 dark:border-red-900/60 dark:bg-red-950/20">
+            <p class="text-sm font-semibold text-red-800 dark:text-red-300">{{ t('admin.sharedPool.approval.deleteImpactTitle') }}</p>
+            <dl class="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
+              <div v-for="impact in approvalBusinessImpacts" :key="impact.key" class="rounded-md bg-white/70 px-2 py-2 dark:bg-dark-900/50">
+                <dt class="text-xs text-gray-500 dark:text-gray-400">{{ approvalImpactLabel(impact.key) }}</dt>
+                <dd class="mt-0.5 font-semibold tabular-nums text-gray-900 dark:text-white">{{ impact.count }}</dd>
+              </div>
+            </dl>
+          </div>
+
+          <details v-if="approvalDiffRows.length" class="mt-4 overflow-hidden rounded-lg border border-gray-200 dark:border-dark-700">
+            <summary class="cursor-pointer bg-gray-100 px-3 py-2 text-sm font-medium text-gray-700 dark:bg-dark-800 dark:text-gray-200">
+              {{ t('admin.sharedPool.approval.technicalDetails') }} · {{ approvalDiffRows.length }}
+            </summary>
+            <div>
             <div class="hidden grid-cols-[minmax(8rem,0.8fr)_minmax(0,1fr)_minmax(0,1fr)] bg-gray-100 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:bg-dark-800 dark:text-gray-400 sm:grid">
               <span>{{ t('admin.sharedPool.approval.field') }}</span>
               <span>{{ t('admin.sharedPool.approval.before') }}</span>
@@ -729,9 +793,10 @@
               <span class="break-all whitespace-pre-wrap text-gray-500 dark:text-gray-400"><span class="font-semibold sm:hidden">{{ t('admin.sharedPool.approval.before') }}: </span>{{ row.before }}</span>
               <span class="break-all whitespace-pre-wrap text-gray-900 dark:text-white"><span class="font-semibold sm:hidden">{{ t('admin.sharedPool.approval.after') }}: </span>{{ row.after }}</span>
             </div>
-          </div>
+            </div>
+          </details>
 
-          <div v-if="canReviewApproval(selectedApproval)" class="mt-4 space-y-3 border-t border-gray-200 pt-4 dark:border-dark-700">
+          <div v-if="canReviewApproval(selectedApproval)" class="sticky bottom-0 z-10 -mx-4 mt-4 space-y-3 border-t border-gray-200 bg-white px-4 pb-1 pt-4 shadow-[0_-8px_16px_-16px_rgba(0,0,0,0.5)] dark:border-dark-700 dark:bg-dark-900">
             <label for="approval-decision-reason" class="block text-sm font-medium text-gray-700 dark:text-gray-300">
               {{ t('admin.sharedPool.approval.decisionReason') }}
             </label>
@@ -854,7 +919,7 @@ import { sanitizeUrl } from '@/utils/url'
 import { getFloatingPanelPosition } from '@/utils/floatingPanel'
 import type { Account, AccountPlatform, AccountSchedulerGroupScore, AccountType, Proxy as AccountProxy, AdminGroup, WindowStats, ClaudeModel } from '@/types'
 import type { AccountBatchStatusSummary, AccountImportBatchSummary, AccountListRow } from '@/api/admin/accounts'
-import type { PoolApproval, PoolApprovalStatus, PoolCredentialReveal, SharedPoolAccountCost } from '@/api/admin/sharedPool'
+import type { PoolApproval, PoolApprovalBusinessChange, PoolApprovalBusinessSummary, PoolApprovalScope, PoolApprovalStatus, PoolCredentialReveal, SharedPoolAccountCost } from '@/api/admin/sharedPool'
 
 const props = withDefaults(defineProps<{
   embedded?: boolean
@@ -942,9 +1007,12 @@ const showTLSFingerprintProfiles = ref(false)
 const showApprovalCenter = ref(false)
 const approvalsLoading = ref(false)
 const approvals = ref<PoolApproval[]>([])
+const approvalScope = ref<PoolApprovalScope>('reviewable')
+const approvalScopes: PoolApprovalScope[] = ['reviewable', 'mine', 'processed']
 const approvalStatusFilter = ref<PoolApprovalStatus | ''>('pending')
 const approvalPagination = reactive({ page: 1, page_size: 20, total: 0 })
 const pendingApprovalCount = ref(0)
+const highRiskApprovalCount = ref(0)
 const selectedApproval = ref<PoolApproval | null>(null)
 const approvalDecisionReason = ref('')
 const approvalActionID = ref<number | null>(null)
@@ -1061,6 +1129,7 @@ const approvalDiffRows = computed(() => {
   }
 
   for (const [section, rawSection] of Object.entries(changes)) {
+    if (section === 'business') continue
     if (rawSection && typeof rawSection === 'object' && !Array.isArray(rawSection)) {
       for (const [field, rawChange] of Object.entries(rawSection as Record<string, unknown>)) {
         const path = `${section}.${field}`
@@ -1088,6 +1157,18 @@ const approvalDiffRows = computed(() => {
   return rows
 })
 
+const approvalBusiness = computed<PoolApprovalBusinessSummary | null>(() => selectedApproval.value?.changes?.business ?? null)
+const approvalBusinessGroups = computed(() => approvalBusiness.value?.groups ?? [])
+const approvalBusinessImpacts = computed(() => approvalBusiness.value?.impacts ?? [])
+const approvalGroupLabel = (key: string) => t(`admin.sharedPool.approval.groups.${key}`)
+const approvalImpactLabel = (key: string) => t(`admin.sharedPool.approval.impacts.${key}`)
+const approvalBusinessChangeValue = (change: PoolApprovalBusinessChange, side: 'before' | 'after') => (
+  change.sensitive
+    ? (side === 'after' ? t('admin.sharedPool.approval.updated') : t('admin.sharedPool.approval.sensitiveValue'))
+    : formatApprovalValue(change[side], change.key)
+)
+const approvalBusinessChangeImpact = (change: PoolApprovalBusinessChange) => t(`admin.sharedPool.approval.effects.${change.impact}`)
+
 // Account tools dropdown
 const showAccountToolsDropdown = ref(false)
 const accountToolsDropdownRef = ref<HTMLElement | null>(null)
@@ -1106,7 +1187,10 @@ const accountToolsDropdownStyle = computed(() => ({
   width: `${accountToolsDropdownPosition.width}px`
 }))
 const hiddenColumns = reactive<Set<string>>(new Set())
-const DEFAULT_HIDDEN_COLUMNS = ['today_stats', 'proxy', 'notes', 'priority', 'scheduler_score', 'rate_multiplier']
+const DEFAULT_HIDDEN_COLUMNS = [
+  'id', 'today_stats', 'groups', 'proxy', 'notes', 'priority', 'scheduler_score',
+  'rate_multiplier', 'upstream_billing_rate', 'last_used_at', 'expires_at'
+]
 const HIDDEN_COLUMNS_KEY = 'account-hidden-columns'
 // One-time migration: hide scheduler score for existing admins too, because showing it opt-ins to heavy backend scoring.
 const HIDDEN_COLUMNS_VERSION_KEY = 'account-hidden-columns-version'
@@ -1261,7 +1345,7 @@ const loadSavedColumns = () => {
       parsed.forEach(key => {
         hiddenColumns.add(key)
       })
-      // Older saved column layouts may have scheduler_score visible; migrate them to the new safe default once.
+      // Older saved column layouts may have scheduler_score visible; migrate them to the safe default once.
       if (localStorage.getItem(HIDDEN_COLUMNS_VERSION_KEY) !== HIDDEN_COLUMNS_CURRENT_VERSION) {
         hiddenColumns.add('scheduler_score')
         localStorage.setItem(HIDDEN_COLUMNS_KEY, JSON.stringify([...hiddenColumns]))
@@ -1402,6 +1486,11 @@ const {
 })
 
 const accounts = ref<Account[]>([])
+const visibleResultAccountCount = computed(() => accountListRows.value.reduce(
+  (total, row) => total + (row.kind === 'account' ? 1 : row.batch.matched_count),
+  0
+))
+const visibleResultBatchCount = computed(() => accountListRows.value.filter(row => row.kind === 'import_batch').length)
 const accountUploader = (account: Account): string => account.uploader_username || account.uploader_email || '-'
 const importBatchID = (account: Account): string => {
   const value = account.extra?.import_batch_id
@@ -1584,6 +1673,9 @@ const {
   rows: accounts,
   getId: (account) => account.id
 })
+const selectedBatchCount = computed(() => new Set(
+  selIds.value.map(id => knownAccountsByID.get(id)).filter((account): account is Account => Boolean(account)).map(importBatchID).filter(Boolean)
+).size)
 watch(accounts, rows => {
   rows.forEach(account => knownAccountsByID.set(account.id, account))
 }, { immediate: true })
@@ -2096,6 +2188,14 @@ function accountDisplayEmail(row: any): string {
   return row.extra?.email_address || row.extra?.email || row.credentials?.email || row.parent_email || ''
 }
 
+function accountIdentitySubtitle(row: Account): string {
+  const parts = [`#${row.id}`]
+  const email = accountDisplayEmail(row)
+  if (email) parts.push(email)
+  if (row.parent_chatgpt_account_id) parts.push(String(row.parent_chatgpt_account_id))
+  return parts.join(' · ')
+}
+
 function accountHomepageUrl(row: Account): string {
   if (row.type !== 'apikey' || typeof row.credentials?.base_url !== 'string') return ''
   const baseUrl = sanitizeUrl(row.credentials.base_url)
@@ -2248,6 +2348,14 @@ const approvalRequestReason = (reason: string) => {
 const approvalBusinessSummary = computed(() => {
   const approval = selectedApproval.value
   if (!approval) return ''
+  const business = approval.changes?.business
+  if (business?.groups?.length) {
+    const scope = business.scope?.length ? business.scope : business.groups.map(group => group.key)
+    return t('admin.sharedPool.approval.businessGrouped', {
+      groups: scope.map(approvalGroupLabel).join('、'),
+      count: business.groups.reduce((total, group) => total + group.items.length, 0)
+    })
+  }
   if (approval.action_type === 'DELETE_ACCOUNT') return t('admin.sharedPool.approval.businessDelete')
   if (approval.action_type === 'VIEW_CREDENTIAL') return t('admin.sharedPool.approval.businessCredential')
   const fields = approvalDiffRows.value.map(row => row.field).join('、')
@@ -2288,10 +2396,15 @@ const canRevealApproval = (approval: PoolApproval) => (
 
 const loadPendingApprovalCount = async () => {
   try {
-    const result = await adminAPI.sharedPool.listApprovals({ status: 'pending', page: 1, page_size: 1 })
-    pendingApprovalCount.value = result.total
+    const [all, highRisk] = await Promise.all([
+      adminAPI.sharedPool.listApprovals({ scope: 'reviewable', status: 'pending', page: 1, page_size: 1 }),
+      adminAPI.sharedPool.listApprovals({ scope: 'reviewable', status: 'pending', high_risk: true, page: 1, page_size: 1 })
+    ])
+    pendingApprovalCount.value = all.total
+    highRiskApprovalCount.value = highRisk.total
   } catch {
     pendingApprovalCount.value = 0
+    highRiskApprovalCount.value = 0
   }
 }
 
@@ -2299,7 +2412,8 @@ const loadApprovals = async () => {
   approvalsLoading.value = true
   try {
     const result = await adminAPI.sharedPool.listApprovals({
-      status: approvalStatusFilter.value || undefined,
+      scope: approvalScope.value,
+      status: approvalScope.value === 'reviewable' ? 'pending' : approvalStatusFilter.value || undefined,
       page: approvalPagination.page,
       page_size: approvalPagination.page_size
     })
@@ -2335,6 +2449,12 @@ const changeApprovalFilter = () => {
   void loadApprovals()
 }
 
+const changeApprovalScope = (scope: PoolApprovalScope) => {
+  approvalScope.value = scope
+  approvalStatusFilter.value = scope === 'reviewable' ? 'pending' : ''
+  changeApprovalFilter()
+}
+
 const handleApprovalPageChange = (page: number) => {
   approvalPagination.page = page
   selectedApproval.value = null
@@ -2368,7 +2488,11 @@ const decideApproval = async (decision: 'approve' | 'reject') => {
     selectedApproval.value = updated
     await loadApprovals()
   } catch (error) {
-    appStore.showError(extractApiErrorMessage(error, t('admin.sharedPool.approval.decisionFailed')))
+    appStore.showError(extractApiErrorMessage(error, t('admin.sharedPool.approval.decisionFailed'), {
+      POOL_APPROVAL_STALE: t('admin.sharedPool.approval.errors.stale'),
+      APPROVAL_ALREADY_DECIDED: t('admin.sharedPool.approval.errors.decided'),
+      POOL_APPROVAL_CONFLICT: t('admin.sharedPool.approval.errors.conflict')
+    }))
   } finally {
     approvalActionID.value = null
     approvalDecisionInProgress.value = null
@@ -3046,7 +3170,9 @@ const confirmDelete = async () => {
 		if (result.approval) void loadPendingApprovalCount()
 		else reload()
   } catch (error) {
-    appStore.showError(extractApiErrorMessage(error, t('admin.sharedPool.delete.failed')))
+    appStore.showError(extractApiErrorMessage(error, t('admin.sharedPool.delete.failed'), {
+      POOL_APPROVAL_CONFLICT: t('admin.sharedPool.approval.errors.conflict')
+    }))
   } finally {
     deleteSubmitting.value = false
   }
@@ -3167,5 +3293,9 @@ onUnmounted(() => {
 
 .account-tools-menu-icon {
   @apply inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-md;
+}
+
+:deep(tr[data-row-id^='import-batch:'] > td) {
+  @apply border-y border-emerald-200 bg-emerald-50/80 dark:border-emerald-800 dark:bg-emerald-950/30;
 }
 </style>

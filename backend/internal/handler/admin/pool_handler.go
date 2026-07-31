@@ -192,7 +192,7 @@ func (h *PoolHandler) CreateApproval(c *gin.Context) {
 
 func (h *PoolHandler) ListApprovals(c *gin.Context) {
 	page, pageSize := response.ParsePagination(c)
-	filter := service.PoolApprovalFilter{Status: c.Query("status"), ActionType: c.Query("action_type")}
+	filter := service.PoolApprovalFilter{Status: c.Query("status"), ActionType: c.Query("action_type"), Scope: c.Query("scope")}
 	if filter.ActionType == "" {
 		filter.ActionType = c.Query("request_type")
 	}
@@ -202,6 +202,19 @@ func (h *PoolHandler) ListApprovals(c *gin.Context) {
 	}
 	if filter.RequestedByUserID, ok = optionalPoolQueryID(c, "requested_by_user_id"); !ok {
 		return
+	}
+	if raw, exists := c.GetQuery("high_risk"); exists {
+		value, err := strconv.ParseBool(raw)
+		if err != nil {
+			response.BadRequest(c, "Invalid high_risk")
+			return
+		}
+		filter.HighRisk = &value
+	}
+	if strings.TrimSpace(filter.Scope) != "" {
+		if filter.ActorID, ok = poolActorID(c); !ok {
+			return
+		}
 	}
 	items, total, err := h.poolService.ListApprovals(c.Request.Context(), filter, page, pageSize)
 	if err != nil {

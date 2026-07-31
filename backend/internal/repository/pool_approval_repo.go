@@ -132,6 +132,19 @@ func (r *poolApprovalRepository) ListApprovals(ctx context.Context, filter servi
 	if filter.RequestedByUserID != nil {
 		add("r.requested_by_user_id=$%d", *filter.RequestedByUserID)
 	}
+	switch filter.Scope {
+	case "reviewable":
+		add("r.requested_by_user_id<>$%d", filter.ActorID)
+		clauses = append(clauses, "r.status='pending'")
+	case "mine":
+		add("r.requested_by_user_id=$%d", filter.ActorID)
+	case "processed":
+		add("r.decided_by_user_id=$%d", filter.ActorID)
+		clauses = append(clauses, "r.status<>'pending'")
+	}
+	if filter.HighRisk != nil {
+		add("COALESCE((r.change_summary#>>'{business,high_risk}')::boolean,false)=$%d", *filter.HighRisk)
+	}
 	where := " WHERE " + strings.Join(clauses, " AND ")
 
 	countRows, err := r.executor(ctx).QueryContext(ctx, `SELECT COUNT(*) FROM pool_approval_requests r`+where, args...)
@@ -226,6 +239,58 @@ FROM accounts WHERE id=$1 AND deleted_at IS NULL`, accountID)
 		return nil, err
 	}
 	return item, rows.Err()
+}
+
+func (r *poolApprovalRepository) GetAccountDeleteImpact(ctx context.Context, accountID int64) (*service.PoolAccountDeleteImpact, error) {
+	rows, err := r.executor(ctx).QueryContext(ctx, `
+WITH RECURSIVE family AS (
+  SELECT id,credentials FROM accounts WHERE (id=$1 OR parent_account_id=$1) AND deleted_at IS NULL
+), doomed_costs(id) AS (
+  SELECT id FROM account_cost_entries WHERE account_id IN (SELECT id FROM family) OR related_account_id IN (SELECT id FROM family)
+  UNION
+  SELECT child.id FROM account_cost_entries child JOIN doomed_costs parent ON child.supersedes_id=parent.id
+)
+SELECT
+  (SELECT COUNT(*) FROM family),
+  (SELECT COALESCE(SUM(jsonb_object_length(CASE WHEN jsonb_typeof(credentials)='object' THEN credentials ELSE '{}'::jsonb END)),0) FROM family),
+  (SELECT COUNT(*) FROM scheduled_test_plans WHERE account_id IN (SELECT id FROM family)),
+  (SELECT COUNT(*) FROM doomed_costs),
+  (SELECT COUNT(*) FROM pool_settlements settlement WHERE
+    settlement.filter_snapshot->>'account_id' IN (SELECT id::text FROM family)
+    OR EXISTS (
+      SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(settlement.cost_snapshot)='array' THEN settlement.cost_snapshot ELSE '[]'::jsonb END) item
+      WHERE item->>'account_id' IN (SELECT id::text FROM family)
+    )),
+  (SELECT COUNT(*) FROM account_groups WHERE account_id IN (SELECT id FROM family)),
+  (SELECT COUNT(*) FROM account_lifecycle_events WHERE account_id IN (SELECT id FROM family) OR replacement_account_id IN (SELECT id FROM family)),
+  (SELECT COUNT(*) FROM usage_logs WHERE account_id IN (SELECT id FROM family))`, accountID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	if !rows.Next() {
+		if err := rows.Err(); err != nil {
+			return nil, err
+		}
+		return nil, service.ErrPoolAccountNotFound
+	}
+	impact := &service.PoolAccountDeleteImpact{}
+	if err := rows.Scan(
+		&impact.Accounts,
+		&impact.CredentialKeys,
+		&impact.SchedulingRecords,
+		&impact.CostEntries,
+		&impact.Settlements,
+		&impact.GroupLinks,
+		&impact.LifecycleEvents,
+		&impact.UsageRecords,
+	); err != nil {
+		return nil, err
+	}
+	if impact.Accounts == 0 {
+		return nil, service.ErrPoolAccountNotFound
+	}
+	return impact, rows.Err()
 }
 
 func (r *poolApprovalRepository) UpdatePoolAccountApproved(ctx context.Context, id int64, input service.UpdatePoolAccountInput) error {

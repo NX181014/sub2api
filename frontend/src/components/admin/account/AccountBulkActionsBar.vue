@@ -2,7 +2,7 @@
   <div class="mb-4 flex flex-col gap-3 rounded-lg bg-primary-50 p-3 dark:bg-primary-900/20 sm:flex-row sm:items-center sm:justify-between">
     <div class="flex flex-wrap items-center gap-2">
       <span v-if="selectedIds.length > 0" class="text-sm font-medium text-primary-900 dark:text-primary-100">
-        {{ t('admin.accounts.bulkActions.selected', { count: selectedIds.length }) }}
+        {{ t('admin.accounts.bulkActions.selectedScope', { count: selectedIds.length, batches: selectedBatchCount }) }}
       </span>
       <span v-else class="text-sm font-medium text-primary-900 dark:text-primary-100">
         {{ t('admin.accounts.bulkActions.filtered', { count: filteredCount }) }}
@@ -51,6 +51,7 @@ import { useI18n } from 'vue-i18n'
 
 withDefaults(defineProps<{
   selectedIds: number[]
+  selectedBatchCount?: number
   filteredCount?: number
   hasActiveFilters?: boolean
   hiddenSelectedCount?: number
@@ -59,6 +60,7 @@ withDefaults(defineProps<{
   busy?: boolean
 }>(), {
   filteredCount: 0,
+  selectedBatchCount: 0,
   hasActiveFilters: false,
   hiddenSelectedCount: 0,
   allPageSelected: false,

@@ -46,3 +46,61 @@ func TestUpdateCostApprovedAdjustsExpectedTokensByDifference(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestGetAccountDeleteImpactReturnsLifecycleCounts(t *testing.T) {
+	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherRegexp))
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := dbent.NewClient(dbent.Driver(sql.OpenDB(dialect.Postgres, db)))
+	t.Cleanup(func() { _ = client.Close() })
+
+	mock.ExpectQuery(`WITH RECURSIVE family AS`).WithArgs(int64(7)).WillReturnRows(
+		sqlmock.NewRows([]string{"accounts", "credentials", "schedules", "costs", "settlements", "groups", "events", "usage"}).
+			AddRow(int64(2), int64(4), int64(1), int64(3), int64(2), int64(5), int64(6), int64(7)),
+	)
+	repo, ok := NewPoolApprovalRepository(client).(interface {
+		GetAccountDeleteImpact(context.Context, int64) (*service.PoolAccountDeleteImpact, error)
+	})
+	if !ok {
+		t.Fatal("pool approval repository must expose delete impact preview")
+	}
+	impact, err := repo.GetAccountDeleteImpact(context.Background(), 7)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if impact.Accounts != 2 || impact.CredentialKeys != 4 || impact.UsageRecords != 7 {
+		t.Fatalf("unexpected delete impact: %#v", impact)
+	}
+	if err = mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestListApprovalsScopesReviewableRequestsToOtherAdmins(t *testing.T) {
+	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherRegexp))
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := dbent.NewClient(dbent.Driver(sql.OpenDB(dialect.Postgres, db)))
+	t.Cleanup(func() { _ = client.Close() })
+
+	mock.ExpectQuery(`SELECT COUNT\(\*\) FROM pool_approval_requests r.*requested_by_user_id<>\$1.*status='pending'.*high_risk.*=\$2`).
+		WithArgs(int64(5), true).WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(int64(0)))
+	mock.ExpectQuery(`SELECT r.id, r.action_type.*requested_by_user_id<>\$1.*status='pending'.*high_risk.*=\$2.*LIMIT \$3 OFFSET \$4`).
+		WithArgs(int64(5), true, 20, 0).WillReturnRows(sqlmock.NewRows([]string{"id"}))
+
+	highRisk := true
+	items, total, err := NewPoolApprovalRepository(client).ListApprovals(context.Background(), service.PoolApprovalFilter{
+		Scope: "reviewable", ActorID: 5, HighRisk: &highRisk,
+	}, 20, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if total != 0 || len(items) != 0 {
+		t.Fatalf("unexpected scoped approvals: total=%d items=%#v", total, items)
+	}
+	if err = mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}

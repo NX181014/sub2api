@@ -302,9 +302,9 @@ describe('admin shared-pool API', () => {
     })
 
     get.mockResolvedValueOnce({ data: { items: [approval], total: 1, page: 1, page_size: 20, pages: 1 } })
-    await listApprovals({ status: 'pending', page: 1, page_size: 20 })
+    await listApprovals({ scope: 'reviewable', status: 'pending', high_risk: true, page: 1, page_size: 20 })
     expect(get).toHaveBeenCalledWith('/admin/pool/approvals', {
-      params: { status: 'pending', page: 1, page_size: 20 }
+      params: { scope: 'reviewable', status: 'pending', high_risk: true, page: 1, page_size: 20 }
     })
 
     post.mockResolvedValueOnce({ data: { ...approval, status: 'approved' } })
