@@ -35,9 +35,12 @@ func TestPoolApprovalDeleteImpactUsesAccountTraceRows(t *testing.T) {
 			int64(1), int64(1), int64(2), int64(8), int64(9), int64(10),
 		))
 
-	reader := repo.(interface {
+	reader, ok := repo.(interface {
 		GetAccountDeleteImpact(context.Context, int64) (*service.PoolAccountDeleteImpact, error)
 	})
+	if !ok {
+		t.Fatal("pool approval repository does not expose delete impact")
+	}
 	impact, err := reader.GetAccountDeleteImpact(context.Background(), 7)
 	if err != nil {
 		t.Fatal(err)
