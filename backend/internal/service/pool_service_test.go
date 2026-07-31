@@ -123,15 +123,22 @@ func TestBuildSettlementAllocationRollsUpExactly(t *testing.T) {
 	require.Equal(t, int64(40), lines[1].ContributionCreditMinor)
 
 	byUserAllocated, byUserCredit := map[int64]int64{}, map[int64]int64{}
+	byUserWeight, byUserShare := map[int64]decimal.Decimal{}, map[int64]decimal.Decimal{}
 	for _, line := range accountLines {
 		byUserAllocated[line.UserID] += line.AllocatedCostMinor
 		byUserCredit[line.UserID] += line.ContributionCreditMinor
+		byUserWeight[line.UserID] = byUserWeight[line.UserID].Add(decimal.RequireFromString(line.AccountUsageWeight))
+		byUserShare[line.UserID] = byUserShare[line.UserID].Add(decimal.RequireFromString(line.UsageShare))
 		require.Equal(t, "exact", line.TraceQuality)
 	}
 	require.Equal(t, map[int64]int64{1: 67, 2: 33}, byUserAllocated)
 	require.Equal(t, map[int64]int64{1: 60, 2: 40}, byUserCredit)
 	require.Equal(t, int64(34), accountLines[0].AllocatedCostMinor)
 	require.Equal(t, int64(33), accountLines[1].AllocatedCostMinor)
+	for _, line := range lines {
+		require.True(t, decimal.RequireFromString(line.UsageWeight).Equal(byUserWeight[line.UserID]))
+		require.True(t, decimal.RequireFromString(line.UsageShare).Equal(byUserShare[line.UserID]))
+	}
 }
 
 func TestBuildSettlementAllocationCarriesWhenThereIsNoUsage(t *testing.T) {

@@ -1250,6 +1250,9 @@ func BuildSettlementAllocation(costs []SettlementCostSnapshot, weights []PoolUsa
 			NetAmountMinor: allocatedCost - credit, PaymentStatus: "unpaid",
 		})
 		accountAllocations, _ := AllocateLargestRemainder(allocatedCost, accountWeights[userID])
+		accountShareUnits, _ := AllocateLargestRemainder(
+			share.Shift(int32(decimal.DivisionPrecision)).IntPart(), accountWeights[userID],
+		)
 		accountIDs := make(map[int64]struct{}, len(accountWeights[userID])+len(accountCredits[userID]))
 		for accountID := range accountWeights[userID] {
 			accountIDs[accountID] = struct{}{}
@@ -1264,10 +1267,7 @@ func BuildSettlementAllocation(costs []SettlementCostSnapshot, weights []PoolUsa
 		sort.Slice(orderedAccountIDs, func(i, j int) bool { return orderedAccountIDs[i] < orderedAccountIDs[j] })
 		for _, accountID := range orderedAccountIDs {
 			accountWeight := accountWeights[userID][accountID]
-			accountShare := decimal.Zero
-			if !totalWeight.IsZero() {
-				accountShare = accountWeight.Div(totalWeight)
-			}
+			accountShare := decimal.NewFromInt(accountShareUnits[accountID]).Shift(-int32(decimal.DivisionPrecision))
 			accountAllocated, accountCredit := accountAllocations[accountID], accountCredits[userID][accountID]
 			if carryOut != 0 {
 				accountAllocated, accountCredit = 0, 0
