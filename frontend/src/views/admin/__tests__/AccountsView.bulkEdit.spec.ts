@@ -90,7 +90,7 @@ vi.mock('vue-i18n', async () => {
 })
 
 const DataTableStub = {
-  props: ['columns', 'data'],
+  props: ['columns', 'data', 'mobileColumnKeys'],
   template: `
     <div data-test="data-table">
       <div data-test="select-header"><slot name="header-select" /></div>
@@ -98,6 +98,9 @@ const DataTableStub = {
       <div v-for="row in data" :key="row.id">
         <div data-test="select-row"><slot name="cell-select" :row="row" /></div>
         <slot name="cell-name" :value="row.name" :row="row" />
+        <slot name="cell-usage" :value="row.usage" :row="row" />
+        <slot name="cell-status" :value="row.status" :row="row" />
+        <slot name="cell-actions" :row="row" />
         <slot name="cell-created_at" :value="row.created_at" :row="row" />
       </div>
     </div>
@@ -341,7 +344,7 @@ describe('admin AccountsView bulk edit scope', () => {
     expect(wrapper.find('[data-test="workbench-batch"]').exists()).toBe(true)
     const defaultColumnKeys = (wrapper.getComponent(DataTableStub).props('columns') as Array<{ key: string }>).map(column => column.key)
     expect(defaultColumnKeys).toEqual(expect.arrayContaining([
-      'name', 'status', 'schedulable', 'capacity', 'platform_type', 'groups', 'usage', 'actions'
+      'name', 'usage', 'status', 'actions'
     ]))
     expect(defaultColumnKeys).not.toContain('id')
     expect(wrapper.text()).toContain('#7')
@@ -371,6 +374,40 @@ describe('admin AccountsView bulk edit scope', () => {
     await wrapper.get('[data-test="workbench-standalone"]').trigger('click')
     await flushPromises()
     expect(listAccounts.mock.calls.at(-1)?.[2]).toMatchObject({ import_batch_scope: 'standalone' })
+  })
+
+  it('renders the planned workbench hierarchy and keeps usage activity ahead of runtime details', async () => {
+    const batchID = 'batch-layout'
+    listAccounts.mockResolvedValue({
+      items: [{
+        ...account(7),
+        last_used_at: '2026-07-31T12:00:00Z',
+        extra: { import_batch_id: batchID }
+      }],
+      total: 1,
+      page: 1,
+      page_size: 20,
+      pages: 1
+    })
+    listRows.mockResolvedValue(batchRowsResponse(batchID, 1))
+
+    const wrapper = mountAccountsView({}, { embedded: true })
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="workbench-sidebar-header"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="workbench-sidebar-search"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="workbench-batch-status"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="account-workbench-identity"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="account-workbench-usage"]').exists()).toBe(true)
+    expect(wrapper.get('[data-test="account-workbench-last-used"]').text()).toContain('admin.accounts.columns.lastUsed')
+    expect(wrapper.find('[data-test="account-workbench-runtime"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="account-workbench-actions"]').exists()).toBe(true)
+
+    const table = wrapper.getComponent(DataTableStub)
+    expect((table.props('columns') as Array<{ key: string }>).map(column => column.key)).toEqual([
+      'select', 'name', 'usage', 'status', 'actions'
+    ])
+    expect(table.props('mobileColumnKeys')).toEqual(['select', 'name', 'usage', 'status', 'actions'])
   })
 
   it('applies an updated workbench URL context without emitting it back', async () => {

@@ -79,6 +79,8 @@ export default {
       deleteAccount: '删除账号',
       searchAccounts: '搜索名称、邮箱、账号 ID、批次或上传者...',
       searchAccountsHint: '支持账号名称、邮箱、账号 ID、导入批次和上传者',
+      workbenchNavigatorTitle: '批次与来源',
+      workbenchNavigatorSearch: '搜索批次或上传者',
       searchLabel: '搜索',
       moreFilters: '更多筛选',
       privacyLabel: '可见范围',

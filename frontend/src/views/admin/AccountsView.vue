@@ -195,13 +195,30 @@
         </div>
       </template>
       <template #table>
-        <div :class="embedded ? 'flex min-h-0 flex-1 flex-col lg:flex-row' : 'contents'">
+        <div :class="embedded ? 'workbench-layout min-h-0 flex-1' : 'contents'">
           <aside
             v-if="embedded"
-            class="workbench-sidebar shrink-0 border-b border-gray-200 bg-gray-50/60 dark:border-dark-700 dark:bg-dark-900/30 lg:border-b-0 lg:border-r"
+            class="workbench-sidebar shrink-0 border-b border-gray-200 bg-gray-50/60 dark:border-dark-700 dark:bg-dark-900/30 lg:flex lg:min-h-0 lg:flex-col lg:border-b-0 lg:border-r"
             :aria-label="t('admin.accounts.importBatchGroup')"
           >
-            <div class="flex items-start gap-2 overflow-x-auto p-3 lg:block lg:h-full lg:space-y-2 lg:overflow-y-auto">
+            <div data-test="workbench-sidebar-header" class="border-b border-gray-200 p-3 dark:border-dark-700">
+              <div class="mb-2 flex items-center justify-between gap-3">
+                <h2 class="text-sm font-semibold text-gray-900 dark:text-white">{{ t('admin.accounts.workbenchNavigatorTitle') }}</h2>
+                <span class="text-xs tabular-nums text-gray-500 dark:text-gray-400">{{ workbenchBatches.length }}</span>
+              </div>
+              <label class="relative block">
+                <Icon name="search" size="sm" class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                <input
+                  v-model.trim="workbenchNavigatorSearch"
+                  data-test="workbench-sidebar-search"
+                  type="search"
+                  :placeholder="t('admin.accounts.workbenchNavigatorSearch')"
+                  :aria-label="t('admin.accounts.workbenchNavigatorSearch')"
+                  class="h-11 w-full rounded-lg border border-gray-200 bg-white pl-9 pr-3 text-sm text-gray-900 outline-none transition focus:border-primary-400 focus:ring-2 focus:ring-primary-100 dark:border-dark-600 dark:bg-dark-800 dark:text-white dark:focus:border-primary-600 dark:focus:ring-primary-900/40"
+                />
+              </label>
+            </div>
+            <div class="flex items-start gap-2 overflow-x-auto p-3 lg:block lg:min-h-0 lg:flex-1 lg:space-y-2 lg:overflow-y-auto">
               <button
                 type="button"
                 data-test="workbench-all"
@@ -222,7 +239,7 @@
               </button>
 
               <div
-                v-for="group in workbenchUploaderGroups"
+                v-for="group in filteredWorkbenchUploaderGroups"
                 :key="String(group.id)"
                 class="flex min-w-max items-start gap-1 border-l border-gray-200 pl-2 dark:border-dark-700 lg:block lg:min-w-0 lg:space-y-1 lg:border-l-0 lg:border-t lg:pl-0 lg:pt-2"
               >
@@ -243,12 +260,24 @@
                   :class="['workbench-batch-item', selectedWorkbenchBatchID === batch.id ? 'workbench-batch-item-active' : '']"
                   @click="selectWorkbenchBatch(batch)"
                 >
-                  <span class="min-w-0">
+                  <span class="min-w-0 flex-1">
                     <span class="block truncate font-medium text-gray-800 dark:text-gray-100" :title="batch.names.join('、')">
                       {{ batch.names.join('、') || t('admin.accounts.importBatchGroup') }}
                     </span>
                     <span class="block truncate text-xs text-gray-500 dark:text-gray-400">
                       {{ formatDateTime(batch.created_at) }} · {{ batch.id }}
+                    </span>
+                    <span data-test="workbench-batch-status" class="mt-1.5 flex flex-wrap gap-1">
+                      <span
+                        v-for="item in batchStatusItems(batch.status)"
+                        :key="item.key"
+                        :class="['inline-flex rounded px-1.5 py-0.5 text-[10px] font-medium', item.className]"
+                      >
+                        {{ item.label }} {{ item.count }}
+                      </span>
+                      <span class="inline-flex rounded bg-gray-100 px-1.5 py-0.5 text-[10px] font-medium text-gray-600 dark:bg-dark-700 dark:text-gray-300">
+                        {{ t('admin.accounts.importBatchSchedulable', { current: batch.schedulable_count, total: batch.matched_count }) }}
+                      </span>
                     </span>
                   </span>
                   <span class="shrink-0 text-xs tabular-nums text-gray-500 dark:text-gray-400">{{ batch.matched_count }}</span>
@@ -297,7 +326,11 @@
           @toggle-page="togglePageSelection"
           @toggle-schedulable="handleBulkToggleSchedulable"
         />
-        <div ref="accountTableRef" class="account-workbench-table flex min-h-0 flex-1 flex-col overflow-hidden">
+        <div
+          ref="accountTableRef"
+          class="account-workbench-table flex min-h-0 flex-1 flex-col overflow-hidden"
+          :class="{ 'is-embedded': embedded }"
+        >
         <DataTable
           ref="dataTableRef"
           :columns="cols"
@@ -309,11 +342,13 @@
           default-sort-key="created_at"
           default-sort-order="desc"
           :sort-storage-key="ACCOUNT_SORT_STORAGE_KEY"
+          :sticky-first-column="!embedded"
+          :sticky-actions-column="!embedded"
           :estimate-row-height="168"
           :overscan="5"
           :virtualize-threshold="50"
           :mobile-column-keys="embedded
-            ? ['select', 'name', 'status', 'usage', 'capacity', 'schedulable', 'platform_type', 'groups', 'id', 'actions']
+            ? ['select', 'name', 'usage', 'status', 'actions']
             : ['select', 'uploader', 'usage', 'pool_record', 'status']"
         >
           <template #header-select>
@@ -360,11 +395,18 @@
                 <span class="block max-w-64 truncate text-xs text-gray-500 dark:text-gray-400" :title="row.names">{{ row.names }}</span>
               </span>
             </button>
-            <div v-else class="flex flex-col" :class="isImportBatchChild(row) ? 'border-l-2 border-gray-200 pl-4 dark:border-dark-600' : ''">
+            <div
+              v-else
+              data-test="account-workbench-identity"
+              :data-account-id="embedded ? row.id : undefined"
+              class="flex min-w-0 flex-col"
+              :class="isImportBatchChild(row) ? 'border-l-2 border-gray-200 pl-4 dark:border-dark-600' : ''"
+            >
               <button
                 v-if="embedded"
                 type="button"
-                class="min-h-11 max-w-[220px] truncate text-left font-medium text-primary-600 hover:underline dark:text-primary-400"
+                data-test="account-workbench-card"
+                class="min-h-11 w-full max-w-[220px] truncate text-left font-semibold text-gray-900 hover:text-primary-600 dark:text-white dark:hover:text-primary-400"
                 :title="value"
                 @click="emit('trace-account', row.id)"
               >
@@ -394,6 +436,14 @@
               >
                 {{ accountIdentitySubtitle(row) }}
               </span>
+              <div v-if="embedded" class="mt-2 flex max-w-[220px] flex-wrap items-center gap-1">
+                <PlatformTypeBadge :platform="row.platform" :type="row.type"
+                  :auth-mode="getOpenAIAuthMode(row)"
+                  :plan-type="getAccountPlanType(row)"
+                  :privacy-mode="row.extra?.privacy_mode || row.parent_privacy_mode"
+                  :subscription-expires-at="row.credentials?.subscription_expires_at || row.parent_subscription_expires_at" />
+                <span class="font-mono text-[11px] text-gray-400 dark:text-gray-500">#{{ row.id }}</span>
+              </div>
             </div>
           </template>
           <template #cell-uploader="{ row }">
@@ -473,6 +523,24 @@
                 {{ t('admin.accounts.status.notChecked') }}
               </span>
             </div>
+            <div v-else-if="embedded" data-test="account-workbench-runtime" class="flex min-w-0 flex-col gap-2">
+              <AccountStatusIndicator :account="row" @show-temp-unsched="handleShowTempUnsched" />
+              <div class="flex flex-wrap items-center gap-3">
+                <button
+                  @click="handleToggleSchedulable(row)"
+                  :disabled="togglingSchedulable === row.id"
+                  class="inline-flex min-h-11 items-center gap-2 rounded-md px-1 text-xs font-medium text-gray-600 focus:outline-none focus:ring-2 focus:ring-primary-500 disabled:cursor-not-allowed disabled:opacity-50 dark:text-gray-300"
+                  :title="row.schedulable ? t('admin.accounts.schedulableEnabled') : t('admin.accounts.schedulableDisabled')"
+                >
+                  <span class="relative inline-flex h-5 w-9 rounded-full border-2 border-transparent transition-colors" :class="row.schedulable ? 'bg-primary-500' : 'bg-gray-200 dark:bg-dark-600'">
+                    <span class="pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow transition" :class="row.schedulable ? 'translate-x-4' : 'translate-x-0'" />
+                  </span>
+                  <span>{{ t('admin.accounts.columns.schedulable') }}</span>
+                </button>
+                <AccountCapacityCell :account="row" />
+              </div>
+              <AccountGroupsCell v-if="!authStore.isSimpleMode" :groups="row.groups" :max-display="2" />
+            </div>
             <div v-else class="flex items-center gap-1.5">
               <AccountStatusIndicator :account="row" @show-temp-unsched="handleShowTempUnsched" />
             </div>
@@ -505,13 +573,30 @@
             </div>
           </template>
           <template #cell-usage="{ row }">
-            <div v-if="!isImportBatchRow(row)" class="account-usage-card">
+            <div
+              v-if="!isImportBatchRow(row)"
+              data-test="account-workbench-usage"
+              :class="embedded ? 'min-w-0' : 'account-usage-card'"
+            >
+              <div v-if="embedded" class="mb-2 flex items-center gap-1 text-xs font-semibold text-gray-500 dark:text-gray-400">
+                <span>{{ t('admin.accounts.columns.usageWindows') }}</span>
+                <HelpTooltip :content="t('admin.accounts.usageWindowsHint')" width-class="w-72" />
+              </div>
               <AccountUsageCell
                 :account="row"
                 :today-stats="todayStatsByAccountId[String(row.id)] ?? null"
                 :today-stats-loading="todayStatsLoading"
                 :manual-refresh-token="usageManualRefreshToken"
               />
+              <time
+                v-if="embedded"
+                data-test="account-workbench-last-used"
+                class="mt-2 block text-xs text-gray-500 dark:text-gray-400"
+                :datetime="row.last_used_at || undefined"
+                :title="row.last_used_at ? formatDateTime(row.last_used_at) : undefined"
+              >
+                {{ t('admin.accounts.columns.lastUsed') }}: {{ formatRelativeTime(row.last_used_at) }}
+              </time>
             </div>
           </template>
           <template #cell-pool_record="{ row }">
@@ -641,7 +726,7 @@
               <Icon :name="expandedImportBatches.has(row.batchID) ? 'chevronDown' : 'chevronRight'" size="sm" />
               {{ expandedImportBatches.has(row.batchID) ? t('admin.accounts.collapseImportBatch') : t('admin.accounts.expandImportBatch') }}
             </button>
-            <div v-else class="flex items-center gap-1">
+            <div v-else data-test="account-workbench-actions" class="flex items-center gap-1">
               <button @click="handleEdit(row)" class="flex min-h-11 min-w-11 flex-col items-center justify-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-primary-600 dark:hover:bg-dark-700 dark:hover:text-primary-400">
                 <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10" /></svg>
                 <span class="text-xs">{{ t('common.edit') }}</span>
@@ -1080,6 +1165,7 @@ const selectedWorkbenchUploaderID = ref<number | string>(
   props.initialWorkbenchContext.uploader_user_id ?? props.initialUploaderUserId
 )
 const workbenchBatches = ref<AccountImportBatchSummary[]>([])
+const workbenchNavigatorSearch = ref('')
 const workbenchNavigatorLoading = ref(false)
 const workbenchAccountTotal = ref(0)
 let workbenchNavigatorRevision = 0
@@ -1867,6 +1953,24 @@ const workbenchUploaderGroups = computed<WorkbenchUploaderGroup[]>(() => {
     groups.set(key, group)
   }
   return [...groups.values()]
+})
+const filteredWorkbenchUploaderGroups = computed<WorkbenchUploaderGroup[]>(() => {
+  const needle = workbenchNavigatorSearch.value.trim().toLocaleLowerCase()
+  if (!needle) return workbenchUploaderGroups.value
+  return workbenchUploaderGroups.value
+    .map(group => {
+      const groupMatches = group.label.toLocaleLowerCase().includes(needle)
+      const batches = groupMatches
+        ? group.batches
+        : group.batches.filter(batch => [
+            batch.id,
+            batch.uploader_username,
+            batch.uploader_email,
+            ...batch.names
+          ].some(value => String(value || '').toLocaleLowerCase().includes(needle)))
+      return { ...group, batches }
+    })
+    .filter(group => group.batches.length > 0)
 })
 const selectedWorkbenchBatch = computed(() =>
   workbenchBatches.value.find(batch => batch.id === selectedWorkbenchBatchID.value)
@@ -2694,11 +2798,17 @@ const toggleableColumns = computed(() =>
 )
 
 // Filtered columns based on visibility
-const cols = computed(() =>
-  allColumns.value.filter(col =>
+const cols = computed(() => {
+  if (embedded) {
+    return ['select', 'name', 'usage', 'status', 'actions'].flatMap(key => {
+      const column = allColumns.value.find(col => col.key === key)
+      return column ? [column] : []
+    })
+  }
+  return allColumns.value.filter(col =>
     ['select', 'name', 'actions'].includes(col.key) || !hiddenColumns.has(col.key)
   )
-)
+})
 
 const handleEdit = (a: Account) => { edAcc.value = a; showEdit.value = true }
 const poolRecordFor = (accountID: number) => props.poolRecords[accountID]
@@ -3730,13 +3840,15 @@ onUnmounted(() => {
   @apply border-primary-200 bg-primary-50/60 ring-1 ring-primary-100 dark:border-primary-700/60 dark:bg-primary-900/20 dark:ring-primary-900/40;
 }
 
-.workbench-sidebar {
-  flex-basis: auto;
+.workbench-layout {
+  display: flex;
+  flex-direction: column;
 }
 
 @media (min-width: 1024px) {
-  .workbench-sidebar {
-    flex-basis: clamp(244px, 16vw, 276px);
+  .workbench-layout {
+    display: grid;
+    grid-template-columns: clamp(244px, 16%, 276px) minmax(0, 1fr);
   }
 }
 
@@ -3744,38 +3856,156 @@ onUnmounted(() => {
   @apply min-w-[232px] rounded-xl border border-gray-200/80 bg-gray-50/70 px-3 py-2 dark:border-dark-700 dark:bg-dark-800/60;
 }
 
-/* Keep desktop rows readable as compact cards while DataTable owns pagination and virtualization. */
-.account-workbench-table :deep(.table-wrapper table) {
+/* Preserve the regular account page table; only the embedded pool view uses the composite card grid. */
+.account-workbench-table:not(.is-embedded) :deep(.table-wrapper table) {
   border-collapse: separate;
   border-spacing: 0 8px;
 }
 
-.account-workbench-table :deep(.table-body) {
+.account-workbench-table:not(.is-embedded) :deep(.table-body) {
   background: transparent;
 }
 
-.account-workbench-table :deep(.table-body tr[data-row-id]) {
+.account-workbench-table:not(.is-embedded) :deep(.table-body tr[data-row-id]) {
   box-shadow: 0 1px 2px rgb(15 23 42 / 0.05);
 }
 
-.account-workbench-table :deep(.table-body tr[data-row-id] td) {
+.account-workbench-table:not(.is-embedded) :deep(.table-body tr[data-row-id] td) {
   border-top: 1px solid rgb(226 232 240 / 0.9);
   border-bottom: 1px solid rgb(226 232 240 / 0.9);
   background: rgb(255 255 255 / 0.96);
 }
 
-.account-workbench-table :deep(.table-body tr[data-row-id] td:first-child) {
+.account-workbench-table:not(.is-embedded) :deep(.table-body tr[data-row-id] td:first-child) {
   border-left: 1px solid rgb(226 232 240 / 0.9);
   border-radius: 12px 0 0 12px;
 }
 
-.account-workbench-table :deep(.table-body tr[data-row-id] td:last-child) {
+.account-workbench-table:not(.is-embedded) :deep(.table-body tr[data-row-id] td:last-child) {
   border-right: 1px solid rgb(226 232 240 / 0.9);
   border-radius: 0 12px 12px 0;
 }
 
-.dark .account-workbench-table :deep(.table-body tr[data-row-id] td) {
+.dark .account-workbench-table:not(.is-embedded) :deep(.table-body tr[data-row-id] td) {
   border-color: rgb(71 85 105 / 0.7);
   background: rgb(30 41 59 / 0.78);
+}
+
+@media (min-width: 768px) {
+  .account-workbench-table.is-embedded :deep(.table-wrapper table),
+  .account-workbench-table.is-embedded :deep(.table-body) {
+    display: block;
+    width: 100%;
+    min-width: 0;
+    background: transparent;
+  }
+
+  .account-workbench-table.is-embedded :deep(.table-header) {
+    display: none;
+  }
+
+  .account-workbench-table.is-embedded :deep(.table-body tr[data-row-id]) {
+    display: grid;
+    grid-template-columns: 44px minmax(160px, 190px) minmax(280px, 1fr) 92px;
+    width: 100%;
+    min-width: 576px;
+    margin: 8px 0;
+    overflow: hidden;
+    border: 1px solid rgb(226 232 240 / 0.9);
+    border-radius: 8px;
+    background: rgb(255 255 255 / 0.96);
+    box-shadow: 0 1px 2px rgb(15 23 42 / 0.05);
+  }
+
+  .account-workbench-table.is-embedded :deep(.table-body tr[data-row-id] td) {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    padding: 14px 12px;
+    white-space: normal;
+    background: transparent;
+  }
+
+  .account-workbench-table.is-embedded :deep(.table-body tr[data-row-id] td + td) {
+    border-left: 1px solid rgb(241 245 249);
+  }
+
+  .account-workbench-table.is-embedded :deep(.table-body tr[data-row-id] td:nth-child(1)),
+  .account-workbench-table.is-embedded :deep(.table-body tr[data-row-id] td:nth-child(5)) {
+    grid-row: 1 / 3;
+  }
+
+  .account-workbench-table.is-embedded :deep(.table-body tr[data-row-id] td:nth-child(4)) {
+    grid-column: 2 / 4;
+    grid-row: 2;
+    border-top: 1px solid rgb(241 245 249);
+  }
+
+  .account-workbench-table.is-embedded :deep(.table-body tr[data-row-id] td:nth-child(5)) {
+    grid-column: 4;
+  }
+
+  .account-workbench-table.is-embedded :deep(.table-body tr:not([data-row-id])) {
+    display: block;
+    width: 100%;
+  }
+
+  .account-workbench-table.is-embedded :deep(.table-body tr:not([data-row-id]) td) {
+    display: block;
+    width: 100%;
+  }
+
+  .dark .account-workbench-table.is-embedded :deep(.table-body tr[data-row-id]) {
+    border-color: rgb(71 85 105 / 0.7);
+    background: rgb(30 41 59 / 0.78);
+  }
+
+  .dark .account-workbench-table.is-embedded :deep(.table-body tr[data-row-id] td + td) {
+    border-left-color: rgb(51 65 85 / 0.8);
+  }
+
+  .dark .account-workbench-table.is-embedded :deep(.table-body tr[data-row-id] td:nth-child(4)) {
+    border-top-color: rgb(51 65 85 / 0.8);
+  }
+}
+
+@media (min-width: 1200px) {
+  .account-workbench-table.is-embedded :deep(.table-body tr[data-row-id]) {
+    grid-template-columns: 44px minmax(180px, 210px) minmax(300px, 1fr) minmax(190px, 220px) 104px;
+    min-width: 838px;
+  }
+
+  .account-workbench-table.is-embedded :deep(.table-body tr[data-row-id] td:nth-child(1)),
+  .account-workbench-table.is-embedded :deep(.table-body tr[data-row-id] td:nth-child(4)),
+  .account-workbench-table.is-embedded :deep(.table-body tr[data-row-id] td:nth-child(5)) {
+    grid-column: auto;
+    grid-row: auto;
+  }
+
+  .account-workbench-table.is-embedded :deep(.table-body tr[data-row-id] td:nth-child(4)) {
+    border-top: 0;
+  }
+}
+
+@media (max-width: 767px) {
+  .account-workbench-table.is-embedded :deep([data-field='name']),
+  .account-workbench-table.is-embedded :deep([data-field='usage']),
+  .account-workbench-table.is-embedded :deep([data-field='status']) {
+    display: block;
+  }
+
+  .account-workbench-table.is-embedded :deep([data-field='name'] > span),
+  .account-workbench-table.is-embedded :deep([data-field='usage'] > span),
+  .account-workbench-table.is-embedded :deep([data-field='status'] > span) {
+    display: none;
+  }
+
+  .account-workbench-table.is-embedded :deep([data-field='name'] > div),
+  .account-workbench-table.is-embedded :deep([data-field='usage'] > div),
+  .account-workbench-table.is-embedded :deep([data-field='status'] > div) {
+    width: 100%;
+    max-width: none;
+    text-align: left;
+  }
 }
 </style>

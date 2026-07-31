@@ -1256,23 +1256,6 @@ func (s *adminServiceImpl) resolveBulkUpdateTargetIDs(ctx context.Context, filte
 	}
 }
 
-func (s *adminServiceImpl) deleteAccountLegacy(ctx context.Context, id int64) error {
-	// 级联删除 spark 影子账号（先删影子，再删母账号）
-	shadows, err := s.accountRepo.ListShadowsByParent(ctx, id)
-	if err != nil {
-		return fmt.Errorf("list spark shadows for cascade delete: %w", err)
-	}
-	for _, shadow := range shadows {
-		if err := s.accountRepo.Delete(ctx, shadow.ID); err != nil {
-			return fmt.Errorf("cascade delete spark shadow %d: %w", shadow.ID, err)
-		}
-	}
-	if err := s.accountRepo.Delete(ctx, id); err != nil {
-		return err
-	}
-	return nil
-}
-
 type AccountDeleteOptions struct {
 }
 

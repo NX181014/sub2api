@@ -80,6 +80,8 @@ export default {
       deleteAccount: 'Delete Account',
       searchAccounts: 'Search name, email, account ID, batch, or uploader...',
       searchAccountsHint: 'Searches account name, email, account ID, import batch, and uploader',
+      workbenchNavigatorTitle: 'Batches and sources',
+      workbenchNavigatorSearch: 'Search batches or uploaders',
       searchLabel: 'Search',
       moreFilters: 'More filters',
       privacyLabel: 'Visibility',
