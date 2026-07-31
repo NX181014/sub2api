@@ -93,15 +93,6 @@ func hardDeleteAccountFamily(ctx context.Context, exec accountDeleteExecutor, id
 	for i, id := range ids {
 		textIDs[i] = strconv.FormatInt(id, 10)
 	}
-	if _, err := exec.ExecContext(ctx, `DELETE FROM ops_retry_attempts r
-		WHERE r.pinned_account_id=ANY($1) OR r.used_account_id=ANY($1)
-		OR EXISTS (SELECT 1 FROM ops_error_logs e
-			WHERE e.account_id=ANY($1) AND (e.id=r.source_error_id OR e.id=r.result_error_id))
-		OR EXISTS (SELECT 1 FROM usage_logs u
-			WHERE u.account_id=ANY($1) AND u.request_id IS NOT NULL
-			AND u.request_id IN (r.result_usage_request_id,r.upstream_request_id,r.result_request_id))`, idArray); err != nil {
-		return err
-	}
 	if err := hardDeleteAccountUsage(ctx, exec, ids); err != nil {
 		return err
 	}

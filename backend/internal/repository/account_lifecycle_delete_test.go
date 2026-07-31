@@ -24,8 +24,6 @@ func TestDeleteAccountWithLifecycleHardDeletesFamily(t *testing.T) {
 	mock.ExpectQuery(`SELECT id\s+FROM accounts`).WithArgs(int64(7)).WillReturnRows(
 		sqlmock.NewRows([]string{"id"}).AddRow(int64(8)).AddRow(int64(7)),
 	)
-	mock.ExpectExec(`(?s)DELETE FROM ops_retry_attempts.*pinned_account_id.*used_account_id.*source_error_id.*result_error_id.*result_usage_request_id`).
-		WillReturnResult(sqlmock.NewResult(0, 4))
 	mock.ExpectQuery(`SELECT MIN\(created_at\),MAX\(created_at\) FROM usage_logs`).
 		WillReturnRows(sqlmock.NewRows([]string{"min", "max"}).AddRow(nil, nil))
 	for _, query := range []string{
@@ -60,7 +58,6 @@ func TestDeleteAccountWithLifecycleRollsBackWhenCleanupFails(t *testing.T) {
 	mock.ExpectQuery(`SELECT id\s+FROM accounts`).WithArgs(int64(7)).WillReturnRows(
 		sqlmock.NewRows([]string{"id"}).AddRow(int64(7)),
 	)
-	mock.ExpectExec(`DELETE FROM ops_retry_attempts`).WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectQuery(`SELECT MIN\(created_at\),MAX\(created_at\) FROM usage_logs`).
 		WillReturnRows(sqlmock.NewRows([]string{"min", "max"}).AddRow(nil, nil))
 	mock.ExpectExec(`DELETE FROM pool_settlements`).WillReturnError(context.Canceled)
