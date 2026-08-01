@@ -79,24 +79,20 @@ func (s *GroupRepoSuite) TestCreateFromSourcePreservesPriorityAndFiltersIneligib
 	}
 	s.Require().NoError(s.repo.Create(s.ctx, source))
 
-	insertAccount := func(name, accountType string, deleted bool) int64 {
+	insertAccount := func(name, accountType string) int64 {
 		var id int64
-		deletedAt := any(nil)
-		if deleted {
-			deletedAt = "2026-07-16T00:00:00Z"
-		}
 		s.Require().NoError(scanSingleRow(
 			s.ctx,
 			s.tx,
-			"INSERT INTO accounts (name, platform, type, deleted_at) VALUES ($1, $2, $3, $4) RETURNING id",
-			[]any{name, service.PlatformOpenAI, accountType, deletedAt},
+			"INSERT INTO accounts (name, platform, type) VALUES ($1, $2, $3) RETURNING id",
+			[]any{name, service.PlatformOpenAI, accountType},
 			&id,
 		))
 		return id
 	}
-	oauthID := insertAccount("duplicate-oauth", service.AccountTypeOAuth, false)
-	apiKeyID := insertAccount("duplicate-apikey", service.AccountTypeAPIKey, false)
-	deletedID := insertAccount("duplicate-deleted", service.AccountTypeOAuth, true)
+	oauthID := insertAccount("duplicate-oauth", service.AccountTypeOAuth)
+	apiKeyID := insertAccount("duplicate-apikey", service.AccountTypeAPIKey)
+	deletedID := insertAccount("duplicate-deleted", service.AccountTypeOAuth)
 	for _, binding := range []struct {
 		accountID int64
 		priority  int
@@ -110,6 +106,8 @@ func (s *GroupRepoSuite) TestCreateFromSourcePreservesPriorityAndFiltersIneligib
 		)
 		s.Require().NoError(err)
 	}
+	_, err := s.tx.ExecContext(s.ctx, "UPDATE accounts SET deleted_at='2026-07-16T00:00:00Z' WHERE id=$1", deletedID)
+	s.Require().NoError(err)
 
 	duplicate := &service.Group{
 		Name:                 "duplicate-source (Copy)",
