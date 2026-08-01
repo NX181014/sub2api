@@ -44,8 +44,12 @@ export default {
     columns: { account: '账号', accounts: '账号数', contributor: '贡献人', uploader: '上传人', uploadedAt: '上传时间', source: '采购来源', costType: '成本类型', cost: '成本', servicePeriod: '服务期', warranty: '质保截止', status: '状态', roi: '回本率', remaining: '待回本', netProfit: '当前盈亏', recoveredAt: '首次回本时间', member: '成员', usageWeight: '计价用量', share: '用量占比', allocated: '分摊成本', credit: '垫付抵扣', net: '净额', confirmation: '成员确认', ban30: '30 天封禁率', survival: '平均存活天数', actions: '操作' },
     form: { title: '录入账号成本', account: '账号', providerIdentity: '上游账号身份', contributor: '贡献人/付款人', uploader: '实际上传人', source: '购买来源', purchaseUrl: '购买链接', orderNo: '订单号', entryType: '成本类型', cost: '实付成本', costPerAccount: '每个账号的实付成本', costPerAccountHint: '批量导入时，这个金额会分别记入每一个导入成功的账号。订单总价请先除以账号数。', currency: '币种', serviceStart: '服务开始', serviceEnd: '服务结束', warrantyEnd: '质保截止', notes: '备注', costSharingEnabled: '参与 AA 结算', costSharingEnabledHint: '关闭后该账号的成本和用量不进入后续结算周期', saved: '账号成本已保存', fxRate: 'USD/CNY 估值汇率', saveFxRate: '保存估值汇率', fxRateSaved: '估值汇率已保存' },
     actions: { poolRecord: '号池资料' },
+    workbench: {
+      sourceCount: '{count} 个采购来源', grossCost: '采购总额', latestPurchase: '最近采购', recovery: '已回收',
+      dataQuality: { ready: '数据完整', partial_expected_tokens: '部分未定价', missing_expected_tokens: '未定价', no_cost: '暂无成本', derived: '聚合推算', unavailable: '暂无数据' }
+    },
     delete: {
-      hardDeleteHint: '账号及全部关联数据将永久删除。',
+      hardDeleteHint: '账号凭证及关联业务数据将永久清理；历史用量记录继续保留。',
 		bulkConfirm: '确定删除选中的 {count} 个账号及关联业务数据吗？', bulkSummary: '已删除 {deleted} 个，进入审批 {approval} 个，失败 {failed} 个', approvalSubmitted: '删除申请已提交，等待其他管理员审核', success: '账号及关联数据已删除', failed: '删除账号失败'
     },
     approval: {
@@ -61,9 +65,9 @@ export default {
       businessUpdate: '变更账号业务信息', businessUpdateFields: '变更字段：{fields}', businessCredential: '查看账号敏感凭证', businessDelete: '删除账号及其关联业务数据',
       businessGrouped: '涉及 {groups}，共 {count} 项业务变更',
       groups: { identity: '账号身份与归属', visibility: '可见范围', scheduling: '运行调度', capacity: '容量配置', cost_settlement: '成本结算', linked_data: '关联数据', credentials: '凭证信息' },
-      impacts: { accounts: '账号', credential_keys: '凭证键', scheduling_records: '调度记录', cost_entries: '成本记录', settlements: '受影响结算', settlement_account_costs: 'AA 账号成本行', settlement_account_lines: 'AA 账号分摊行', mixed_settlements: '混合结算', empty_settlements: '空结算', purchase_sources: '采购来源', group_links: '分组关联', lifecycle_events: '生命周期记录', usage_records: '用量记录' },
+      impacts: { accounts: '账号', credential_keys: '凭证键', scheduling_records: '调度记录', cost_entries: '成本记录', settlements: '受影响结算', settlement_account_costs: 'AA 账号成本行', settlement_account_lines: 'AA 账号分摊行', mixed_settlements: '混合结算', empty_settlements: '空结算', purchase_sources: '采购来源', group_links: '分组关联', lifecycle_events: '生命周期记录', retained_usage_records: '保留的用量记录' },
       effects: { identity_changed: '账号识别与归属信息会更新', visibility_changed: '账号可见与分组范围会变化', scheduling_changed: '账号调度行为会变化', capacity_changed: '容量与回本计算会变化', settlement_changed: '成本或 AA 结算依据会变化', linked_data_changed: '账号关联业务数据会更新', credential_replacement: '凭证将更新，凭证值保持隐藏', credential_access: '批准后申请人可查看一次凭证', permanent_cleanup: '执行后账号及关联业务数据会永久清理' },
-      updated: '已更新', showRemaining: '展开其余 {count} 项', technicalDetails: '技术详情', deleteImpactTitle: '执行后将清理以下关联记录',
+      updated: '已更新', showRemaining: '展开其余 {count} 项', technicalDetails: '技术详情', deleteImpactTitle: '执行后的关联数据变化',
       sensitiveValue: '敏感值已隐藏',
       reasons: { deleteAccountReason: '申请删除账号', updateAccountReason: '申请变更账号信息', reauthorizeReason: '申请更新账号授权凭证', updatePoolReason: '申请变更号池账号资料', updateCostReason: '申请变更号池成本记录', credentialAccessReason: '管理员申请查看凭证' },
       fieldLabels: { name: '账号名称', notes: '备注', type: '账号类型', proxy: '代理', concurrency: '并发数', priority: '优先级', rateMultiplier: '计费倍率', loadFactor: '负载系数', status: '账号状态', groups: '所属分组', expiresAt: '过期时间', autoPauseOnExpired: '过期自动暂停', providerIdentity: '上游账号身份', contributor: '贡献人', uploader: '上传人', costSharingEnabled: '参与 AA 结算', credentialKeys: '变更的凭证键名', extraKeys: '变更的扩展字段', deleteAccount: '删除账号', costEntry: '成本记录', payer: '付款人', purchaseSource: '采购来源', costType: '成本类型', costAmount: '成本金额', currency: '币种', fxRate: '汇率', serviceStart: '服务开始', serviceEnd: '服务结束', warrantyEnd: '质保截止', paidAt: '付款时间', orderNo: '订单号', purchaseUrl: '采购链接', note: '成本备注', expectedTokens: '预期 Token 数' },

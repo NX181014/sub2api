@@ -179,7 +179,7 @@ func TestPoolApprovalBusinessSummaryIncludesDeleteImpact(t *testing.T) {
 	if len(summary.Impacts) != 13 || summary.Impacts[0].Key != "accounts" || summary.Impacts[0].Count != 2 ||
 		summary.Impacts[5].Key != "settlement_account_costs" || summary.Impacts[5].Count != 8 ||
 		summary.Impacts[8].Key != "empty_settlements" || summary.Impacts[8].Count != 1 ||
-		summary.Impacts[12].Key != "usage_records" || summary.Impacts[12].Count != 7 {
+		summary.Impacts[12].Key != "retained_usage_records" || summary.Impacts[12].Count != 7 {
 		t.Fatalf("unexpected delete impact: %#v", summary.Impacts)
 	}
 }

@@ -1084,6 +1084,12 @@ export interface Account {
   uploader_username?: string | null
   expected_token_count?: number | null
   pool_total_usage_tokens?: number
+  pool_latest_purchase_source?: string | null
+  pool_purchase_source_count?: number
+  pool_purchase_cost_minor?: number
+  pool_latest_purchased_at?: string | null
+  pool_recognized_cost_minor?: number
+  pool_recovery_data_quality?: 'ready' | 'partial_expected_tokens' | 'missing_expected_tokens' | 'no_cost'
   pool_net_cost_minor?: number
   pool_remaining_cost_minor?: number
   pool_cost_progress?: string | null

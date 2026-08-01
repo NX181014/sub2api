@@ -218,6 +218,13 @@ type Account struct {
 	PoolCostProgress        *string                        `json:"pool_cost_progress,omitempty"`
 	PoolLifecycleStatus     string                         `json:"pool_lifecycle_status,omitempty"`
 
+	PoolPurchaseCostMinor    int64      `json:"pool_purchase_cost_minor,omitempty"`
+	PoolRecognizedCostMinor  int64      `json:"pool_recognized_cost_minor,omitempty"`
+	PoolLatestPurchaseSource *string    `json:"pool_latest_purchase_source,omitempty"`
+	PoolPurchaseSourceCount  int64      `json:"pool_purchase_source_count,omitempty"`
+	PoolLatestPurchasedAt    *time.Time `json:"pool_latest_purchased_at,omitempty"`
+	PoolRecoveryDataQuality  string     `json:"pool_recovery_data_quality,omitempty"`
+
 	Schedulable bool `json:"schedulable"`
 
 	RateLimitedAt    *time.Time `json:"rate_limited_at"`

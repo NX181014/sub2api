@@ -56,6 +56,13 @@ type Account struct {
 	PoolCostProgress       *string
 	PoolLifecycleStatus    string
 
+	PoolPurchaseCostMinor    int64
+	PoolRecognizedCostMinor  int64
+	PoolLatestPurchaseSource *string
+	PoolPurchaseSourceCount  int64
+	PoolLatestPurchasedAt    *time.Time
+	PoolRecoveryDataQuality  string
+
 	Schedulable bool
 
 	RateLimitedAt    *time.Time

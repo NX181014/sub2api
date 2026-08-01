@@ -812,7 +812,7 @@ func buildPoolApprovalBusinessSummary(action string, account *Account, changes P
 				{Key: "purchase_sources", Count: deleteImpact.PurchaseSources},
 				{Key: "group_links", Count: deleteImpact.GroupLinks},
 				{Key: "lifecycle_events", Count: deleteImpact.LifecycleEvents},
-				{Key: "usage_records", Count: deleteImpact.UsageRecords},
+				{Key: "retained_usage_records", Count: deleteImpact.UsageRecords},
 			}
 		}
 		return result

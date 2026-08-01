@@ -249,8 +249,24 @@
                   :class="['workbench-nav-item', workbenchScope === 'uploader' && String(selectedWorkbenchUploaderID) === String(group.id) ? 'workbench-nav-item-active' : '']"
                   @click="selectWorkbenchUploader(group)"
                 >
-                  <span class="truncate font-medium" :title="group.label">{{ group.label }}</span>
-                  <span class="shrink-0 text-xs tabular-nums text-gray-500 dark:text-gray-400">{{ group.count }}</span>
+                  <span class="min-w-0 flex-1">
+                    <span class="flex items-center justify-between gap-2">
+                      <span class="truncate font-medium" :title="group.label">{{ group.label }}</span>
+                      <span class="shrink-0 text-xs tabular-nums text-gray-500 dark:text-gray-400">{{ group.count }}</span>
+                    </span>
+                    <span data-test="workbench-uploader-status" class="mt-1.5 flex flex-wrap gap-1">
+                      <span
+                        v-for="item in batchStatusItems(group.status)"
+                        :key="item.key"
+                        :class="['inline-flex rounded px-1.5 py-0.5 text-[10px] font-medium', item.className]"
+                      >
+                        {{ item.label }} {{ item.count }}
+                      </span>
+                      <span class="inline-flex rounded bg-gray-100 px-1.5 py-0.5 text-[10px] font-medium text-gray-600 dark:bg-dark-700 dark:text-gray-300">
+                        {{ t('admin.accounts.importBatchSchedulable', { current: group.schedulableCount, total: group.count }) }}
+                      </span>
+                    </span>
+                  </span>
                 </button>
                 <button
                   v-for="batch in group.batches"
@@ -578,25 +594,102 @@
               data-test="account-workbench-usage"
               :class="embedded ? 'min-w-0' : 'account-usage-card'"
             >
-              <div v-if="embedded" class="mb-2 flex items-center gap-1 text-xs font-semibold text-gray-500 dark:text-gray-400">
-                <span>{{ t('admin.accounts.columns.usageWindows') }}</span>
-                <HelpTooltip :content="t('admin.accounts.usageWindowsHint')" width-class="w-72" />
+              <div :class="embedded ? 'account-usage-finance' : ''">
+                <div class="min-w-0">
+                  <div v-if="embedded" class="mb-2 flex items-center gap-1 text-xs font-semibold text-gray-500 dark:text-gray-400">
+                    <span>{{ t('admin.accounts.columns.usageWindows') }}</span>
+                    <HelpTooltip :content="t('admin.accounts.usageWindowsHint')" width-class="w-72" />
+                  </div>
+                  <AccountUsageCell
+                    :account="row"
+                    :today-stats="todayStatsByAccountId[String(row.id)] ?? null"
+                    :today-stats-loading="todayStatsLoading"
+                    :manual-refresh-token="usageManualRefreshToken"
+                  />
+                  <time
+                    v-if="embedded"
+                    data-test="account-workbench-last-used"
+                    class="mt-2 block text-xs text-gray-500 dark:text-gray-400"
+                    :datetime="row.last_used_at || undefined"
+                    :title="row.last_used_at ? formatDateTime(row.last_used_at) : undefined"
+                  >
+                    {{ t('admin.accounts.columns.lastUsed') }}: {{ formatRelativeTime(row.last_used_at) }}
+                  </time>
+                </div>
+
+                <button
+                  v-if="embedded"
+                  type="button"
+                  data-test="account-workbench-finance"
+                  class="account-finance-summary min-h-11 min-w-0 text-left"
+                  :title="t('admin.sharedPool.actions.poolRecord')"
+                  @click="emit('pool-record', row)"
+                >
+                  <div class="flex min-w-0 items-start justify-between gap-2">
+                    <div class="min-w-0">
+                      <p class="truncate text-xs font-semibold text-gray-800 dark:text-gray-100" :title="poolWorkbenchRecordFor(row).sourceName">
+                        {{ poolWorkbenchRecordFor(row).sourceName || t('admin.sharedPool.intake.pending') }}
+                      </p>
+                      <p v-if="poolWorkbenchRecordFor(row).sourceCount > 1" class="text-[10px] text-gray-500 dark:text-gray-400">
+                        {{ t('admin.sharedPool.workbench.sourceCount', { count: poolWorkbenchRecordFor(row).sourceCount }) }}
+                      </p>
+                    </div>
+                    <StatusBadge
+                      class="shrink-0"
+                      :status="poolTraceBadgeStatus(poolWorkbenchRecordFor(row).traceQuality)"
+                      :label="t(`admin.sharedPool.workbench.dataQuality.${poolWorkbenchRecordFor(row).traceQuality}`)"
+                    />
+                  </div>
+
+                  <dl class="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-[11px]">
+                    <div>
+                      <dt class="text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.workbench.grossCost') }}</dt>
+                      <dd class="font-medium tabular-nums text-gray-800 dark:text-gray-100">{{ formatPoolCost(poolWorkbenchRecordFor(row).grossCostMinor) }}</dd>
+                    </div>
+                    <div>
+                      <dt class="text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.ledger.netCost') }}</dt>
+                      <dd class="font-medium tabular-nums text-gray-800 dark:text-gray-100">{{ formatPoolCost(poolWorkbenchRecordFor(row).netCostMinor) }}</dd>
+                    </div>
+                    <div class="col-span-2 flex min-w-0 items-center justify-between gap-2">
+                      <dt class="shrink-0 text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.workbench.latestPurchase') }}</dt>
+                      <dd class="truncate text-right font-medium text-gray-700 dark:text-gray-200" :title="poolWorkbenchRecordFor(row).latestPurchaseAt ? formatDateTime(poolWorkbenchRecordFor(row).latestPurchaseAt) : '-'">
+                        {{ poolWorkbenchRecordFor(row).latestPurchaseAt ? formatDateTime(poolWorkbenchRecordFor(row).latestPurchaseAt) : '-' }}
+                      </dd>
+                    </div>
+                  </dl>
+
+                  <div class="mt-2">
+                    <div class="mb-1 flex items-center justify-between gap-2 text-[10px]">
+                      <span class="text-gray-500 dark:text-gray-400">
+                        {{ t('admin.sharedPool.workbench.recovery') }} {{ formatPoolCost(poolWorkbenchRecordFor(row).recognizedCostMinor) }}
+                      </span>
+                      <span class="font-medium tabular-nums text-gray-700 dark:text-gray-200">{{ (poolWorkbenchRecordFor(row).progress * 100).toFixed(1) }}%</span>
+                    </div>
+                    <div class="h-1.5 overflow-hidden rounded-full bg-gray-200 dark:bg-gray-700">
+                      <div
+                        class="h-full bg-emerald-500 transition-all duration-300"
+                        :style="{ width: `${Math.min(1, poolWorkbenchRecordFor(row).progress) * 100}%` }"
+                      ></div>
+                    </div>
+                  </div>
+
+                  <div class="mt-2 flex items-center justify-between gap-2 text-[11px]">
+                    <span class="text-gray-500 dark:text-gray-400">
+                      {{ t(poolWorkbenchRecordFor(row).remainingCostMinor > 0 ? 'admin.sharedPool.columns.remaining' : 'admin.sharedPool.columns.netProfit') }}
+                    </span>
+                    <span
+                      class="font-semibold tabular-nums"
+                      :class="poolWorkbenchRecordFor(row).remainingCostMinor > 0
+                        ? 'text-amber-600 dark:text-amber-400'
+                        : poolWorkbenchRecordFor(row).netGainMinor >= 0
+                          ? 'text-emerald-600 dark:text-emerald-400'
+                          : 'text-red-600 dark:text-red-400'"
+                    >
+                      {{ formatPoolCost(poolWorkbenchRecordFor(row).remainingCostMinor > 0 ? poolWorkbenchRecordFor(row).remainingCostMinor : poolWorkbenchRecordFor(row).netGainMinor) }}
+                    </span>
+                  </div>
+                </button>
               </div>
-              <AccountUsageCell
-                :account="row"
-                :today-stats="todayStatsByAccountId[String(row.id)] ?? null"
-                :today-stats-loading="todayStatsLoading"
-                :manual-refresh-token="usageManualRefreshToken"
-              />
-              <time
-                v-if="embedded"
-                data-test="account-workbench-last-used"
-                class="mt-2 block text-xs text-gray-500 dark:text-gray-400"
-                :datetime="row.last_used_at || undefined"
-                :title="row.last_used_at ? formatDateTime(row.last_used_at) : undefined"
-              >
-                {{ t('admin.accounts.columns.lastUsed') }}: {{ formatRelativeTime(row.last_used_at) }}
-              </time>
             </div>
           </template>
           <template #cell-pool_record="{ row }">
@@ -1935,6 +2028,8 @@ type WorkbenchUploaderGroup = {
   id: number | string
   label: string
   count: number
+  schedulableCount: number
+  status: AccountBatchStatusSummary
   batches: AccountImportBatchSummary[]
 }
 const workbenchUploaderGroups = computed<WorkbenchUploaderGroup[]>(() => {
@@ -1946,9 +2041,23 @@ const workbenchUploaderGroups = computed<WorkbenchUploaderGroup[]>(() => {
       id,
       label: batch.uploader_username || batch.uploader_email || t('admin.sharedPool.ledger.unassignedUploader'),
       count: 0,
+      schedulableCount: 0,
+      status: {
+        normal: 0,
+        error: 0,
+        inactive: 0,
+        rate_limited: 0,
+        overloaded: 0,
+        temp_unschedulable: 0,
+        manual_unschedulable: 0
+      },
       batches: []
     }
     group.count += batch.matched_count
+    group.schedulableCount += batch.schedulable_count
+    for (const key of Object.keys(group.status) as Array<keyof AccountBatchStatusSummary>) {
+      group.status[key] += batch.status[key]
+    }
     group.batches.push(batch)
     groups.set(key, group)
   }
@@ -2812,8 +2921,52 @@ const cols = computed(() => {
 
 const handleEdit = (a: Account) => { edAcc.value = a; showEdit.value = true }
 const poolRecordFor = (accountID: number) => props.poolRecords[accountID]
-const hasPoolCost = (account: Account) => Number(account.pool_net_cost_minor || 0) > 0 || Boolean(poolRecordFor(account.id))
+const hasPoolCost = (account: Account) => Number(account.pool_purchase_cost_minor || account.pool_net_cost_minor || 0) > 0 || Boolean(poolRecordFor(account.id))
 const formatPoolCost = (minor?: number | null) => `¥${(Number(minor || 0) / 100).toFixed(2)}`
+type PoolWorkbenchTraceQuality = 'ready' | 'no_cost' | 'missing_expected_tokens' | 'partial_expected_tokens' | 'derived' | 'unavailable'
+type PoolWorkbenchAccount = Account & {
+  pool_latest_purchase_source?: string | null
+  pool_purchase_source_count?: number
+  pool_purchase_cost_minor?: number
+  pool_recognized_cost_minor?: number
+  pool_latest_purchased_at?: string | null
+  pool_recovery_data_quality?: PoolWorkbenchTraceQuality
+}
+const poolWorkbenchRecordFor = (account: Account) => {
+  const page = account as PoolWorkbenchAccount
+  const fallback = poolRecordFor(account.id)
+  const fallbackMinor = (amount?: number | null) => Math.round(Number(amount || 0) * 100)
+  const sourceName = page.pool_latest_purchase_source?.trim() || fallback?.purchase_source_name?.trim() || ''
+  const grossCostMinor = Number(page.pool_purchase_cost_minor ?? fallbackMinor(fallback?.purchase_cost))
+  const netCostMinor = Number(page.pool_net_cost_minor ?? fallbackMinor(fallback?.purchase_cost))
+  const hasPageMetrics = Boolean(page.pool_recovery_data_quality)
+  const legacyRemainingCostMinor = Math.max(0, Number(page.pool_remaining_cost_minor ?? fallbackMinor(fallback?.remaining_cost)))
+  const recognizedCostMinor = Math.max(0, Number(
+    hasPageMetrics
+      ? (page.pool_recognized_cost_minor ?? 0)
+      : (fallback ? fallbackMinor(fallback.usage_value) : Math.max(0, netCostMinor - legacyRemainingCostMinor))
+  ))
+  const remainingCostMinor = hasPageMetrics
+    ? Math.max(0, grossCostMinor - recognizedCostMinor)
+    : legacyRemainingCostMinor
+  const progress = Math.max(0, grossCostMinor > 0
+    ? recognizedCostMinor / grossCostMinor
+    : Number(page.pool_cost_progress ?? ((fallback?.roi_rate || 0) / 100)))
+  return {
+    sourceName,
+    sourceCount: Math.max(0, Number(page.pool_purchase_source_count ?? (sourceName ? 1 : 0))),
+    grossCostMinor,
+    netCostMinor,
+    recognizedCostMinor,
+    latestPurchaseAt: page.pool_latest_purchased_at || fallback?.paid_at || null,
+    remainingCostMinor,
+    netGainMinor: recognizedCostMinor - grossCostMinor,
+    progress,
+    traceQuality: page.pool_recovery_data_quality || (fallback ? 'derived' : 'unavailable') as PoolWorkbenchTraceQuality
+  }
+}
+const poolTraceBadgeStatus = (quality: PoolWorkbenchTraceQuality) =>
+  quality === 'ready' ? 'success' : ['derived', 'missing_expected_tokens', 'partial_expected_tokens'].includes(quality) ? 'warning' : 'inactive'
 const poolRecoveryLabel = (account: Account) => {
   const progress = Number(account.pool_cost_progress || 0)
   if (progress >= 1) return t('admin.sharedPool.status.recovered')
@@ -3825,7 +3978,7 @@ onUnmounted(() => {
 }
 
 .workbench-nav-item {
-  @apply flex min-h-11 min-w-48 items-center justify-between gap-3 rounded-xl border border-transparent px-3 py-2 text-left text-sm text-gray-700 transition-colors hover:border-gray-200 hover:bg-white dark:text-gray-200 dark:hover:border-dark-600 dark:hover:bg-dark-800 lg:min-w-0 lg:w-full;
+  @apply flex min-h-11 min-w-48 items-center justify-between gap-3 rounded-lg border border-transparent px-3 py-2 text-left text-sm text-gray-700 transition-colors hover:border-gray-200 hover:bg-white dark:text-gray-200 dark:hover:border-dark-600 dark:hover:bg-dark-800 lg:min-w-0 lg:w-full;
 }
 
 .workbench-nav-item-active {
@@ -3833,7 +3986,7 @@ onUnmounted(() => {
 }
 
 .workbench-batch-item {
-  @apply flex min-h-11 min-w-64 items-center justify-between gap-3 rounded-xl border border-gray-200/80 bg-white/70 px-3 py-2 text-left text-sm transition-colors hover:border-gray-300 hover:bg-white dark:border-dark-700 dark:bg-dark-800/70 dark:hover:border-dark-600 dark:hover:bg-dark-700 lg:min-w-0 lg:w-full;
+  @apply flex min-h-11 min-w-64 items-center justify-between gap-3 rounded-lg border border-gray-200/80 bg-white/70 px-3 py-2 text-left text-sm transition-colors hover:border-gray-300 hover:bg-white dark:border-dark-700 dark:bg-dark-800/70 dark:hover:border-dark-600 dark:hover:bg-dark-700 lg:min-w-0 lg:w-full;
 }
 
 .workbench-batch-item-active {
@@ -3848,12 +4001,28 @@ onUnmounted(() => {
 @media (min-width: 1024px) {
   .workbench-layout {
     display: grid;
-    grid-template-columns: clamp(244px, 16%, 276px) minmax(0, 1fr);
+    grid-template-columns: clamp(272px, 18%, 304px) minmax(0, 1fr);
   }
 }
 
 .account-usage-card {
   @apply min-w-[232px] rounded-xl border border-gray-200/80 bg-gray-50/70 px-3 py-2 dark:border-dark-700 dark:bg-dark-800/60;
+}
+
+.account-usage-finance {
+  display: grid;
+  min-width: 0;
+  gap: 12px;
+}
+
+.account-finance-summary {
+  width: 100%;
+  padding-top: 12px;
+  border-top: 1px solid rgb(226 232 240 / 0.9);
+}
+
+.dark .account-finance-summary {
+  border-top-color: rgb(51 65 85 / 0.8);
 }
 
 /* Preserve the regular account page table; only the embedded pool view uses the composite card grid. */
@@ -3969,7 +4138,26 @@ onUnmounted(() => {
   }
 }
 
-@media (min-width: 1200px) {
+@media (min-width: 1280px) {
+  .account-usage-finance {
+    grid-template-columns: minmax(280px, 1fr) minmax(240px, 0.85fr);
+    gap: 16px;
+  }
+
+  .account-finance-summary {
+    padding-top: 0;
+    padding-left: 16px;
+    border-top: 0;
+    border-left: 1px solid rgb(226 232 240 / 0.9);
+  }
+
+  .dark .account-finance-summary {
+    border-top-color: transparent;
+    border-left-color: rgb(51 65 85 / 0.8);
+  }
+}
+
+@media (min-width: 1440px) {
   .account-workbench-table.is-embedded :deep(.table-body tr[data-row-id]) {
     grid-template-columns: 44px minmax(180px, 210px) minmax(300px, 1fr) minmax(190px, 220px) 104px;
     min-width: 838px;

@@ -382,6 +382,14 @@ describe('admin AccountsView bulk edit scope', () => {
       items: [{
         ...account(7),
         last_used_at: '2026-07-31T12:00:00Z',
+        pool_latest_purchase_source: 'Supplier A',
+        pool_purchase_source_count: 2,
+        pool_purchase_cost_minor: 4200,
+        pool_net_cost_minor: 4000,
+        pool_recognized_cost_minor: 2000,
+        pool_remaining_cost_minor: 2000,
+        pool_latest_purchased_at: '2026-07-30T12:00:00Z',
+        pool_recovery_data_quality: 'ready',
         extra: { import_batch_id: batchID }
       }],
       total: 1,
@@ -400,6 +408,8 @@ describe('admin AccountsView bulk edit scope', () => {
     expect(wrapper.find('[data-test="account-workbench-identity"]').exists()).toBe(true)
     expect(wrapper.find('[data-test="account-workbench-usage"]').exists()).toBe(true)
     expect(wrapper.get('[data-test="account-workbench-last-used"]').text()).toContain('admin.accounts.columns.lastUsed')
+    expect(wrapper.get('[data-test="account-workbench-finance"]').text()).toContain('Supplier A')
+    expect(wrapper.get('[data-test="account-workbench-finance"]').text()).toContain('47.6%')
     expect(wrapper.find('[data-test="account-workbench-runtime"]').exists()).toBe(true)
     expect(wrapper.find('[data-test="account-workbench-actions"]').exists()).toBe(true)
 

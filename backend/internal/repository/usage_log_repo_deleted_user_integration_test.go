@@ -13,7 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestUsageLog_ListWithFilters_ResolvesSoftDeletedUser(t *testing.T) {
+func TestUsageLog_ListWithFilters_ResolvesSoftDeletedIdentity(t *testing.T) {
 	ctx := context.Background()
 	tx := testEntTx(t)
 	client := tx.Client()
@@ -41,6 +41,7 @@ func TestUsageLog_ListWithFilters_ResolvesSoftDeletedUser(t *testing.T) {
 
 	// 软删除该用户（触发 SoftDeleteMixin Hook → UPDATE deleted_at）。
 	require.NoError(t, client.User.DeleteOneID(deleted.ID).Exec(ctx))
+	require.NoError(t, client.Account.DeleteOneID(account.ID).Exec(ctx))
 
 	logs, _, err := repo.ListWithFilters(ctx, pagination.PaginationParams{Page: 1, PageSize: 50},
 		usagestats.UsageLogFilters{ExactTotal: true})
@@ -62,4 +63,6 @@ func TestUsageLog_ListWithFilters_ResolvesSoftDeletedUser(t *testing.T) {
 	actLog := byUser[active.ID]
 	require.NotNil(t, actLog.User)
 	require.Nil(t, actLog.User.DeletedAt)
+	require.NotNil(t, actLog.Account, "deleted account identity must resolve")
+	require.Equal(t, account.ID, actLog.Account.ID)
 }

@@ -78,14 +78,14 @@ func TestPoolCostRecognitionQueriesUsePricedTranches(t *testing.T) {
 		}
 		defer func() { _ = db.Close() }()
 		mock.ExpectQuery(`SELECT a.id,uploader.email`).WithArgs(int64(9)).WillReturnRows(sqlmock.NewRows([]string{
-			"id", "uploader", "uploader_username", "expected", "basis", "refund", "transferred", "written_off", "net", "tranches", "usage", "lifecycle",
-		}).AddRow(9, nil, nil, 2000, 40000, 0, 0, 0, 40000, pricedTranchesJSON, 1000, "active"))
+			"id", "uploader", "uploader_username", "expected", "basis", "refund", "transferred", "written_off", "net", "purchase", "source_count", "unpriced", "tranches", "usage", "source", "latest_paid_at", "lifecycle",
+		}).AddRow(9, nil, nil, 2000, 40000, 10000, 0, 0, 30000, 40000, 2, 0, pricedTranchesJSON, 1000, "Supplier A", time.Date(2026, 7, 29, 0, 0, 0, 0, time.UTC), "active"))
 
 		accounts := []service.Account{{ID: 9}}
 		if err := newAccountRepositoryWithSQL(nil, db, nil).enrichAccountListPoolMetrics(context.Background(), accounts); err != nil {
 			t.Fatal(err)
 		}
-		if accounts[0].PoolRemainingCostMinor != 30000 || accounts[0].PoolCostProgress == nil || *accounts[0].PoolCostProgress != "0.5" {
+		if accounts[0].PoolPurchaseCostMinor != 40000 || accounts[0].PoolRecognizedCostMinor != 20000 || accounts[0].PoolRemainingCostMinor != 20000 || accounts[0].PoolCostProgress == nil || *accounts[0].PoolCostProgress != "0.5" || accounts[0].PoolPurchaseSourceCount != 2 || accounts[0].PoolLatestPurchaseSource == nil || *accounts[0].PoolLatestPurchaseSource != "Supplier A" || accounts[0].PoolLatestPurchasedAt == nil || accounts[0].PoolRecoveryDataQuality != "ready" {
 			t.Fatalf("unexpected account metrics: %#v", accounts[0])
 		}
 	})

@@ -274,6 +274,12 @@ func AccountFromServiceShallow(a *service.Account) *Account {
 		ParentAccountID:         a.ParentAccountID,
 		QuotaDimension:          a.QuotaDimension,
 	}
+	out.PoolPurchaseCostMinor = a.PoolPurchaseCostMinor
+	out.PoolRecognizedCostMinor = a.PoolRecognizedCostMinor
+	out.PoolLatestPurchaseSource = a.PoolLatestPurchaseSource
+	out.PoolPurchaseSourceCount = a.PoolPurchaseSourceCount
+	out.PoolLatestPurchasedAt = a.PoolLatestPurchasedAt
+	out.PoolRecoveryDataQuality = a.PoolRecoveryDataQuality
 
 	// 提取 5h 窗口费用控制和会话数量控制配置（仅 Anthropic OAuth/SetupToken 账号有效）
 	if a.IsAnthropicOAuthOrSetupToken() {

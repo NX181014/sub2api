@@ -45,14 +45,14 @@ func (r *accountRepository) DeleteAccountWithLifecycle(ctx context.Context, acco
 		exec = tx
 	}
 
-	ids, err := lockAccountDeleteFamily(ctx, exec, accountID)
+	ids, groupIDs, err := lockAccountDeleteFamily(ctx, exec, accountID)
 	if err != nil {
 		return nil, err
 	}
 	if len(ids) == 0 {
 		return nil, service.ErrAccountNotFound
 	}
-	if err := hardDeleteAccountFamily(ctx, exec, ids); err != nil {
+	if err := deleteAccountFamilyPreservingUsage(ctx, exec, ids, groupIDs); err != nil {
 		return nil, err
 	}
 	if tx != nil {
@@ -66,29 +66,58 @@ func (r *accountRepository) DeleteAccountWithLifecycle(ctx context.Context, acco
 	return &service.AccountDeleteResult{AccountID: accountID, AffectedAccountIDs: ids}, nil
 }
 
-func lockAccountDeleteFamily(ctx context.Context, exec accountDeleteExecutor, accountID int64) ([]int64, error) {
+func lockAccountDeleteFamily(ctx context.Context, exec accountDeleteExecutor, accountID int64) ([]int64, []int64, error) {
 	rows, err := exec.QueryContext(ctx, `
 SELECT id
 FROM accounts
-WHERE id=$1 OR parent_account_id=$1
-ORDER BY CASE WHEN id=$1 THEN 1 ELSE 0 END, id
+WHERE (id=$1 OR parent_account_id=$1) AND deleted_at IS NULL
+ORDER BY CASE WHEN id=$1 THEN 1 ELSE 0 END,id
 FOR UPDATE`, accountID)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer func() { _ = rows.Close() }()
 	ids := make([]int64, 0, 2)
 	for rows.Next() {
 		var id int64
 		if err := rows.Scan(&id); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		ids = append(ids, id)
 	}
-	return ids, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, nil, err
+	}
+	if len(ids) == 0 {
+		return ids, nil, nil
+	}
+	groupRows, err := exec.QueryContext(ctx, `
+SELECT DISTINCT group_id
+FROM account_groups
+WHERE account_id=ANY($1)
+ORDER BY group_id`, pq.Array(ids))
+	if err != nil {
+		return nil, nil, err
+	}
+	defer func() { _ = groupRows.Close() }()
+	groupIDs := make([]int64, 0)
+	for groupRows.Next() {
+		var groupID int64
+		if err := groupRows.Scan(&groupID); err != nil {
+			return nil, nil, err
+		}
+		groupIDs = append(groupIDs, groupID)
+	}
+	if err := groupRows.Err(); err != nil {
+		return nil, nil, err
+	}
+	return ids, groupIDs, nil
 }
 
-func hardDeleteAccountFamily(ctx context.Context, exec accountDeleteExecutor, ids []int64) error {
+func deleteAccountFamilyPreservingUsage(ctx context.Context, exec accountDeleteExecutor, ids, groupIDs []int64) error {
 	idArray := pq.Array(ids)
 	textIDs := make([]string, len(ids))
 	for i, id := range ids {
@@ -97,14 +126,14 @@ func hardDeleteAccountFamily(ctx context.Context, exec accountDeleteExecutor, id
 	if err := hardDeleteAccountSettlements(ctx, exec, ids, textIDs); err != nil {
 		return err
 	}
-	if err := hardDeleteAccountUsage(ctx, exec, ids); err != nil {
-		return err
-	}
 
 	queries := []struct {
 		sql  string
 		args []any
 	}{
+		{`DELETE FROM account_groups WHERE account_id=ANY($1)`, []any{idArray}},
+		{`DELETE FROM scheduled_test_plans WHERE account_id=ANY($1)`, []any{idArray}},
+		{`DELETE FROM sora_accounts WHERE account_id=ANY($1)`, []any{idArray}},
 		{`DELETE FROM batch_image_jobs WHERE account_id=ANY($1)`, []any{idArray}},
 		{`DELETE FROM ops_system_logs WHERE account_id=ANY($1)`, []any{idArray}},
 		{`DELETE FROM ops_error_logs WHERE account_id=ANY($1)`, []any{idArray}},
@@ -137,16 +166,30 @@ func hardDeleteAccountFamily(ctx context.Context, exec accountDeleteExecutor, id
 			WHERE route.value::text=ANY($1::text[]))`, []any{pq.Array(textIDs)}},
 		{`UPDATE accounts SET extra=COALESCE(extra, '{}'::jsonb)-'linked_openai_account_id',updated_at=NOW()
 			WHERE extra->>'linked_openai_account_id'=ANY($1::text[]) AND NOT id=ANY($2)`, []any{pq.Array(textIDs), idArray}},
+		{`UPDATE accounts SET
+			name='deleted-account-'||id::text,notes=NULL,provider_identity=NULL,
+			contributor_user_id=NULL,created_by_user_id=NULL,cost_sharing_enabled=FALSE,
+			credentials='{}'::jsonb,
+			extra=CASE WHEN platform='openai' THEN '{"openai_long_context_billing_enabled":false}'::jsonb ELSE '{}'::jsonb END,
+			proxy_id=NULL,proxy_fallback_origin_id=NULL,concurrency=0,load_factor=NULL,priority=50,rate_multiplier=1,
+			status='disabled',error_message=NULL,last_used_at=NULL,expires_at=NULL,auto_pause_on_expired=FALSE,
+			schedulable=FALSE,rate_limited_at=NULL,rate_limit_reset_at=NULL,overload_until=NULL,
+			temp_unschedulable_until=NULL,temp_unschedulable_reason=NULL,session_window_start=NULL,
+			session_window_end=NULL,session_window_status=NULL,parent_account_id=NULL,quota_dimension='global',
+			expected_token_count=NULL,deleted_at=COALESCE(deleted_at,NOW()),updated_at=NOW()
+			WHERE id=ANY($1)`, []any{idArray}},
 		{`DELETE FROM scheduler_outbox o WHERE account_id=ANY($1) OR EXISTS (
 			SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(o.payload->'account_ids')='array' THEN o.payload->'account_ids' ELSE '[]'::jsonb END) AS payload_id(value)
 			WHERE payload_id.value::text=ANY($2::text[]))`, []any{idArray, pq.Array(textIDs)}},
-		{`DELETE FROM accounts WHERE id=ANY($1) AND id<>$2`, []any{idArray, ids[len(ids)-1]}},
-		{`DELETE FROM accounts WHERE id=$1`, []any{ids[len(ids)-1]}},
-		{`INSERT INTO scheduler_outbox(event_type,account_id)
-			SELECT $2,account_id FROM unnest($1::bigint[]) AS account_id`, []any{idArray, service.SchedulerOutboxEventAccountChanged}},
 	}
 	for _, query := range queries {
 		if _, err := exec.ExecContext(ctx, query.sql, query.args...); err != nil {
+			return err
+		}
+	}
+	payload := buildSchedulerGroupPayload(groupIDs)
+	for _, id := range ids {
+		if err := enqueueSchedulerOutbox(ctx, exec, service.SchedulerOutboxEventAccountChanged, &id, nil, payload); err != nil {
 			return err
 		}
 	}
@@ -396,33 +439,4 @@ SET period_cost_minor=$2,carry_in_minor=$3,carry_out_minor=$4,total_cost_minor=$
     updated_at=NOW()
 WHERE id=$1`, settlementID, periodCost, carryIn, carryOut, periodCost+carryIn, totalWeight.String(), pricingCoverage, unpricedCount, pq.Array(textIDs))
 	return err
-}
-
-func hardDeleteAccountUsage(ctx context.Context, exec accountDeleteExecutor, ids []int64) error {
-	rows, err := exec.QueryContext(ctx, `SELECT MIN(created_at),MAX(created_at) FROM usage_logs WHERE account_id=ANY($1)`, pq.Array(ids))
-	if err != nil {
-		return err
-	}
-	defer func() { _ = rows.Close() }()
-	var start, end sql.NullTime
-	if !rows.Next() {
-		return rows.Err()
-	}
-	if err := rows.Scan(&start, &end); err != nil {
-		return err
-	}
-	if err := rows.Err(); err != nil {
-		return err
-	}
-	if err := rows.Close(); err != nil {
-		return err
-	}
-	if !start.Valid || !end.Valid {
-		return nil
-	}
-	if _, err := exec.ExecContext(ctx, `DELETE FROM usage_logs WHERE account_id=ANY($1)`, pq.Array(ids)); err != nil {
-		return err
-	}
-	// ponytail: account deletion is rare; reuse the existing exact range rebuild instead of duplicating aggregate SQL.
-	return newDashboardAggregationRepositoryWithSQL(exec).RecomputeRange(ctx, start.Time, end.Time.Add(time.Nanosecond))
 }

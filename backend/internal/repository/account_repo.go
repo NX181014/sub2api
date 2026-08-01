@@ -1061,8 +1061,12 @@ SELECT a.id,uploader.email,uploader.username,a.expected_token_count,
        COALESCE(costs.transferred_out_minor,0)::bigint,
        COALESCE(costs.written_off_minor,0)::bigint,
        COALESCE(costs.net_cost_minor,0)::bigint,
+	   COALESCE(costs.purchase_cost_minor,0)::bigint,
+	   COALESCE(costs.purchase_source_count,0)::bigint,
+	   COALESCE(costs.unpriced_positive_count,0)::bigint,
 	   COALESCE(costs.tranches,'[]'::jsonb),
        COALESCE(usage.total_tokens,0)::bigint,
+	   latest_source.name,latest_source.paid_at,
        COALESCE(lifecycle.event_type,'active')
 FROM accounts a
 LEFT JOIN users uploader ON uploader.id=a.created_by_user_id
@@ -1072,6 +1076,9 @@ LEFT JOIN LATERAL (
            COALESCE(-SUM(c.cny_amount_minor) FILTER (WHERE c.entry_type='replacement_out' AND c.cny_amount_minor<0),0)::bigint transferred_out_minor,
            COALESCE(-SUM(c.cny_amount_minor) FILTER (WHERE c.entry_type='write_off' AND c.cny_amount_minor<0),0)::bigint written_off_minor,
            COALESCE(SUM(c.cny_amount_minor) FILTER (WHERE c.entry_type<>'write_off'),0)::bigint net_cost_minor,
+	       COALESCE(SUM(c.cny_amount_minor) FILTER (WHERE c.cny_amount_minor>0),0)::bigint purchase_cost_minor,
+	       COUNT(DISTINCT c.purchase_source_id) FILTER (WHERE c.cny_amount_minor>0)::bigint purchase_source_count,
+	       COUNT(*) FILTER (WHERE c.cny_amount_minor>0 AND c.expected_token_count IS NULL)::bigint unpriced_positive_count,
 	       COALESCE((SELECT jsonb_agg(jsonb_build_object(
 	         'id',priced.id,'cost_minor',priced.cny_amount_minor,'expected_tokens',priced.expected_token_count,
 	         'paid_at',priced.paid_at,'payer_user_id',priced.payer_user_id,'purchase_source_id',priced.purchase_source_id,
@@ -1090,6 +1097,13 @@ LEFT JOIN LATERAL (
     FROM usage_logs ul WHERE ul.account_id=a.id
 ) usage ON TRUE
 LEFT JOIN LATERAL (
+    SELECT ps.name,c.paid_at
+    FROM account_cost_entries c
+    LEFT JOIN purchase_sources ps ON ps.id=c.purchase_source_id
+    WHERE c.account_id=a.id AND c.entry_type IN ('purchase','renewal','topup','price_version')
+    ORDER BY c.paid_at DESC,c.id DESC LIMIT 1
+) latest_source ON TRUE
+LEFT JOIN LATERAL (
     SELECT e.event_type FROM account_lifecycle_events e
     WHERE e.account_id=a.id AND e.event_type<>'refund'
     ORDER BY e.occurred_at DESC,e.id DESC LIMIT 1
@@ -1107,10 +1121,14 @@ WHERE a.id IN (`+strings.Join(placeholders, ",")+`)`, args...)
 			expectedTokens                             sql.NullInt64
 			costBasis, refund, transferred, writtenOff int64
 			netCost, totalUsage                        int64
+			purchaseCost, purchaseSourceCount          int64
+			unpricedPositiveCount                      int64
 			trancheJSON                                []byte
+			latestPurchaseSource                       sql.NullString
+			latestPurchasedAt                          sql.NullTime
 			lifecycleStatus                            string
 		)
-		if err := rows.Scan(&accountID, &uploaderEmail, &uploaderUsername, &expectedTokens, &costBasis, &refund, &transferred, &writtenOff, &netCost, &trancheJSON, &totalUsage, &lifecycleStatus); err != nil {
+		if err := rows.Scan(&accountID, &uploaderEmail, &uploaderUsername, &expectedTokens, &costBasis, &refund, &transferred, &writtenOff, &netCost, &purchaseCost, &purchaseSourceCount, &unpricedPositiveCount, &trancheJSON, &totalUsage, &latestPurchaseSource, &latestPurchasedAt, &lifecycleStatus); err != nil {
 			return err
 		}
 		tranches, err := decodePoolCostTranches(trancheJSON)
@@ -1131,10 +1149,34 @@ WHERE a.id IN (`+strings.Join(placeholders, ",")+`)`, args...)
 			account.ExpectedTokenCount = &expectedTokens.Int64
 		}
 		account.PoolTotalUsageTokens = totalUsage
+		account.PoolPurchaseCostMinor = purchaseCost
 		account.PoolNetCostMinor = netCost
-		_, account.PoolRemainingCostMinor, account.PoolCostProgress = service.CalculateAccountCostRecognitionByTranches(
+		recognized, _, progress := service.CalculateAccountCostRecognitionByTranches(
 			costBasis, refund+transferred+writtenOff, totalUsage, tranches,
 		)
+		account.PoolRecognizedCostMinor = recognized + refund + transferred
+		if account.PoolRecognizedCostMinor > costBasis {
+			account.PoolRecognizedCostMinor = costBasis
+		}
+		account.PoolRemainingCostMinor = costBasis - account.PoolRecognizedCostMinor
+		account.PoolCostProgress = progress
+		account.PoolPurchaseSourceCount = purchaseSourceCount
+		if latestPurchaseSource.Valid {
+			account.PoolLatestPurchaseSource = &latestPurchaseSource.String
+		}
+		if latestPurchasedAt.Valid {
+			account.PoolLatestPurchasedAt = &latestPurchasedAt.Time
+		}
+		switch {
+		case purchaseCost <= 0:
+			account.PoolRecoveryDataQuality = "no_cost"
+		case account.PoolCostProgress == nil:
+			account.PoolRecoveryDataQuality = "missing_expected_tokens"
+		case unpricedPositiveCount > 0:
+			account.PoolRecoveryDataQuality = "partial_expected_tokens"
+		default:
+			account.PoolRecoveryDataQuality = "ready"
+		}
 		account.PoolLifecycleStatus = lifecycleStatus
 	}
 	return rows.Err()
