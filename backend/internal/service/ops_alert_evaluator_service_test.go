@@ -18,6 +18,26 @@ type stubOpsRepo struct {
 	err      error
 }
 
+func TestShouldPauseTrafficEvaluation(t *testing.T) {
+	t.Parallel()
+
+	availability := &OpsAccountAvailability{
+		Accounts: map[int64]*AccountAvailability{1: {IsAvailable: false}},
+	}
+	svc := &OpsAlertEvaluatorService{opsService: &OpsService{
+		getAccountAvailability: func(context.Context, string, *int64) (*OpsAccountAvailability, error) {
+			return availability, nil
+		},
+	}}
+
+	require.True(t, svc.shouldPauseTrafficEvaluation(context.Background(), true, "error_rate", "", nil))
+	availability.Accounts[1].IsAvailable = true
+	require.False(t, svc.shouldPauseTrafficEvaluation(context.Background(), true, "error_rate", "", nil))
+	availability.Accounts[1].IsAvailable = false
+	require.False(t, svc.shouldPauseTrafficEvaluation(context.Background(), true, "cpu_usage_percent", "", nil))
+	require.False(t, svc.shouldPauseTrafficEvaluation(context.Background(), false, "error_rate", "", nil))
+}
+
 func (s *stubOpsRepo) GetDashboardOverview(ctx context.Context, filter *OpsDashboardFilter) (*OpsDashboardOverview, error) {
 	if s.err != nil {
 		return nil, s.err

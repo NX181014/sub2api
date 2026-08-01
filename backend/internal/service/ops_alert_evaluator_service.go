@@ -196,9 +196,14 @@ func (s *OpsAlertEvaluatorService) evaluateOnce(interval time.Duration) {
 	rulesTotal := len(rules)
 	rulesEnabled := 0
 	rulesEvaluated := 0
+	rulesPaused := 0
 	eventsCreated := 0
 	eventsResolved := 0
 	emailsSent := 0
+	pauseTrafficWithoutAccounts := false
+	if s.opsService != nil {
+		pauseTrafficWithoutAccounts = s.opsService.OpsAdvancedSettingsSnapshot().IgnoreNoAvailableAccounts
+	}
 
 	now := time.Now().UTC()
 	safeEnd := now.Truncate(time.Minute)
@@ -218,6 +223,24 @@ func (s *OpsAlertEvaluatorService) evaluateOnce(interval time.Duration) {
 		rulesEnabled++
 
 		scopePlatform, scopeGroupID, scopeRegion := parseOpsAlertRuleScope(rule.Filters)
+		if s.shouldPauseTrafficEvaluation(ctx, pauseTrafficWithoutAccounts, rule.MetricType, scopePlatform, scopeGroupID) {
+			rulesPaused++
+			s.resetRuleState(rule.ID, now)
+			activeEvent, err := s.opsRepo.GetActiveAlertEvent(ctx, rule.ID)
+			if err != nil {
+				logger.LegacyPrintf("service.ops_alert_evaluator", "[OpsAlertEvaluator] get active event while paused failed (rule=%d): %v", rule.ID, err)
+				continue
+			}
+			if activeEvent != nil {
+				resolvedAt := now
+				if err := s.opsRepo.UpdateAlertEventStatus(ctx, activeEvent.ID, OpsAlertStatusResolved, &resolvedAt); err != nil {
+					logger.LegacyPrintf("service.ops_alert_evaluator", "[OpsAlertEvaluator] resolve paused event failed (event=%d): %v", activeEvent.ID, err)
+				} else {
+					eventsResolved++
+				}
+			}
+			continue
+		}
 
 		windowMinutes := rule.WindowMinutes
 		if windowMinutes <= 0 {
@@ -310,8 +333,39 @@ func (s *OpsAlertEvaluatorService) evaluateOnce(interval time.Duration) {
 		}
 	}
 
-	result := truncateString(fmt.Sprintf("rules=%d enabled=%d evaluated=%d created=%d resolved=%d emails_sent=%d", rulesTotal, rulesEnabled, rulesEvaluated, eventsCreated, eventsResolved, emailsSent), 2048)
+	result := truncateString(fmt.Sprintf("rules=%d enabled=%d evaluated=%d paused=%d created=%d resolved=%d emails_sent=%d", rulesTotal, rulesEnabled, rulesEvaluated, rulesPaused, eventsCreated, eventsResolved, emailsSent), 2048)
 	s.recordHeartbeatSuccess(runAt, time.Since(startedAt), result)
+}
+
+func (s *OpsAlertEvaluatorService) shouldPauseTrafficEvaluation(
+	ctx context.Context,
+	enabled bool,
+	metricType string,
+	platform string,
+	groupID *int64,
+) bool {
+	if !enabled || s == nil || s.opsService == nil || !isTrafficQualityMetric(metricType) {
+		return false
+	}
+	availability, err := s.opsService.GetAccountAvailability(ctx, platform, groupID)
+	if err != nil || availability == nil {
+		return false
+	}
+	for _, account := range availability.Accounts {
+		if account != nil && account.IsAvailable {
+			return false
+		}
+	}
+	return true
+}
+
+func isTrafficQualityMetric(metricType string) bool {
+	switch strings.TrimSpace(metricType) {
+	case "success_rate", "error_rate", "upstream_error_rate":
+		return true
+	default:
+		return false
+	}
 }
 
 func (s *OpsAlertEvaluatorService) pruneRuleStates(rules []*OpsAlertRule) {
