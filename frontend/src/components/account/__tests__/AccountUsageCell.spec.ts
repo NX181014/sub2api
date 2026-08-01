@@ -21,7 +21,7 @@ vi.mock('vue-i18n', async () => {
     ...actual,
     useI18n: () => ({
       t: (key: string, params?: Record<string, unknown>) => key === 'admin.accounts.usageWindow.windowTooltip'
-        ? `${params?.window}|${params?.reset}`
+        ? `${params?.window}|${params?.percent}% used|${params?.reset}`
         : key
     })
   }
@@ -291,7 +291,7 @@ describe('AccountUsageCell', () => {
     expect(wrapper.text()).toContain('5h|12')
     expect(wrapper.text()).toContain('30d10h|54.5')
     expect(wrapper.text()).not.toContain('7d|54.5')
-    expect(wrapper.get('[data-test="openai-secondary-window"]').attributes('title')).toMatch(/^30d10h\|.*2099/)
+    expect(wrapper.get('[data-test="openai-secondary-window"]').attributes('title')).toMatch(/^30d10h\|55% used\|.*2099/)
 
     const setupState = wrapper.vm.$.setupState as {
       formatUsageWindow: (minutes: number | undefined, fallback: string) => string

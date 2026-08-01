@@ -402,7 +402,7 @@ export default {
       },
       usageWindow: {
         statsTitle: '5小时窗口用量统计',
-        windowTooltip: '{window} 窗口，重置时间：{reset}',
+        windowTooltip: '{window} 窗口，已用 {percent}%，重置时间：{reset}',
         statsTitleDaily: '每日用量统计',
         geminiProDaily: 'Pro',
         geminiFlashDaily: 'Flash',

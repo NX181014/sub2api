@@ -748,6 +748,7 @@ const usageWindowTitle = (progress: UsageProgress, fallback: string) => t(
   'admin.accounts.usageWindow.windowTooltip',
   {
     window: formatUsageWindow(progress.window_minutes, fallback),
+    percent: Math.round(progress.utilization),
     reset: progress.resets_at ? formatDateTime(progress.resets_at) : '-'
   }
 )

@@ -609,7 +609,7 @@
             <div
               v-if="!isImportBatchRow(row)"
               data-test="account-workbench-usage"
-              :class="embedded ? 'min-w-0' : 'account-usage-card'"
+              :class="embedded ? 'w-full min-w-0' : 'account-usage-card'"
             >
               <div :class="embedded ? 'account-usage-finance' : ''">
                 <div class="min-w-0">
@@ -4302,14 +4302,16 @@ onUnmounted(() => {
   .dark .workbench-uploader-group {
     border-top-color: rgb(51 65 85);
   }
+}
 
+@media (min-width: 768px) and (max-width: 1439px) {
   .account-workbench-table.is-embedded :deep(.table-body tr[data-row-id]) {
-    grid-template-columns: 44px minmax(0, 1fr) 104px;
+    grid-template-columns: 44px minmax(0, 1fr) minmax(150px, 190px) 104px;
   }
 
   .account-workbench-table.is-embedded :deep(.table-body tr[data-row-id] td:nth-child(1)) {
     grid-column: 1;
-    grid-row: 1 / 3;
+    grid-row: 1;
   }
 
   .account-workbench-table.is-embedded :deep(.table-body tr[data-row-id] td:nth-child(2)) {
@@ -4318,20 +4320,19 @@ onUnmounted(() => {
   }
 
   .account-workbench-table.is-embedded :deep(.table-body tr[data-row-id] td:nth-child(3)) {
-    grid-column: 1 / 4;
-    grid-row: 3;
+    grid-column: 1 / 5;
+    grid-row: 2;
     border-top: 1px solid rgb(241 245 249);
   }
 
   .account-workbench-table.is-embedded :deep(.table-body tr[data-row-id] td:nth-child(4)) {
-    grid-column: 2;
-    grid-row: 2;
-    padding-top: 0;
+    grid-column: 3;
+    grid-row: 1;
   }
 
   .account-workbench-table.is-embedded :deep(.table-body tr[data-row-id] td:nth-child(5)) {
-    grid-column: 3;
-    grid-row: 1 / 3;
+    grid-column: 4;
+    grid-row: 1;
   }
 
   .account-usage-finance {
@@ -4352,27 +4353,13 @@ onUnmounted(() => {
   }
 }
 
-@media (min-width: 1180px) {
-  .account-workbench-table.is-embedded :deep(.table-body tr[data-row-id]) {
-    grid-template-columns: 44px minmax(145px, 180px) minmax(260px, 1fr) minmax(170px, 200px) 96px;
-  }
-
-  .account-workbench-table.is-embedded :deep(.table-body tr[data-row-id] td + td) {
-    border-left: 1px solid rgb(241 245 249);
-  }
-
-  .dark .account-workbench-table.is-embedded :deep(.table-body tr[data-row-id] td + td) {
-    border-left-color: rgb(51 65 85 / 0.8);
-  }
-}
-
 @media (min-width: 1440px) {
   .account-workbench-table.is-embedded :deep(.table-body tr[data-row-id]) {
     grid-template-columns: 44px minmax(180px, 210px) minmax(300px, 1fr) minmax(190px, 220px) 104px;
   }
 
   .account-usage-finance {
-    grid-template-columns: minmax(280px, 1fr) minmax(240px, 0.85fr);
+    grid-template-columns: minmax(0, 1fr) minmax(0, 0.85fr);
     gap: 16px;
   }
 
