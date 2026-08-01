@@ -147,7 +147,8 @@ type WindowStats struct {
 
 // UsageProgress 使用量进度
 type UsageProgress struct {
-	Utilization      float64      `json:"utilization"`            // 使用率百分比 (0-100+，100表示100%)
+	Utilization      float64      `json:"utilization"` // 使用率百分比 (0-100+，100表示100%)
+	WindowMinutes    int          `json:"window_minutes,omitempty"`
 	ResetsAt         *time.Time   `json:"resets_at"`              // 重置时间
 	RemainingSeconds int          `json:"remaining_seconds"`      // 距重置剩余秒数
 	WindowStats      *WindowStats `json:"window_stats,omitempty"` // 窗口期统计（从窗口开始到当前的使用量）
@@ -1368,6 +1369,7 @@ func buildCodexUsageProgressFromExtra(extra map[string]any, window string, now t
 		usedPercentKey string
 		resetAfterKey  string
 		resetAtKey     string
+		windowMinsKey  string
 	)
 
 	switch window {
@@ -1375,10 +1377,12 @@ func buildCodexUsageProgressFromExtra(extra map[string]any, window string, now t
 		usedPercentKey = "codex_5h_used_percent"
 		resetAfterKey = "codex_5h_reset_after_seconds"
 		resetAtKey = "codex_5h_reset_at"
+		windowMinsKey = "codex_5h_window_minutes"
 	case "7d":
 		usedPercentKey = "codex_7d_used_percent"
 		resetAfterKey = "codex_7d_reset_after_seconds"
 		resetAtKey = "codex_7d_reset_at"
+		windowMinsKey = "codex_7d_window_minutes"
 	default:
 		return nil
 	}
@@ -1388,7 +1392,10 @@ func buildCodexUsageProgressFromExtra(extra map[string]any, window string, now t
 		return nil
 	}
 
-	progress := &UsageProgress{Utilization: parseExtraFloat64(usedRaw)}
+	progress := &UsageProgress{
+		Utilization:   parseExtraFloat64(usedRaw),
+		WindowMinutes: parseExtraInt(extra[windowMinsKey]),
+	}
 	if resetAtRaw, ok := extra[resetAtKey]; ok {
 		if resetAt, err := parseTime(fmt.Sprint(resetAtRaw)); err == nil {
 			progress.ResetsAt = &resetAt
@@ -1424,6 +1431,9 @@ func buildCodexUsageProgressFromExtra(extra map[string]any, window string, now t
 }
 
 func codexWindowStatsStart(progress *UsageProgress, fallbackWindow time.Duration, now time.Time) time.Time {
+	if progress != nil && progress.WindowMinutes > 0 {
+		fallbackWindow = time.Duration(progress.WindowMinutes) * time.Minute
+	}
 	if progress != nil && progress.ResetsAt != nil && now.Before(*progress.ResetsAt) {
 		return progress.ResetsAt.Add(-fallbackWindow)
 	}

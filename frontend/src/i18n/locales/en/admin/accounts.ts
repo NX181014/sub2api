@@ -1348,6 +1348,7 @@ export default {
       },
       usageWindow: {
         statsTitle: '5-Hour Window Usage Statistics',
+        windowTooltip: '{window} window, resets at {reset}',
         statsTitleDaily: 'Daily Usage Statistics',
         geminiProDaily: 'Pro',
         geminiFlashDaily: 'Flash',

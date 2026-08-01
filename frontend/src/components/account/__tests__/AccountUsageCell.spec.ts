@@ -20,7 +20,9 @@ vi.mock('vue-i18n', async () => {
   return {
     ...actual,
     useI18n: () => ({
-      t: (key: string) => key
+      t: (key: string, params?: Record<string, unknown>) => key === 'admin.accounts.usageWindow.windowTooltip'
+        ? `${params?.window}|${params?.reset}`
+        : key
     })
   }
 })
@@ -250,6 +252,51 @@ describe('AccountUsageCell', () => {
     expect(getUsage).toHaveBeenCalledWith(2000)
     expect(wrapper.text()).toContain('5h|15|300')
     expect(wrapper.text()).toContain('7d|77|300')
+  })
+
+  it('OpenAI OAuth 按后端实际分钟数显示窗口并在提示中保留重置时间', async () => {
+    getUsage.mockResolvedValue({
+      five_hour: {
+        utilization: 12,
+        window_minutes: 300,
+        resets_at: '2099-08-01T12:00:00Z',
+        remaining_seconds: 3600
+      },
+      seven_day: {
+        utilization: 54.5,
+        window_minutes: 43800,
+        resets_at: '2099-09-01T12:00:00Z',
+        remaining_seconds: 3600
+      }
+    })
+
+    const wrapper = mount(AccountUsageCell, {
+      props: {
+        account: makeAccount({ id: 2171, platform: 'openai', type: 'oauth', extra: {} })
+      },
+      global: {
+        stubs: {
+          UsageProgressBar: {
+            props: ['label', 'utilization'],
+            template: '<div class="usage-bar">{{ label }}|{{ utilization }}</div>'
+          },
+          AccountQuotaInfo: true,
+          OpenAIQuotaResetCell: true
+        }
+      }
+    })
+
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('5h|12')
+    expect(wrapper.text()).toContain('30d10h|54.5')
+    expect(wrapper.text()).not.toContain('7d|54.5')
+    expect(wrapper.get('[data-test="openai-secondary-window"]').attributes('title')).toMatch(/^30d10h\|.*2099/)
+
+    const setupState = wrapper.vm.$.setupState as {
+      formatUsageWindow: (minutes: number | undefined, fallback: string) => string
+    }
+    expect(setupState.formatUsageWindow(10080, '-')).toBe('7d')
   })
 
   it('OpenAI OAuth 有 codex 快照时仍然使用 /usage API 数据渲染', async () => {

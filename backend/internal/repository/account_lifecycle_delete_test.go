@@ -30,7 +30,6 @@ func TestDeleteAccountWithLifecycleKeepsUsageAndSoftDeletesFamily(t *testing.T) 
 	for _, query := range []string{
 		`DELETE FROM account_groups`,
 		`DELETE FROM scheduled_test_plans`,
-		`DELETE FROM sora_accounts`,
 		`DELETE FROM batch_image_jobs`,
 		`DELETE FROM ops_system_logs`,
 		`DELETE FROM ops_error_logs`,

@@ -256,3 +256,21 @@ func TestBuildCodexUsageProgressFromExtra_ZerosExpiredWindow(t *testing.T) {
 		}
 	})
 }
+
+func TestBuildCodexUsageProgressFromExtra_PreservesActualWindowMinutes(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 8, 1, 8, 0, 0, 0, time.UTC)
+	resetAt := now.Add(43800 * time.Minute)
+	progress := buildCodexUsageProgressFromExtra(map[string]any{
+		"codex_7d_used_percent":   54.5,
+		"codex_7d_window_minutes": 43800,
+		"codex_7d_reset_at":       resetAt.Format(time.RFC3339),
+	}, "7d", now)
+
+	if progress == nil || progress.WindowMinutes != 43800 {
+		t.Fatalf("expected actual 43800-minute window, got %#v", progress)
+	}
+	if got, want := codexWindowStatsStart(progress, 7*24*time.Hour, now), now; !got.Equal(want) {
+		t.Fatalf("window stats start = %v, want %v", got, want)
+	}
+}

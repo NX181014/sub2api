@@ -1089,7 +1089,7 @@ export interface Account {
   pool_purchase_cost_minor?: number
   pool_latest_purchased_at?: string | null
   pool_recognized_cost_minor?: number
-  pool_recovery_data_quality?: 'ready' | 'partial_expected_tokens' | 'missing_expected_tokens' | 'no_cost'
+  pool_recovery_data_quality?: 'ready' | 'partial_expected_tokens' | 'missing_expected_tokens' | 'no_cost' | 'future_purchase_time'
   pool_net_cost_minor?: number
   pool_remaining_cost_minor?: number
   pool_cost_progress?: string | null
@@ -1198,6 +1198,7 @@ export interface UsageProgress {
   utilization: number // Percentage (0-100+, 100 = 100%)
   resets_at: string | null
   remaining_seconds: number
+  window_minutes?: number
   window_stats?: WindowStats | null // 窗口期统计（从窗口开始到当前的使用量）
   used_requests?: number
   limit_requests?: number

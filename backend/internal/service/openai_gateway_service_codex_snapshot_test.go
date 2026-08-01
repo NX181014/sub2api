@@ -104,6 +104,23 @@ func TestBuildCodexUsageExtraUpdates_UsesSnapshotUpdatedAt(t *testing.T) {
 	}
 }
 
+func TestNormalizeCodexLimits_PreservesActualLongWindowMinutes(t *testing.T) {
+	primaryWindow := 43800
+	secondaryWindow := 300
+	snapshot := &OpenAICodexUsageSnapshot{
+		PrimaryWindowMinutes:   &primaryWindow,
+		SecondaryWindowMinutes: &secondaryWindow,
+	}
+
+	normalized := snapshot.Normalize()
+	if normalized == nil || normalized.Window7dMinutes == nil || *normalized.Window7dMinutes != primaryWindow {
+		t.Fatalf("expected compatibility 7d bucket to preserve %d minutes, got %#v", primaryWindow, normalized)
+	}
+	if normalized.Window5hMinutes == nil || *normalized.Window5hMinutes != secondaryWindow {
+		t.Fatalf("expected 5h bucket to preserve %d minutes, got %#v", secondaryWindow, normalized.Window5hMinutes)
+	}
+}
+
 // TestBuildCodexUsageExtraUpdates_FreshAccountUsedPercentNotInverted_Issue2994 locks in the
 // canonical "used %" semantics for the 5h window. A fresh account reports a tiny
 // secondary-used-percent (~1%); the stored codex_5h_used_percent must equal that value

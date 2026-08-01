@@ -95,6 +95,18 @@ func parsePoolDate(value string) (time.Time, error) {
 	return time.ParseInLocation("2006-01-02", strings.TrimSpace(value), loc)
 }
 
+func parsePoolPaidAt(value *string, submittedAt time.Time) (time.Time, error) {
+	if value == nil || strings.TrimSpace(*value) == "" {
+		return submittedAt, nil
+	}
+	raw := strings.TrimSpace(*value)
+	if date, err := parsePoolDate(raw); err == nil {
+		localSubmittedAt := submittedAt.In(date.Location())
+		return time.Date(date.Year(), date.Month(), date.Day(), localSubmittedAt.Hour(), localSubmittedAt.Minute(), localSubmittedAt.Second(), localSubmittedAt.Nanosecond(), date.Location()), nil
+	}
+	return time.Parse(time.RFC3339, raw)
+}
+
 func (h *PoolHandler) ListAccounts(c *gin.Context) {
 	items, err := h.poolService.ListAccounts(c.Request.Context())
 	if err != nil {
@@ -352,13 +364,10 @@ func (h *PoolHandler) CreateAccountIntake(c *gin.Context) {
 		response.BadRequest(c, "service_end must be YYYY-MM-DD")
 		return
 	}
-	paidAt := time.Now().UTC()
-	if req.PaidAt != nil && strings.TrimSpace(*req.PaidAt) != "" {
-		paidAt, err = time.Parse(time.RFC3339, strings.TrimSpace(*req.PaidAt))
-		if err != nil {
-			response.BadRequest(c, "paid_at must be RFC3339")
-			return
-		}
+	paidAt, err := parsePoolPaidAt(req.PaidAt, time.Now().UTC())
+	if err != nil {
+		response.BadRequest(c, "paid_at must be RFC3339 or YYYY-MM-DD")
+		return
 	}
 	var warrantyEnd *time.Time
 	if req.WarrantyEnd != nil && strings.TrimSpace(*req.WarrantyEnd) != "" {
@@ -648,13 +657,10 @@ func (h *PoolHandler) CreateCost(c *gin.Context) {
 		response.BadRequest(c, "service_end must be YYYY-MM-DD")
 		return
 	}
-	paidAt := time.Now()
-	if req.PaidAt != nil && strings.TrimSpace(*req.PaidAt) != "" {
-		paidAt, err = time.Parse(time.RFC3339, strings.TrimSpace(*req.PaidAt))
-		if err != nil {
-			response.BadRequest(c, "paid_at must be RFC3339")
-			return
-		}
+	paidAt, err := parsePoolPaidAt(req.PaidAt, time.Now().UTC())
+	if err != nil {
+		response.BadRequest(c, "paid_at must be RFC3339 or YYYY-MM-DD")
+		return
 	}
 	if req.FXRate == "" {
 		req.FXRate = "1"
@@ -744,12 +750,9 @@ func parseBatchPoolCostCommon(req batchPoolCostCommonRequest) (service.CreateAcc
 	if err != nil {
 		return service.CreateAccountCostInput{}, fmt.Errorf("service_end must be YYYY-MM-DD")
 	}
-	paidAt := time.Now()
-	if req.PaidAt != nil && strings.TrimSpace(*req.PaidAt) != "" {
-		paidAt, err = time.Parse(time.RFC3339, strings.TrimSpace(*req.PaidAt))
-		if err != nil {
-			return service.CreateAccountCostInput{}, fmt.Errorf("paid_at must be RFC3339")
-		}
+	paidAt, err := parsePoolPaidAt(req.PaidAt, time.Now().UTC())
+	if err != nil {
+		return service.CreateAccountCostInput{}, fmt.Errorf("paid_at must be RFC3339 or YYYY-MM-DD")
 	}
 	var warrantyEnd *time.Time
 	if req.WarrantyEnd != nil && strings.TrimSpace(*req.WarrantyEnd) != "" {

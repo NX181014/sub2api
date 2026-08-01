@@ -26,7 +26,7 @@ export default {
       emptySummary: 'No account cost summaries', emptyEntries: 'No cost entries', batchTitle: 'Add Account Costs in Batch',
       steps: { accounts: 'Accounts', common: 'Common Details', overrides: 'Per-account Overrides', preview: 'Review' },
       amountMode: 'Amount Mode', perAccountAmount: 'Cost per Account', perAccountHint: 'The amount applies to each selected account', orderTotal: 'Order Total', orderTotalHint: 'Allocate one order total across selected accounts',
-      allocationMode: 'Allocation Mode', equalAllocation: 'Equal', manualAllocation: 'Manual', expectedTokens: 'Expected Tokens Added (M)', paidAt: 'Paid At',
+      allocationMode: 'Allocation Mode', equalAllocation: 'Equal', manualAllocation: 'Manual', expectedTokens: 'Expected Tokens Added (M)', paidAt: 'Paid At', paidAtHint: 'Leave blank to use the actual submission or import time',
       perAccountPreview: '{price} each × {count} accounts = {total} batch total', orderTotalPreview: '{total} order total allocated across {count} accounts',
       overrideHint: 'Leave blank to use the common value. Equal allocation also supports fixed amounts for selected accounts.', accountAmount: 'Account Amount', accountCount: 'Account Count',
       originalAmount: 'Original Amount', cnyAmount: 'CNY Amount', recordedAt: 'Recorded At', duplicateHint: 'The server rechecks duplicate orders, accounts, and idempotency before committing the entire batch.',
@@ -35,7 +35,7 @@ export default {
         load: 'Failed to load the cost ledger', options: 'Failed to load filter options', accounts: 'Failed to load accounts', submit: 'Failed to add costs',
         accounts_required: 'Select at least one account', duplicate_accounts: 'Duplicate accounts are selected', payer_required: 'Select a payer', source_required: 'Select a purchase source',
         amount_invalid: 'Amount must be greater than zero', allocation_exceeds_total: 'Fixed account amounts exceed the order total', allocation_total_mismatch: 'Manual allocations must equal the order total',
-        expected_tokens_invalid: 'Expected tokens for every account must be a positive integer', period_invalid: 'Service end must be after service start'
+        expected_tokens_invalid: 'Expected tokens for every account must be a positive integer', period_invalid: 'Service end must be after service start', future_paid_at: 'Paid time cannot be later than the current time'
       }
     },
     entryTypes: { purchase: 'Purchase', renewal: 'Renewal', topup: 'Top-up', price_version: 'Price Change', refund: 'Refund', adjustment: 'Adjustment', replacement_in: 'Replacement In', replacement_out: 'Replacement Out', write_off: 'Written-off Loss' },
@@ -46,7 +46,7 @@ export default {
     actions: { poolRecord: 'Pool Record' },
     workbench: {
       sourceCount: '{count} purchase sources', grossCost: 'Gross cost', latestPurchase: 'Latest purchase', recovery: 'Recovered',
-      dataQuality: { ready: 'Complete', partial_expected_tokens: 'Partially unpriced', missing_expected_tokens: 'Unpriced', no_cost: 'No cost', derived: 'Derived', unavailable: 'No data' }
+      dataQuality: { ready: 'Complete', partial_expected_tokens: 'Partially unpriced', missing_expected_tokens: 'Unpriced', no_cost: 'No cost', future_purchase_time: 'Purchase time issue', derived: 'Derived', unavailable: 'No data' }
     },
     delete: {
 		hardDeleteHint: 'Credentials and related business data will be removed permanently; historical usage records are retained.',
@@ -90,6 +90,6 @@ export default {
     event: { title: 'Record Account Event', type: 'Event Type', date: 'Event Date', banned: 'Confirmed Ban', recovered: 'Recovered', refund: 'Refund', replaced: 'Replacement', retired: 'Retired', refundAmount: 'Refund Received', replacementAccount: 'Replacement Account', transferAmount: 'Transferred Cost', reason: 'Reason / Note', saved: 'Account event saved' },
     status: { active: 'Active', warning: 'Review', banned: 'Banned', inactive: 'Inactive', draft: 'Draft', locked: 'Locked', paid: 'Paid', recovered: 'Recovered', recovering: 'Recovering' },
     empty: { overview: 'No payback data for this period', settlement: 'No settlement data for this period', sources: 'No purchase source statistics' },
-    errors: { load: 'Failed to load shared pool', options: 'Failed to load accounts or members', required: 'Complete the account identity, source, contributor, and uploader', replacementRequired: 'Select a replacement account', invalidCostPeriod: 'Cost must be positive and service end must not precede start', invalidExpectedTokens: 'Expected tokens must be a positive integer', save: 'Failed to save account cost', event: 'Failed to save account event', fxRate: 'Value rate must be positive', lock: 'Failed to lock settlement', confirmSettlement: 'Failed to confirm your settlement line', markPaid: 'Failed to mark settlement paid' }
+    errors: { load: 'Failed to load shared pool', options: 'Failed to load accounts or members', required: 'Complete the account identity, source, contributor, and uploader', replacementRequired: 'Select a replacement account', invalidCostPeriod: 'Cost must be positive and service end must not precede start', invalidExpectedTokens: 'Expected tokens must be a positive integer', futurePaidAt: 'Paid time cannot be later than the current time', save: 'Failed to save account cost', event: 'Failed to save account event', fxRate: 'Value rate must be positive', lock: 'Failed to lock settlement', confirmSettlement: 'Failed to confirm your settlement line', markPaid: 'Failed to mark settlement paid' }
   }
 }

@@ -121,24 +121,36 @@
     <!-- OpenAI OAuth accounts: single source from /usage API -->
     <template v-else-if="account.platform === 'openai' && account.type === 'oauth'">
       <div v-if="hasOpenAIUsageFallback" class="space-y-1">
-        <UsageProgressBar
+        <div
           v-if="usageInfo?.five_hour"
-          label="5h"
-          :utilization="usageInfo.five_hour.utilization"
-          :resets-at="usageInfo.five_hour.resets_at"
-          :window-stats="usageInfo.five_hour.window_stats"
-          :show-now-when-idle="true"
-          color="indigo"
-        />
-        <UsageProgressBar
+          data-test="openai-primary-window"
+          class="openai-usage-window"
+          :title="usageWindowTitle(usageInfo.five_hour, '5h')"
+        >
+          <UsageProgressBar
+            :label="formatUsageWindow(usageInfo.five_hour.window_minutes, '5h')"
+            :utilization="usageInfo.five_hour.utilization"
+            :resets-at="usageInfo.five_hour.resets_at"
+            :window-stats="usageInfo.five_hour.window_stats"
+            :show-now-when-idle="true"
+            color="indigo"
+          />
+        </div>
+        <div
           v-if="usageInfo?.seven_day"
-          label="7d"
-          :utilization="usageInfo.seven_day.utilization"
-          :resets-at="usageInfo.seven_day.resets_at"
-          :window-stats="usageInfo.seven_day.window_stats"
-          :show-now-when-idle="true"
-          color="emerald"
-        />
+          data-test="openai-secondary-window"
+          class="openai-usage-window"
+          :title="usageWindowTitle(usageInfo.seven_day, '7d')"
+        >
+          <UsageProgressBar
+            :label="formatUsageWindow(usageInfo.seven_day.window_minutes, '7d')"
+            :utilization="usageInfo.seven_day.utilization"
+            :resets-at="usageInfo.seven_day.resets_at"
+            :window-stats="usageInfo.seven_day.window_stats"
+            :show-now-when-idle="true"
+            color="emerald"
+          />
+        </div>
         <!--
           Upstream codex /wham/usage quota query + reset. The local active-sampling
           refresh button is rendered via the pre-actions slot so the user sees a
@@ -626,10 +638,10 @@ import { ref, computed, onMounted, onBeforeUnmount, onUnmounted, watch } from 'v
 import { useI18n } from 'vue-i18n'
 import { adminAPI } from '@/api/admin'
 import type { GrokQuotaProbeResult } from '@/api/admin/grok'
-import type { Account, AccountUsageInfo, GeminiCredentials, WindowStats } from '@/types'
+import type { Account, AccountUsageInfo, GeminiCredentials, UsageProgress, WindowStats } from '@/types'
 import { buildOpenAIUsageRefreshKey } from '@/utils/accountUsageRefresh'
 import { enqueueUsageRequest } from '@/utils/usageLoadQueue'
-import { formatCompactNumber, formatRelativeTime } from '@/utils/format'
+import { formatCompactNumber, formatDateTime, formatRelativeTime } from '@/utils/format'
 import UsageProgressBar from './UsageProgressBar.vue'
 import AccountQuotaInfo from './AccountQuotaInfo.vue'
 import OpenAIQuotaResetCell from './OpenAIQuotaResetCell.vue'
@@ -721,6 +733,24 @@ const hasOpenAIUsageFallback = computed(() => {
   if (props.account.platform !== 'openai' || props.account.type !== 'oauth') return false
   return !!usageInfo.value?.five_hour || !!usageInfo.value?.seven_day
 })
+
+const formatUsageWindow = (minutes: number | undefined, fallback: string) => {
+  if (!Number.isFinite(minutes) || Number(minutes) <= 0) return fallback
+  let remaining = Math.round(Number(minutes))
+  const days = Math.floor(remaining / 1440)
+  remaining %= 1440
+  const hours = Math.floor(remaining / 60)
+  const mins = remaining % 60
+  return `${days ? `${days}d` : ''}${hours ? `${hours}h` : ''}${mins ? `${mins}m` : ''}`
+}
+
+const usageWindowTitle = (progress: UsageProgress, fallback: string) => t(
+  'admin.accounts.usageWindow.windowTooltip',
+  {
+    window: formatUsageWindow(progress.window_minutes, fallback),
+    reset: progress.resets_at ? formatDateTime(progress.resets_at) : '-'
+  }
+)
 
 const openAIUsageRefreshKey = computed(() => buildOpenAIUsageRefreshKey(props.account))
 
@@ -1572,3 +1602,9 @@ onUnmounted(() => {
   desktopViewportMediaQuery = null
 })
 </script>
+
+<style scoped>
+.openai-usage-window :deep(> div > div:last-child > span:first-child) {
+  width: 4rem;
+}
+</style>

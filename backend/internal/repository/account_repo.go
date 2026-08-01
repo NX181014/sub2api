@@ -1064,6 +1064,7 @@ SELECT a.id,uploader.email,uploader.username,a.expected_token_count,
 	   COALESCE(costs.purchase_cost_minor,0)::bigint,
 	   COALESCE(costs.purchase_source_count,0)::bigint,
 	   COALESCE(costs.unpriced_positive_count,0)::bigint,
+	   COALESCE(costs.future_purchase_count,0)::bigint,
 	   COALESCE(costs.tranches,'[]'::jsonb),
        COALESCE(usage.total_tokens,0)::bigint,
 	   latest_source.name,latest_source.paid_at,
@@ -1079,6 +1080,7 @@ LEFT JOIN LATERAL (
 	       COALESCE(SUM(c.cny_amount_minor) FILTER (WHERE c.cny_amount_minor>0),0)::bigint purchase_cost_minor,
 	       COUNT(DISTINCT c.purchase_source_id) FILTER (WHERE c.cny_amount_minor>0)::bigint purchase_source_count,
 	       COUNT(*) FILTER (WHERE c.cny_amount_minor>0 AND c.expected_token_count IS NULL)::bigint unpriced_positive_count,
+	       COUNT(*) FILTER (WHERE c.entry_type IN ('purchase','renewal','topup','price_version') AND c.paid_at>c.created_at+INTERVAL '5 minutes')::bigint future_purchase_count,
 	       COALESCE((SELECT jsonb_agg(jsonb_build_object(
 	         'id',priced.id,'cost_minor',priced.cny_amount_minor,'expected_tokens',priced.expected_token_count,
 	         'paid_at',priced.paid_at,'payer_user_id',priced.payer_user_id,'purchase_source_id',priced.purchase_source_id,
@@ -1122,13 +1124,13 @@ WHERE a.id IN (`+strings.Join(placeholders, ",")+`)`, args...)
 			costBasis, refund, transferred, writtenOff int64
 			netCost, totalUsage                        int64
 			purchaseCost, purchaseSourceCount          int64
-			unpricedPositiveCount                      int64
+			unpricedPositiveCount, futurePurchaseCount int64
 			trancheJSON                                []byte
 			latestPurchaseSource                       sql.NullString
 			latestPurchasedAt                          sql.NullTime
 			lifecycleStatus                            string
 		)
-		if err := rows.Scan(&accountID, &uploaderEmail, &uploaderUsername, &expectedTokens, &costBasis, &refund, &transferred, &writtenOff, &netCost, &purchaseCost, &purchaseSourceCount, &unpricedPositiveCount, &trancheJSON, &totalUsage, &latestPurchaseSource, &latestPurchasedAt, &lifecycleStatus); err != nil {
+		if err := rows.Scan(&accountID, &uploaderEmail, &uploaderUsername, &expectedTokens, &costBasis, &refund, &transferred, &writtenOff, &netCost, &purchaseCost, &purchaseSourceCount, &unpricedPositiveCount, &futurePurchaseCount, &trancheJSON, &totalUsage, &latestPurchaseSource, &latestPurchasedAt, &lifecycleStatus); err != nil {
 			return err
 		}
 		tranches, err := decodePoolCostTranches(trancheJSON)
@@ -1167,16 +1169,9 @@ WHERE a.id IN (`+strings.Join(placeholders, ",")+`)`, args...)
 		if latestPurchasedAt.Valid {
 			account.PoolLatestPurchasedAt = &latestPurchasedAt.Time
 		}
-		switch {
-		case purchaseCost <= 0:
-			account.PoolRecoveryDataQuality = "no_cost"
-		case account.PoolCostProgress == nil:
-			account.PoolRecoveryDataQuality = "missing_expected_tokens"
-		case unpricedPositiveCount > 0:
-			account.PoolRecoveryDataQuality = "partial_expected_tokens"
-		default:
-			account.PoolRecoveryDataQuality = "ready"
-		}
+		account.PoolRecoveryDataQuality = service.ResolvePoolRecoveryDataQuality(
+			purchaseCost, account.PoolCostProgress, unpricedPositiveCount, futurePurchaseCount > 0,
+		)
 		account.PoolLifecycleStatus = lifecycleStatus
 	}
 	return rows.Err()

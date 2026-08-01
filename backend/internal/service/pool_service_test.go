@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/shopspring/decimal"
 	"github.com/stretchr/testify/require"
 )
@@ -193,6 +194,35 @@ func TestNormalizePoolCostInput(t *testing.T) {
 	input.ExpectedTokenCount = nil
 	_, err = normalizePoolCostInput(input)
 	require.Error(t, err)
+}
+
+func TestNormalizePoolCostInputDefaultsAllowsSkewAndRejectsFuturePaidAt(t *testing.T) {
+	start := time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)
+	expectedTokens := int64(1_000_000)
+	input := CreateAccountCostInput{
+		AccountID: 1, PayerUserID: 2, CreatedByUserID: 3,
+		EntryType: "purchase", Currency: "CNY", OriginalAmount: "25", FXRate: "1",
+		ServiceStart: start, ServiceEnd: start.AddDate(0, 1, 0), ExpectedTokenCount: &expectedTokens,
+	}
+
+	before := time.Now().UTC()
+	normalized, err := normalizePoolCostInput(input)
+	require.NoError(t, err)
+	require.False(t, normalized.PaidAt.Before(before))
+	require.False(t, normalized.PaidAt.After(time.Now().UTC()))
+
+	input.PaidAt = time.Now().UTC().Add(4 * time.Minute)
+	_, err = normalizePoolCostInput(input)
+	require.NoError(t, err)
+
+	input.PaidAt = time.Now().UTC().Add(10 * time.Minute)
+	_, err = normalizePoolCostInput(input)
+	require.Equal(t, "FUTURE_PURCHASE_TIME", infraerrors.Reason(err))
+}
+
+func TestResolvePoolRecoveryDataQualityMarksFuturePurchase(t *testing.T) {
+	progress := "0"
+	require.Equal(t, "future_purchase_time", ResolvePoolRecoveryDataQuality(2500, &progress, 0, true))
 }
 
 func TestPrepareBatchCostInputsPerAccount(t *testing.T) {

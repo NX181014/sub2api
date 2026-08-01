@@ -191,7 +191,7 @@
       <div><label for="ledger-service-end" class="input-label">{{ t('admin.sharedPool.form.serviceEnd') }} *</label><input id="ledger-service-end" v-model="batchForm.service_end" class="input" type="date" :min="batchForm.service_start" required /></div>
       <div><label for="ledger-warranty" class="input-label">{{ t('admin.sharedPool.form.warrantyEnd') }}</label><input id="ledger-warranty" v-model="batchForm.warranty_end" class="input" type="date" /></div>
       <div><label for="ledger-order" class="input-label">{{ t('admin.sharedPool.form.orderNo') }}</label><input id="ledger-order" v-model.trim="batchForm.order_no" class="input" /></div>
-      <div><label for="ledger-paid" class="input-label">{{ t('admin.sharedPool.ledger.paidAt') }}</label><input id="ledger-paid" v-model="batchForm.paid_at" class="input" type="date" /></div>
+      <div><label for="ledger-paid" class="input-label">{{ t('admin.sharedPool.ledger.paidAt') }}</label><input id="ledger-paid" v-model="batchForm.paid_at" class="input" type="datetime-local" :aria-invalid="batchPaidAtFuture" aria-describedby="ledger-paid-hint" /><p id="ledger-paid-hint" class="input-hint" :class="batchPaidAtFuture ? 'text-red-600 dark:text-red-400' : ''">{{ t(batchPaidAtFuture ? 'admin.sharedPool.ledger.errors.future_paid_at' : 'admin.sharedPool.ledger.paidAtHint') }}</p></div>
       <div class="md:col-span-2 rounded-md bg-gray-50 p-3 text-sm dark:bg-dark-700/60">
         {{ amountPreviewText }}
       </div>
@@ -261,7 +261,7 @@ import StatusBadge from '@/components/common/StatusBadge.vue'
 import Icon from '@/components/icons/Icon.vue'
 import type { Column } from '@/components/common/types'
 import { useAppStore } from '@/stores'
-import { accountStatusPresentation, formatPoolMoney } from '@/utils/sharedPool'
+import { accountStatusPresentation, formatPoolMoney, isPoolPaidAtFuture, poolPaidAtToISOString } from '@/utils/sharedPool'
 import {
   calculateBatchCostAllocations,
   DEFAULT_EXPECTED_TOKEN_COUNT,
@@ -362,12 +362,13 @@ const emptyBatchForm = () => ({
   service_start: today(),
   service_end: nextMonth(),
   warranty_end: '',
-  paid_at: today(),
+  paid_at: '',
   order_no: '',
   purchase_url: '',
   notes: ''
 })
 const batchForm = reactive(emptyBatchForm())
+const batchPaidAtFuture = computed(() => isPoolPaidAtFuture(batchForm.paid_at))
 const batchExpectedTokenMillions = computed({
   get: () => tokensToMillions(batchForm.expected_token_count),
   set: (value: number) => { batchForm.expected_token_count = millionsToTokens(Number(value)) }
@@ -755,6 +756,7 @@ function validateStep(step: number): string[] {
     if (!(batchForm.amount > 0)) errors.push('amount_invalid')
     if (!Number.isSafeInteger(batchForm.expected_token_count) || batchForm.expected_token_count <= 0) errors.push('expected_tokens_invalid')
     if (!batchForm.service_start || !batchForm.service_end || batchForm.service_end <= batchForm.service_start) errors.push('period_invalid')
+    if (batchPaidAtFuture.value) errors.push('future_paid_at')
     return errors
   }
   return allocationResult.value.errors
@@ -784,7 +786,7 @@ async function submitBatch() {
       service_start: batchForm.service_start,
       service_end: batchForm.service_end,
       warranty_end: batchForm.warranty_end || undefined,
-      paid_at: batchForm.paid_at ? new Date(`${batchForm.paid_at}T12:00:00+08:00`).toISOString() : undefined,
+      paid_at: poolPaidAtToISOString(batchForm.paid_at),
       order_no: batchForm.order_no || undefined,
       purchase_url: batchForm.purchase_url || undefined,
       notes: batchForm.notes || undefined,

@@ -26,7 +26,7 @@ export default {
       emptySummary: '暂无账号成本汇总', emptyEntries: '暂无成本流水', batchTitle: '批量添加账号成本',
       steps: { accounts: '选择账号', common: '公共资料', overrides: '逐账号覆盖', preview: '预览提交' },
       amountMode: '金额模式', perAccountAmount: '单个账号成本', perAccountHint: '填写的是每一个账号的成本', orderTotal: '订单总成本', orderTotalHint: '填写整张订单总额，再分配到账号',
-      allocationMode: '订单分配方式', equalAllocation: '平均分配', manualAllocation: '手工分配', expectedTokens: '本次新增预期 Token（M）', paidAt: '付款日期',
+      allocationMode: '订单分配方式', equalAllocation: '平均分配', manualAllocation: '手工分配', expectedTokens: '本次新增预期 Token（M）', paidAt: '付款时间', paidAtHint: '留空则使用实际提交或导入时间',
       perAccountPreview: '单价 {price} × {count} 个账号 = 本批总额 {total}', orderTotalPreview: '订单总额 {total}，分配到 {count} 个账号',
       overrideHint: '留空使用公共值；订单平均分配时，可固定部分账号金额，其余金额自动均分。', accountAmount: '该账号金额', accountCount: '账号数量',
       originalAmount: '原币金额', cnyAmount: '折合人民币', recordedAt: '入账时间', duplicateHint: '提交时后端会再次校验重复订单、重复账号和幂等键，整批成功后才入账。',
@@ -35,7 +35,7 @@ export default {
         load: '加载成本台账失败', options: '加载筛选选项失败', accounts: '加载账号失败', submit: '批量入账失败',
         accounts_required: '请至少选择一个账号', duplicate_accounts: '选择结果中存在重复账号', payer_required: '请选择付款人', source_required: '请选择采购来源',
         amount_invalid: '金额必须大于 0', allocation_exceeds_total: '已固定的账号金额超过订单总额', allocation_total_mismatch: '手工分配金额合计必须等于订单总额',
-        expected_tokens_invalid: '每个账号的预期 Token 必须是大于 0 的整数', period_invalid: '服务结束日期必须晚于开始日期'
+        expected_tokens_invalid: '每个账号的预期 Token 必须是大于 0 的整数', period_invalid: '服务结束日期必须晚于开始日期', future_paid_at: '付款时间不能晚于当前时间'
       }
     },
     entryTypes: { purchase: '首次采购', renewal: '续费', topup: '充值', price_version: '价格变更', refund: '退款', adjustment: '成本调整', replacement_in: '补号转入', replacement_out: '补号转出', write_off: '核销损失' },
@@ -46,7 +46,7 @@ export default {
     actions: { poolRecord: '号池资料' },
     workbench: {
       sourceCount: '{count} 个采购来源', grossCost: '采购总额', latestPurchase: '最近采购', recovery: '已回收',
-      dataQuality: { ready: '数据完整', partial_expected_tokens: '部分未定价', missing_expected_tokens: '未定价', no_cost: '暂无成本', derived: '聚合推算', unavailable: '暂无数据' }
+      dataQuality: { ready: '数据完整', partial_expected_tokens: '部分未定价', missing_expected_tokens: '未定价', no_cost: '暂无成本', future_purchase_time: '采购时间异常', derived: '聚合推算', unavailable: '暂无数据' }
     },
     delete: {
       hardDeleteHint: '账号凭证及关联业务数据将永久清理；历史用量记录继续保留。',
@@ -90,6 +90,6 @@ export default {
     event: { title: '记录账号事件', type: '事件类型', date: '发生日期', banned: '确认封禁', recovered: '恢复使用', refund: '退款', replaced: '换号', retired: '停用', refundAmount: '到账退款金额', replacementAccount: '替换账号', transferAmount: '转移成本', reason: '备注/原因', saved: '账号事件已保存' },
     status: { active: '活跃', warning: '关注', banned: '已封禁', inactive: '已停用', draft: '草稿', locked: '已锁定', paid: '已结清', recovered: '已回本', recovering: '回本中' },
     empty: { overview: '当前周期暂无回本数据', settlement: '当前周期暂无结算数据', sources: '暂无采购来源统计' },
-    errors: { load: '加载共享号池失败', options: '加载账号或成员失败', required: '请完整填写账号身份、来源、贡献人和上传人', replacementRequired: '换号时请选择替换账号', invalidCostPeriod: '成本需大于 0，且服务结束日期不得早于开始日期', invalidExpectedTokens: '预期 Token 必须是大于 0 的整数', save: '保存账号成本失败', event: '保存账号事件失败', fxRate: '估值汇率需大于 0', lock: '锁定结算失败', confirmSettlement: '确认本人账单失败', markPaid: '结清本期账单失败' }
+    errors: { load: '加载共享号池失败', options: '加载账号或成员失败', required: '请完整填写账号身份、来源、贡献人和上传人', replacementRequired: '换号时请选择替换账号', invalidCostPeriod: '成本需大于 0，且服务结束日期不得早于开始日期', invalidExpectedTokens: '预期 Token 必须是大于 0 的整数', futurePaidAt: '付款时间不能晚于当前时间', save: '保存账号成本失败', event: '保存账号事件失败', fxRate: '估值汇率需大于 0', lock: '锁定结算失败', confirmSettlement: '确认本人账单失败', markPaid: '结清本期账单失败' }
   }
 }

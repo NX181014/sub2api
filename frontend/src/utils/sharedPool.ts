@@ -1,4 +1,5 @@
 import { formatPaymentAmount } from '@/components/payment/currency'
+import { formatDateTimeLocalInput, parseDateTimeLocalInput } from '@/utils/format'
 import type {
   PoolAccountStatus,
   PoolPeriodParams,
@@ -12,6 +13,23 @@ const formatLocalDate = (date: Date): string => {
   const month = String(date.getMonth() + 1).padStart(2, '0')
   const day = String(date.getDate()).padStart(2, '0')
   return `${year}-${month}-${day}`
+}
+
+const PAID_AT_CLOCK_SKEW_MS = 5 * 60 * 1000
+
+export function formatPoolPaidAtInput(value?: string | null): string {
+  const timestamp = value ? new Date(value).getTime() : NaN
+  return Number.isFinite(timestamp) ? formatDateTimeLocalInput(Math.floor(timestamp / 1000)) : ''
+}
+
+export function poolPaidAtToISOString(value?: string): string | undefined {
+  const timestamp = value ? parseDateTimeLocalInput(value) : null
+  return timestamp === null ? undefined : new Date(timestamp * 1000).toISOString()
+}
+
+export function isPoolPaidAtFuture(value?: string, now = Date.now()): boolean {
+  const timestamp = value ? parseDateTimeLocalInput(value) : null
+  return timestamp !== null && timestamp * 1000 > now + PAID_AT_CLOCK_SKEW_MS
 }
 
 export function resolvePoolPeriod(type: PoolPeriodType, reference = new Date()): { start: string; end: string } {

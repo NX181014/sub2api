@@ -133,7 +133,6 @@ func deleteAccountFamilyPreservingUsage(ctx context.Context, exec accountDeleteE
 	}{
 		{`DELETE FROM account_groups WHERE account_id=ANY($1)`, []any{idArray}},
 		{`DELETE FROM scheduled_test_plans WHERE account_id=ANY($1)`, []any{idArray}},
-		{`DELETE FROM sora_accounts WHERE account_id=ANY($1)`, []any{idArray}},
 		{`DELETE FROM batch_image_jobs WHERE account_id=ANY($1)`, []any{idArray}},
 		{`DELETE FROM ops_system_logs WHERE account_id=ANY($1)`, []any{idArray}},
 		{`DELETE FROM ops_error_logs WHERE account_id=ANY($1)`, []any{idArray}},

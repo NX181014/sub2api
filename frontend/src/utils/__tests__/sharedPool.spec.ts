@@ -3,7 +3,10 @@ import {
   accountStatusPresentation,
   buildPoolPeriodParams,
   formatPoolMoney,
+  formatPoolPaidAtInput,
+  isPoolPaidAtFuture,
   latestPoolRecords,
+  poolPaidAtToISOString,
   resolvePoolPeriod,
   settlementStatusPresentation
 } from '../sharedPool'
@@ -60,5 +63,16 @@ describe('shared pool presentation helpers', () => {
     const records = latestPoolRecords([{ ...base, id: 2 }, { ...base, id: 9, purchase_cost: 30 }])
 
     expect(records[7]).toMatchObject({ id: 9, purchase_cost: 30 })
+  })
+
+  it('keeps exact purchase times and rejects clearly future values', () => {
+    const value = '2026-08-01T08:11'
+    const iso = poolPaidAtToISOString(value)
+
+    expect(iso).toBe(new Date(value).toISOString())
+    expect(formatPoolPaidAtInput(iso)).toBe(value)
+    expect(poolPaidAtToISOString('')).toBeUndefined()
+    expect(isPoolPaidAtFuture('2026-08-01T08:16', new Date('2026-08-01T08:10:59').getTime())).toBe(true)
+    expect(isPoolPaidAtFuture('2026-08-01T08:15', new Date('2026-08-01T08:10:59').getTime())).toBe(false)
   })
 })

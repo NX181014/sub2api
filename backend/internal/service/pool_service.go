@@ -194,6 +194,9 @@ type AccountCostSummary struct {
 	LatestServiceStart      *time.Time           `json:"latest_service_start"`
 	LatestServiceEnd        *time.Time           `json:"latest_service_end"`
 	PurchasedAt             *time.Time           `json:"purchased_at"`
+	RecoveryDataQuality     string               `json:"recovery_data_quality"`
+	UnpricedPositiveCount   int64                `json:"-"`
+	FuturePurchaseCount     int64                `json:"-"`
 	CostTranches            []AccountCostTranche `json:"-"`
 }
 
@@ -627,6 +630,12 @@ func (s *PoolService) ListCostSummaries(ctx context.Context, filter AccountCostS
 	}
 	for i := range items {
 		applyCostRecognition(&items[i])
+		items[i].RecoveryDataQuality = ResolvePoolRecoveryDataQuality(
+			items[i].PurchaseCostMinor,
+			items[i].CostProgress,
+			items[i].UnpricedPositiveCount,
+			items[i].FuturePurchaseCount > 0,
+		)
 	}
 	return items, total, nil
 }
@@ -801,6 +810,21 @@ func applyCostRecognition(item *AccountCostSummary) {
 	)
 }
 
+func ResolvePoolRecoveryDataQuality(purchaseCostMinor int64, progress *string, unpricedPositiveCount int64, futurePurchase bool) string {
+	switch {
+	case futurePurchase:
+		return "future_purchase_time"
+	case purchaseCostMinor <= 0:
+		return "no_cost"
+	case progress == nil:
+		return "missing_expected_tokens"
+	case unpricedPositiveCount > 0:
+		return "partial_expected_tokens"
+	default:
+		return "ready"
+	}
+}
+
 // CalculateAccountCostRecognitionByTranches recognizes historical usage against
 // each priced token tranche in purchase order, so later top-ups do not absorb old usage.
 func CalculateAccountCostRecognitionByTranches(costBasisMinor, disposedMinor, usedTokens int64, tranches []AccountCostTranche) (int64, int64, *string) {
@@ -915,6 +939,12 @@ func CalculateAccountCostRecognition(costBasisMinor, disposedMinor, usedTokens i
 }
 
 func normalizePoolCostInput(input CreateAccountCostInput) (CreateAccountCostInput, error) {
+	now := time.Now().UTC()
+	if input.PaidAt.IsZero() {
+		input.PaidAt = now
+	} else if input.PaidAt.After(now.Add(5 * time.Minute)) {
+		return input, infraerrors.BadRequest("FUTURE_PURCHASE_TIME", "paid_at must not be more than 5 minutes in the future")
+	}
 	if input.AccountID <= 0 || input.PayerUserID <= 0 || input.CreatedByUserID <= 0 {
 		return input, infraerrors.BadRequest("INVALID_COST_PARTY", "account, payer and creator are required")
 	}

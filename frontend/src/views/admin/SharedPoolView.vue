@@ -626,8 +626,9 @@
           <input id="pool-warranty-end" v-model="costForm.warranty_end" class="input" type="date" />
         </div>
         <div>
-          <label for="pool-paid-at" class="input-label">{{ t('admin.sharedPool.ledger.paidAt') }} *</label>
-          <input id="pool-paid-at" v-model="costForm.paid_at" class="input" type="date" required />
+          <label for="pool-paid-at" class="input-label">{{ t('admin.sharedPool.ledger.paidAt') }}</label>
+          <input id="pool-paid-at" v-model="costForm.paid_at" class="input" type="datetime-local" :aria-invalid="costPaidAtFuture" aria-describedby="pool-paid-at-hint" />
+          <p id="pool-paid-at-hint" class="input-hint" :class="costPaidAtFuture ? 'text-red-600 dark:text-red-400' : ''">{{ t(costPaidAtFuture ? 'admin.sharedPool.errors.futurePaidAt' : 'admin.sharedPool.ledger.paidAtHint') }}</p>
         </div>
         <div>
           <label for="pool-order" class="input-label">{{ t('admin.sharedPool.form.orderNo') }}</label>
@@ -766,8 +767,11 @@ import { formatDateTimeToMinute } from '@/utils/format'
 import {
   accountStatusPresentation,
   buildPoolPeriodParams,
+  formatPoolPaidAtInput,
   formatPoolMoney,
+  isPoolPaidAtFuture,
   latestPoolRecords,
+  poolPaidAtToISOString,
   resolvePoolPeriod,
   settlementStatusPresentation
 } from '@/utils/sharedPool'
@@ -1159,11 +1163,12 @@ const emptyCostForm = (): CreateSharedPoolCostRequest => ({
   service_start: startDate.value,
   service_end: endDate.value,
   warranty_end: '',
-	paid_at: shanghaiToday(),
+	paid_at: '',
   notes: ''
 })
 
 const costForm = reactive<CreateSharedPoolCostRequest>(emptyCostForm())
+const costPaidAtFuture = computed(() => isPoolPaidAtFuture(costForm.paid_at))
 const expectedTokenMillions = computed({
   get: () => tokensToMillions(costForm.expected_token_count),
   set: (value: number) => { costForm.expected_token_count = millionsToTokens(Number(value)) }
@@ -1235,7 +1240,7 @@ function intakePayload(form: CreateSharedPoolCostRequest): CreateSharedPoolIntak
     service_start: form.service_start,
     service_end: form.service_end,
     warranty_end: form.warranty_end || undefined,
-	paid_at: form.paid_at ? new Date(`${form.paid_at}T12:00:00+08:00`).toISOString() : undefined,
+	paid_at: poolPaidAtToISOString(form.paid_at),
     order_no: form.order_no || undefined,
     purchase_url: form.purchase_url || undefined,
     notes: form.notes || undefined
@@ -1497,7 +1502,7 @@ async function openAccountPoolRecord(account: Pick<Account, 'id' | 'name'>, reco
     service_start: existing?.service_start || startDate.value,
     service_end: existing?.service_end || endDate.value,
     warranty_end: existing?.warranty_end || '',
-	paid_at: existing?.paid_at?.slice(0, 10) || shanghaiToday(),
+	paid_at: formatPoolPaidAtInput(existing?.paid_at),
     notes: existing?.notes || ''
   })
   showCostDialog.value = true
@@ -1532,7 +1537,7 @@ async function openLedgerEntry(entry: SharedPoolLedgerEntry) {
 			service_start: entry.service_start.slice(0, 10),
 			service_end: entry.service_end.slice(0, 10),
 			warranty_end: entry.warranty_end?.slice(0, 10) || '',
-			paid_at: entry.paid_at.slice(0, 10),
+			paid_at: formatPoolPaidAtInput(entry.paid_at),
 			notes: entry.note || ''
 		})
 		showCostDialog.value = true
@@ -1906,6 +1911,10 @@ async function saveAccountCost() {
     appStore.showError(t('admin.sharedPool.errors.invalidExpectedTokens'))
     return
   }
+  if (costPaidAtFuture.value) {
+    appStore.showError(t('admin.sharedPool.errors.futurePaidAt'))
+    return
+  }
 
   if (preAccountDraft.value) {
     pendingIntakeDraft.value = { ...costForm }
@@ -1940,7 +1949,7 @@ async function saveAccountCost() {
         service_start: payload.service_start,
         service_end: payload.service_end,
         warranty_end: payload.warranty_end,
-		paid_at: costForm.paid_at ? new Date(`${costForm.paid_at}T12:00:00+08:00`).toISOString() : undefined,
+		paid_at: payload.paid_at,
         order_no: payload.order_no,
         purchase_url: payload.purchase_url,
         notes: payload.notes,

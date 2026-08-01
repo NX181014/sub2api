@@ -1,9 +1,13 @@
 <template>
-  <component :is="embedded ? 'div' : AppLayout">
+  <component
+    :is="embedded ? 'div' : AppLayout"
+    :class="embedded ? 'accounts-workbench-root min-w-0 max-w-full overflow-x-clip' : ''"
+  >
     <TablePageLayout>
       <template #filters>
-        <div class="flex flex-wrap-reverse items-start justify-between gap-3">
+        <div class="account-operation-band">
           <AccountTableFilters
+            class="account-operation-filters"
             :search-query="params.search"
             :filters="params"
             :groups="groups"
@@ -15,6 +19,7 @@
             @clear="clearFilters"
           />
           <AccountTableActions
+            class="account-operation-actions"
             :loading="loading"
             @refresh="handleManualRefresh"
             @create="handleCreateRequest"
@@ -198,15 +203,28 @@
         <div :class="embedded ? 'workbench-layout min-h-0 flex-1' : 'contents'">
           <aside
             v-if="embedded"
-            class="workbench-sidebar shrink-0 border-b border-gray-200 bg-gray-50/60 dark:border-dark-700 dark:bg-dark-900/30 lg:flex lg:min-h-0 lg:flex-col lg:border-b-0 lg:border-r"
+            class="workbench-sidebar shrink-0 border-b border-gray-200 bg-gray-50/60 dark:border-dark-700 dark:bg-dark-900/30"
+            :class="{ 'workbench-mobile-collapsed': !mobileWorkbenchNavigatorExpanded }"
             :aria-label="t('admin.accounts.importBatchGroup')"
           >
             <div data-test="workbench-sidebar-header" class="border-b border-gray-200 p-3 dark:border-dark-700">
               <div class="mb-2 flex items-center justify-between gap-3">
                 <h2 class="text-sm font-semibold text-gray-900 dark:text-white">{{ t('admin.accounts.workbenchNavigatorTitle') }}</h2>
-                <span class="text-xs tabular-nums text-gray-500 dark:text-gray-400">{{ workbenchBatches.length }}</span>
+                <span class="flex items-center gap-2">
+                  <span class="text-xs tabular-nums text-gray-500 dark:text-gray-400">{{ workbenchBatches.length }}</span>
+                  <button
+                    type="button"
+                    data-test="workbench-mobile-toggle"
+                    class="workbench-mobile-toggle inline-flex min-h-11 min-w-11 items-center justify-center rounded-md text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-dark-700"
+                    :aria-expanded="mobileWorkbenchNavigatorExpanded"
+                    :aria-label="t('admin.accounts.workbenchNavigatorTitle')"
+                    @click="mobileWorkbenchNavigatorExpanded = !mobileWorkbenchNavigatorExpanded"
+                  >
+                    <Icon :name="mobileWorkbenchNavigatorExpanded ? 'chevronDown' : 'chevronRight'" size="sm" />
+                  </button>
+                </span>
               </div>
-              <label class="relative block">
+              <label class="workbench-navigator-search relative block">
                 <Icon name="search" size="sm" class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
                 <input
                   v-model.trim="workbenchNavigatorSearch"
@@ -218,7 +236,7 @@
                 />
               </label>
             </div>
-            <div class="flex items-start gap-2 overflow-x-auto p-3 lg:block lg:min-h-0 lg:flex-1 lg:space-y-2 lg:overflow-y-auto">
+            <div class="workbench-navigator-list flex items-start gap-2 p-3">
               <button
                 type="button"
                 data-test="workbench-all"
@@ -241,7 +259,7 @@
               <div
                 v-for="group in filteredWorkbenchUploaderGroups"
                 :key="String(group.id)"
-                class="flex min-w-max items-start gap-1 border-l border-gray-200 pl-2 dark:border-dark-700 lg:block lg:min-w-0 lg:space-y-1 lg:border-l-0 lg:border-t lg:pl-0 lg:pt-2"
+                class="workbench-uploader-group flex min-w-max items-start gap-1 border-l border-gray-200 pl-2 dark:border-dark-700"
               >
                 <button
                   type="button"
@@ -280,7 +298,7 @@
                     <span class="block truncate font-medium text-gray-800 dark:text-gray-100" :title="batch.names.join('、')">
                       {{ batch.names.join('、') || t('admin.accounts.importBatchGroup') }}
                     </span>
-                    <span class="block truncate text-xs text-gray-500 dark:text-gray-400">
+                    <span class="block truncate text-xs text-gray-500 dark:text-gray-400" :title="`${formatDateTime(batch.created_at)} · ${batch.id}`">
                       {{ formatDateTime(batch.created_at) }} · {{ batch.id }}
                     </span>
                     <span data-test="workbench-batch-status" class="mt-1.5 flex flex-wrap gap-1">
@@ -364,7 +382,7 @@
           :overscan="5"
           :virtualize-threshold="50"
           :mobile-column-keys="embedded
-            ? ['select', 'name', 'usage', 'status', 'actions']
+            ? ['select', 'name', 'status', 'usage', 'actions']
             : ['select', 'uploader', 'usage', 'pool_record', 'status']"
         >
           <template #header-select>
@@ -555,7 +573,6 @@
                 </button>
                 <AccountCapacityCell :account="row" />
               </div>
-              <AccountGroupsCell v-if="!authStore.isSimpleMode" :groups="row.groups" :max-display="2" />
             </div>
             <div v-else class="flex items-center gap-1.5">
               <AccountStatusIndicator :account="row" @show-temp-unsched="handleShowTempUnsched" />
@@ -689,6 +706,19 @@
                     </span>
                   </div>
                 </button>
+              </div>
+              <div
+                v-if="embedded"
+                data-test="account-workbench-secondary"
+                class="mt-3 flex min-w-0 flex-wrap items-center gap-x-4 gap-y-2 border-t border-gray-200 pt-3 text-[11px] text-gray-500 dark:border-dark-700 dark:text-gray-400"
+              >
+                <span class="min-w-0 truncate" :title="accountUploader(row)">
+                  {{ t('admin.sharedPool.columns.uploader') }}: {{ accountUploader(row) }}
+                </span>
+                <span v-if="importBatchID(row)" class="min-w-0 truncate" :title="importBatchID(row)">
+                  {{ t('admin.accounts.importBatchGroup') }}: {{ importBatchID(row) }}
+                </span>
+                <AccountGroupsCell v-if="!authStore.isSimpleMode" :groups="row.groups" :max-display="2" />
               </div>
             </div>
           </template>
@@ -1259,6 +1289,7 @@ const selectedWorkbenchUploaderID = ref<number | string>(
 )
 const workbenchBatches = ref<AccountImportBatchSummary[]>([])
 const workbenchNavigatorSearch = ref('')
+const mobileWorkbenchNavigatorExpanded = ref(false)
 const workbenchNavigatorLoading = ref(false)
 const workbenchAccountTotal = ref(0)
 let workbenchNavigatorRevision = 0
@@ -2923,7 +2954,7 @@ const handleEdit = (a: Account) => { edAcc.value = a; showEdit.value = true }
 const poolRecordFor = (accountID: number) => props.poolRecords[accountID]
 const hasPoolCost = (account: Account) => Number(account.pool_purchase_cost_minor || account.pool_net_cost_minor || 0) > 0 || Boolean(poolRecordFor(account.id))
 const formatPoolCost = (minor?: number | null) => `¥${(Number(minor || 0) / 100).toFixed(2)}`
-type PoolWorkbenchTraceQuality = 'ready' | 'no_cost' | 'missing_expected_tokens' | 'partial_expected_tokens' | 'derived' | 'unavailable'
+type PoolWorkbenchTraceQuality = 'ready' | 'no_cost' | 'missing_expected_tokens' | 'partial_expected_tokens' | 'future_purchase_time' | 'derived' | 'unavailable'
 type PoolWorkbenchAccount = Account & {
   pool_latest_purchase_source?: string | null
   pool_purchase_source_count?: number
@@ -2966,7 +2997,11 @@ const poolWorkbenchRecordFor = (account: Account) => {
   }
 }
 const poolTraceBadgeStatus = (quality: PoolWorkbenchTraceQuality) =>
-  quality === 'ready' ? 'success' : ['derived', 'missing_expected_tokens', 'partial_expected_tokens'].includes(quality) ? 'warning' : 'inactive'
+  quality === 'ready'
+    ? 'success'
+    : quality === 'future_purchase_time'
+      ? 'error'
+      : ['derived', 'missing_expected_tokens', 'partial_expected_tokens'].includes(quality) ? 'warning' : 'inactive'
 const poolRecoveryLabel = (account: Account) => {
   const progress = Number(account.pool_cost_progress || 0)
   if (progress >= 1) return t('admin.sharedPool.status.recovered')
@@ -3977,8 +4012,49 @@ onUnmounted(() => {
   @apply inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-md;
 }
 
+.account-operation-band {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px;
+  overflow: hidden;
+  border: 1px solid rgb(226 232 240);
+  border-radius: 8px;
+  background: rgb(255 255 255);
+}
+
+.dark .account-operation-band {
+  border-color: rgb(51 65 85);
+  background: rgb(30 41 59 / 0.7);
+}
+
+.account-operation-filters {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.account-operation-filters :deep(p) {
+  display: none;
+}
+
+.account-operation-actions {
+  flex: 0 0 auto;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
 .workbench-nav-item {
-  @apply flex min-h-11 min-w-48 items-center justify-between gap-3 rounded-lg border border-transparent px-3 py-2 text-left text-sm text-gray-700 transition-colors hover:border-gray-200 hover:bg-white dark:text-gray-200 dark:hover:border-dark-600 dark:hover:bg-dark-800 lg:min-w-0 lg:w-full;
+  @apply flex min-h-11 min-w-48 items-center justify-between gap-3 rounded-lg border border-transparent px-3 py-2 text-left text-sm text-gray-700 transition-colors hover:border-gray-200 hover:bg-white dark:text-gray-200 dark:hover:border-dark-600 dark:hover:bg-dark-800;
 }
 
 .workbench-nav-item-active {
@@ -3986,7 +4062,7 @@ onUnmounted(() => {
 }
 
 .workbench-batch-item {
-  @apply flex min-h-11 min-w-64 items-center justify-between gap-3 rounded-lg border border-gray-200/80 bg-white/70 px-3 py-2 text-left text-sm transition-colors hover:border-gray-300 hover:bg-white dark:border-dark-700 dark:bg-dark-800/70 dark:hover:border-dark-600 dark:hover:bg-dark-700 lg:min-w-0 lg:w-full;
+  @apply flex min-h-11 min-w-64 items-center justify-between gap-3 rounded-lg border border-gray-200/80 bg-white/70 px-3 py-2 text-left text-sm transition-colors hover:border-gray-300 hover:bg-white dark:border-dark-700 dark:bg-dark-800/70 dark:hover:border-dark-600 dark:hover:bg-dark-700;
 }
 
 .workbench-batch-item-active {
@@ -3998,15 +4074,105 @@ onUnmounted(() => {
   flex-direction: column;
 }
 
-@media (min-width: 1024px) {
+@media (max-width: 1439px) {
+  .account-operation-band {
+    flex-wrap: wrap;
+    align-items: center;
+  }
+
+  .account-operation-filters,
+  .account-operation-actions {
+    display: contents;
+  }
+
+  .account-operation-filters :deep(> div:first-child) {
+    display: contents;
+  }
+
+  .account-operation-filters :deep(> div:first-child > *),
+  .account-operation-actions :deep(> *) {
+    order: 3;
+  }
+
+  .account-operation-filters :deep(> div:first-child > :first-child) {
+    order: 1;
+    width: auto;
+    min-width: 0;
+    flex: 1 1 240px;
+  }
+
+  .account-operation-actions :deep(> .btn-primary) {
+    order: 2;
+    flex: 0 0 auto;
+  }
+
+  .account-operation-filters :deep(> div:not(:first-child)) {
+    order: 4;
+    flex: 1 0 100%;
+  }
+}
+
+@media (min-width: 1180px) {
   .workbench-layout {
     display: grid;
-    grid-template-columns: clamp(272px, 18%, 304px) minmax(0, 1fr);
+    grid-template-columns: 240px minmax(0, 1fr);
+  }
+
+  .workbench-sidebar {
+    display: flex;
+    min-height: 0;
+    flex-direction: column;
+    border-right: 1px solid rgb(226 232 240);
+    border-bottom: 0;
+  }
+
+  .dark .workbench-sidebar {
+    border-right-color: rgb(51 65 85);
+  }
+
+  .workbench-navigator-list {
+    display: block;
+    min-height: 0;
+    flex: 1 1 auto;
+    overflow-y: auto;
+  }
+
+  .workbench-navigator-list > * + * {
+    margin-top: 8px;
+  }
+
+  .workbench-nav-item,
+  .workbench-batch-item {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .workbench-uploader-group {
+    display: block;
+    min-width: 0;
+    padding-top: 8px;
+    padding-left: 0;
+    border-top: 1px solid rgb(226 232 240);
+    border-left: 0;
+  }
+
+  .dark .workbench-uploader-group {
+    border-top-color: rgb(51 65 85);
+  }
+
+  .workbench-uploader-group > * + * {
+    margin-top: 4px;
+  }
+}
+
+@media (min-width: 1440px) {
+  .workbench-layout {
+    grid-template-columns: 272px minmax(0, 1fr);
   }
 }
 
 .account-usage-card {
-  @apply min-w-[232px] rounded-xl border border-gray-200/80 bg-gray-50/70 px-3 py-2 dark:border-dark-700 dark:bg-dark-800/60;
+  @apply min-w-[232px] rounded-lg border border-gray-200/80 bg-gray-50/70 px-3 py-2 dark:border-dark-700 dark:bg-dark-800/60;
 }
 
 .account-usage-finance {
@@ -4075,9 +4241,8 @@ onUnmounted(() => {
 
   .account-workbench-table.is-embedded :deep(.table-body tr[data-row-id]) {
     display: grid;
-    grid-template-columns: 44px minmax(160px, 190px) minmax(280px, 1fr) 92px;
     width: 100%;
-    min-width: 576px;
+    min-width: 0;
     margin: 8px 0;
     overflow: hidden;
     border: 1px solid rgb(226 232 240 / 0.9);
@@ -4090,28 +4255,9 @@ onUnmounted(() => {
     display: flex;
     min-width: 0;
     align-items: center;
-    padding: 14px 12px;
+    padding: 12px;
     white-space: normal;
     background: transparent;
-  }
-
-  .account-workbench-table.is-embedded :deep(.table-body tr[data-row-id] td + td) {
-    border-left: 1px solid rgb(241 245 249);
-  }
-
-  .account-workbench-table.is-embedded :deep(.table-body tr[data-row-id] td:nth-child(1)),
-  .account-workbench-table.is-embedded :deep(.table-body tr[data-row-id] td:nth-child(5)) {
-    grid-row: 1 / 3;
-  }
-
-  .account-workbench-table.is-embedded :deep(.table-body tr[data-row-id] td:nth-child(4)) {
-    grid-column: 2 / 4;
-    grid-row: 2;
-    border-top: 1px solid rgb(241 245 249);
-  }
-
-  .account-workbench-table.is-embedded :deep(.table-body tr[data-row-id] td:nth-child(5)) {
-    grid-column: 4;
   }
 
   .account-workbench-table.is-embedded :deep(.table-body tr:not([data-row-id])) {
@@ -4128,17 +4274,103 @@ onUnmounted(() => {
     border-color: rgb(71 85 105 / 0.7);
     background: rgb(30 41 59 / 0.78);
   }
+}
+
+@media (min-width: 768px) and (max-width: 1179px) {
+  .workbench-navigator-list {
+    flex-wrap: wrap;
+    align-items: stretch;
+    overflow: visible;
+  }
+
+  .workbench-nav-item,
+  .workbench-batch-item {
+    min-width: 0;
+    flex: 1 1 220px;
+  }
+
+  .workbench-uploader-group {
+    min-width: 0;
+    flex: 1 1 100%;
+    flex-wrap: wrap;
+    padding-top: 8px;
+    padding-left: 0;
+    border-top: 1px solid rgb(226 232 240);
+    border-left: 0;
+  }
+
+  .dark .workbench-uploader-group {
+    border-top-color: rgb(51 65 85);
+  }
+
+  .account-workbench-table.is-embedded :deep(.table-body tr[data-row-id]) {
+    grid-template-columns: 44px minmax(0, 1fr) 104px;
+  }
+
+  .account-workbench-table.is-embedded :deep(.table-body tr[data-row-id] td:nth-child(1)) {
+    grid-column: 1;
+    grid-row: 1 / 3;
+  }
+
+  .account-workbench-table.is-embedded :deep(.table-body tr[data-row-id] td:nth-child(2)) {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  .account-workbench-table.is-embedded :deep(.table-body tr[data-row-id] td:nth-child(3)) {
+    grid-column: 1 / 4;
+    grid-row: 3;
+    border-top: 1px solid rgb(241 245 249);
+  }
+
+  .account-workbench-table.is-embedded :deep(.table-body tr[data-row-id] td:nth-child(4)) {
+    grid-column: 2;
+    grid-row: 2;
+    padding-top: 0;
+  }
+
+  .account-workbench-table.is-embedded :deep(.table-body tr[data-row-id] td:nth-child(5)) {
+    grid-column: 3;
+    grid-row: 1 / 3;
+  }
+
+  .account-usage-finance {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 16px;
+  }
+
+  .account-finance-summary {
+    padding-top: 0;
+    padding-left: 16px;
+    border-top: 0;
+    border-left: 1px solid rgb(226 232 240 / 0.9);
+  }
+
+  .dark .account-workbench-table.is-embedded :deep(.table-body tr[data-row-id] td:nth-child(3)),
+  .dark .account-finance-summary {
+    border-color: rgb(51 65 85 / 0.8);
+  }
+}
+
+@media (min-width: 1180px) {
+  .account-workbench-table.is-embedded :deep(.table-body tr[data-row-id]) {
+    grid-template-columns: 44px minmax(145px, 180px) minmax(260px, 1fr) minmax(170px, 200px) 96px;
+  }
+
+  .account-workbench-table.is-embedded :deep(.table-body tr[data-row-id] td + td) {
+    border-left: 1px solid rgb(241 245 249);
+  }
 
   .dark .account-workbench-table.is-embedded :deep(.table-body tr[data-row-id] td + td) {
     border-left-color: rgb(51 65 85 / 0.8);
   }
-
-  .dark .account-workbench-table.is-embedded :deep(.table-body tr[data-row-id] td:nth-child(4)) {
-    border-top-color: rgb(51 65 85 / 0.8);
-  }
 }
 
-@media (min-width: 1280px) {
+@media (min-width: 1440px) {
+  .account-workbench-table.is-embedded :deep(.table-body tr[data-row-id]) {
+    grid-template-columns: 44px minmax(180px, 210px) minmax(300px, 1fr) minmax(190px, 220px) 104px;
+  }
+
   .account-usage-finance {
     grid-template-columns: minmax(280px, 1fr) minmax(240px, 0.85fr);
     gap: 16px;
@@ -4157,25 +4389,81 @@ onUnmounted(() => {
   }
 }
 
-@media (min-width: 1440px) {
-  .account-workbench-table.is-embedded :deep(.table-body tr[data-row-id]) {
-    grid-template-columns: 44px minmax(180px, 210px) minmax(300px, 1fr) minmax(190px, 220px) 104px;
-    min-width: 838px;
-  }
-
-  .account-workbench-table.is-embedded :deep(.table-body tr[data-row-id] td:nth-child(1)),
-  .account-workbench-table.is-embedded :deep(.table-body tr[data-row-id] td:nth-child(4)),
-  .account-workbench-table.is-embedded :deep(.table-body tr[data-row-id] td:nth-child(5)) {
-    grid-column: auto;
-    grid-row: auto;
-  }
-
-  .account-workbench-table.is-embedded :deep(.table-body tr[data-row-id] td:nth-child(4)) {
-    border-top: 0;
-  }
+.workbench-mobile-toggle {
+  display: none;
 }
 
 @media (max-width: 767px) {
+  .account-operation-band {
+    gap: 8px;
+    padding: 8px;
+  }
+
+  .workbench-mobile-toggle {
+    display: inline-flex;
+  }
+
+  .workbench-mobile-collapsed .workbench-navigator-search,
+  .workbench-mobile-collapsed .workbench-navigator-list {
+    display: none;
+  }
+
+  .workbench-navigator-list {
+    display: block;
+    overflow: hidden;
+  }
+
+  .workbench-navigator-list > * + *,
+  .workbench-uploader-group > * + * {
+    margin-top: 8px;
+  }
+
+  .workbench-nav-item,
+  .workbench-batch-item,
+  .workbench-uploader-group {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .workbench-uploader-group {
+    display: block;
+    padding-top: 8px;
+    padding-left: 0;
+    border-top: 1px solid rgb(226 232 240);
+    border-left: 0;
+  }
+
+  .dark .workbench-uploader-group {
+    border-top-color: rgb(51 65 85);
+  }
+
+  .account-workbench-table.is-embedded :deep(.space-y-3 > .rounded-lg > .space-y-3) {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .account-workbench-table.is-embedded :deep(.space-y-3 > .rounded-lg > .space-y-3 > *) {
+    order: 3;
+  }
+
+  .account-workbench-table.is-embedded :deep([data-field='select']) {
+    order: 0;
+  }
+
+  .account-workbench-table.is-embedded :deep([data-field='name']) {
+    order: 1;
+  }
+
+  .account-workbench-table.is-embedded :deep([data-field='status']) {
+    order: 2;
+  }
+
+  .account-workbench-table.is-embedded :deep([data-field='usage']) {
+    order: 4;
+  }
+
   .account-workbench-table.is-embedded :deep([data-field='name']),
   .account-workbench-table.is-embedded :deep([data-field='usage']),
   .account-workbench-table.is-embedded :deep([data-field='status']) {
