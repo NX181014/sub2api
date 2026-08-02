@@ -96,6 +96,26 @@ func (s *mihomoResourceRepoStub) ListNodes(_ context.Context, params pagination.
 	return paginateMihomoStub(s.nodes, params), nil, nil
 }
 
+func (s *mihomoResourceRepoStub) GetNodeByID(_ context.Context, id int64) (*MihomoManagedNode, error) {
+	for i := range s.nodes {
+		if s.nodes[i].ID == id {
+			item := s.nodes[i]
+			return &item, nil
+		}
+	}
+	return nil, ErrMihomoNodeNotFound
+}
+
+func (s *mihomoResourceRepoStub) UpdateNode(_ context.Context, item *MihomoManagedNode) error {
+	for i := range s.nodes {
+		if s.nodes[i].ID == item.ID {
+			s.nodes[i] = *item
+			return nil
+		}
+	}
+	return ErrMihomoNodeNotFound
+}
+
 func (s *mihomoResourceRepoStub) ListRoutes(_ context.Context, params pagination.PaginationParams, filter MihomoRouteFilter) ([]MihomoRoute, *pagination.PaginationResult, error) {
 	items := make([]MihomoRoute, 0, len(s.routes))
 	for _, route := range s.routes {
@@ -481,5 +501,101 @@ func TestRefreshManagedSubscriptionKeepsUnknownDelayAndSkipsProviderMetadata(t *
 	}
 	if node := byName["剩余流量专线"]; node.DelayMS == nil || *node.DelayMS != 55 {
 		t.Fatalf("normal similarly named node = %+v", node)
+	}
+}
+
+func TestManagedSubscriptionRefreshReloadsRuntime(t *testing.T) {
+	configLoads := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPut && r.URL.Path == "/providers/proxies/primary":
+			w.WriteHeader(http.StatusNoContent)
+		case r.Method == http.MethodGet && r.URL.Path == "/providers/proxies":
+			_, _ = w.Write([]byte(`{"providers":{"primary":{"proxies":[{"name":"[primary] Node","alive":true,"history":[{"delay":42}]}]}}}`))
+		case r.Method == http.MethodPut && r.URL.Path == "/configs":
+			configLoads++
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	configPath := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(configPath, []byte("secret: test-secret\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	resources := &mihomoResourceRepoStub{subscriptions: []MihomoSubscription{{
+		ID: 1, Name: "Primary", ProviderKey: "primary", URLCiphertext: []byte("https://subscription.example/sub"),
+		RefreshIntervalSeconds: 600, Status: StatusActive,
+	}}}
+	svc := NewMihomoService(&config.Config{Mihomo: config.MihomoConfig{
+		Enabled: true, ControllerURL: server.URL, ConfigPath: configPath, ProxyHost: "mihomo",
+	}}, &mihomoProxyRepoStub{}, mihomoPlainEncryptor{}).SetResourceRepository(resources)
+
+	finalize, err := svc.applyManagedApproved(context.Background(), MihomoApprovalUpdate{
+		Kind: MihomoApprovalSubscriptionRefresh, SubscriptionID: 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if finalize == nil || configLoads != 2 {
+		t.Fatalf("finalize = %v, config loads = %d", finalize != nil, configLoads)
+	}
+	if err = finalize(true); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestManagedNodesHealthchecksProviderOnceAndSyncsHealth(t *testing.T) {
+	healthchecks, providerRefreshes, configLoads := 0, 0, 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/providers/proxies/primary/healthcheck":
+			healthchecks++
+			w.WriteHeader(http.StatusNoContent)
+		case r.Method == http.MethodGet && r.URL.Path == "/providers/proxies":
+			_, _ = w.Write([]byte(`{"providers":{"primary":{"proxies":[` +
+				`{"name":"[primary] Node A","alive":true,"history":[{"delay":31}]},` +
+				`{"name":"[primary] Node B","alive":false,"history":[{"delay":87}]}` +
+				`]}}}`))
+		case r.Method == http.MethodPut && r.URL.Path == "/providers/proxies/primary":
+			providerRefreshes++
+			w.WriteHeader(http.StatusNoContent)
+		case r.Method == http.MethodPut && r.URL.Path == "/configs":
+			configLoads++
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	configPath := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(configPath, []byte("secret: test-secret\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	resources := &mihomoResourceRepoStub{
+		subscriptions: []MihomoSubscription{{ID: 1, Name: "Primary", ProviderKey: "primary", Status: StatusActive}},
+		nodes: []MihomoManagedNode{
+			{ID: 10, SubscriptionID: 1, OriginalName: "Node A"},
+			{ID: 11, SubscriptionID: 1, OriginalName: "Node B", Alive: true},
+		},
+	}
+	svc := NewMihomoService(&config.Config{Mihomo: config.MihomoConfig{
+		Enabled: true, ControllerURL: server.URL, ConfigPath: configPath,
+	}}, &mihomoProxyRepoStub{}, nil).SetResourceRepository(resources)
+
+	if err := svc.TestManagedNodes(context.Background(), []int64{10, 11, 10}); err != nil {
+		t.Fatal(err)
+	}
+	if healthchecks != 1 || providerRefreshes != 0 || configLoads != 0 {
+		t.Fatalf("healthchecks=%d provider refreshes=%d config loads=%d", healthchecks, providerRefreshes, configLoads)
+	}
+	if got := resources.nodes[0]; !got.Alive || got.DelayMS == nil || *got.DelayMS != 31 {
+		t.Fatalf("Node A health = %+v", got)
+	}
+	if got := resources.nodes[1]; got.Alive || got.DelayMS == nil || *got.DelayMS != 87 {
+		t.Fatalf("Node B health = %+v", got)
 	}
 }

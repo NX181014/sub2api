@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"net/url"
 	"strings"
 	"time"
@@ -366,16 +367,65 @@ func (s *MihomoService) TestManagedNodes(ctx context.Context, nodeIDs []int64) e
 	if err != nil {
 		return err
 	}
-	subscriptions := make(map[int64]struct{})
+	subscriptionIDs := make(map[int64]struct{})
 	for _, id := range ids {
 		node, getErr := s.resources.GetNodeByID(ctx, id)
 		if getErr != nil {
 			return getErr
 		}
-		subscriptions[node.SubscriptionID] = struct{}{}
+		subscriptionIDs[node.SubscriptionID] = struct{}{}
 	}
-	for id := range subscriptions {
-		if err = s.RefreshManagedSubscription(ctx, id); err != nil {
+	subscriptions := make(map[string]int64, len(subscriptionIDs))
+	for subscriptionID := range subscriptionIDs {
+		subscription, getErr := s.resources.GetSubscriptionByID(ctx, subscriptionID)
+		if getErr != nil {
+			return getErr
+		}
+		if subscription.Status != StatusActive {
+			return infraerrors.BadRequest("MIHOMO_SUBSCRIPTION_DISABLED", "mihomo subscription is disabled")
+		}
+		subscriptions[subscription.ProviderKey] = subscription.ID
+	}
+	for providerKey := range subscriptions {
+		if err = s.controllerJSON(ctx, http.MethodGet, "/providers/proxies/"+url.PathEscape(providerKey)+"/healthcheck", nil, nil); err != nil {
+			return err
+		}
+	}
+	providers, err := s.providerStates(ctx)
+	if err != nil {
+		return err
+	}
+	for providerKey, subscriptionID := range subscriptions {
+		provider, ok := providers[providerKey]
+		if !ok {
+			return fmt.Errorf("mihomo provider %q is missing after healthcheck", providerKey)
+		}
+		if err = s.syncManagedNodeHealth(ctx, subscriptionID, providerKey, provider); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *MihomoService) syncManagedNodeHealth(ctx context.Context, subscriptionID int64, providerKey string, provider mihomoProviderState) error {
+	nodes, err := s.allMihomoNodes(ctx, MihomoNodeFilter{SubscriptionID: &subscriptionID, IncludeRemoved: true})
+	if err != nil {
+		return err
+	}
+	prefix := "[" + providerKey + "] "
+	states := make(map[string]MihomoNode, len(provider.Nodes))
+	for _, node := range provider.Nodes {
+		states[strings.TrimSpace(strings.TrimPrefix(node.Name, prefix))] = node
+	}
+	observedAt := time.Now().UTC()
+	for i := range nodes {
+		state, ok := states[nodes[i].OriginalName]
+		if !ok {
+			continue
+		}
+		nodes[i].Alive, nodes[i].DelayMS = state.Alive, state.Delay
+		nodes[i].LastSeenAt, nodes[i].UpstreamRemovedAt = observedAt, nil
+		if err = s.resources.UpdateNode(ctx, &nodes[i]); err != nil {
 			return err
 		}
 	}
@@ -586,9 +636,6 @@ func (s *MihomoService) applyManagedApproved(ctx context.Context, update MihomoA
 		err = s.resources.DeleteSubscription(ctx, update.SubscriptionID)
 	case MihomoApprovalSubscriptionRefresh:
 		err = s.RefreshManagedSubscription(ctx, update.SubscriptionID)
-		if err == nil {
-			return nil, nil
-		}
 	case MihomoApprovalRouteCreate, MihomoApprovalRouteUpdate:
 		err = s.applyManagedRoute(ctx, update)
 	case MihomoApprovalRouteDelete:

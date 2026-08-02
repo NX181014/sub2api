@@ -103,6 +103,22 @@ describe('MihomoPanel', () => {
     expect(wrapper.text()).not.toContain('异常节点')
   })
 
+  it('selects and clears the filtered nodes as an explicit batch', async () => {
+    const wrapper = mount(MihomoPanel)
+    await flushPromises()
+
+    await wrapper.findAll('button').find(button => button.text().includes('节点'))!.trigger('click')
+    await wrapper.get('select[aria-label="按状态筛选节点"]').setValue('unknown')
+    const toolbar = wrapper.findAll('div').find(item => item.text().includes('当前结果 1 个 · 已选 0 个'))!
+
+    await toolbar.findAll('button').find(button => button.text() === '选择当前结果')!.trigger('click')
+    expect(toolbar.text()).toContain('当前结果 1 个 · 已选 1 个')
+    expect(toolbar.text()).toContain('批量检测所属订阅')
+
+    await toolbar.findAll('button').find(button => button.text() === '清空选择')!.trigger('click')
+    expect(toolbar.text()).toContain('当前结果 1 个 · 已选 0 个')
+  })
+
   it('does not count untested routes as failed', async () => {
     mocks.getWorkbench.mockResolvedValue({
       ...workbench,

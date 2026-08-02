@@ -127,14 +127,15 @@
           </div>
 
           <div class="flex flex-wrap items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 p-2 dark:border-dark-700 dark:bg-dark-900/40">
-            <span class="px-2 text-sm text-gray-600 dark:text-gray-300">已选 {{ selectedNodeIDs.length }} 个</span>
+            <span class="px-2 text-sm text-gray-600 dark:text-gray-300">当前结果 {{ selectableFilteredNodes.length }} 个 · 已选 {{ selectedNodeIDs.length }} 个</span>
+            <button type="button" class="btn btn-secondary min-h-11 px-3" :disabled="!selectableFilteredNodes.length || allFilteredNodesSelected" @click="selectAllFilteredNodes">选择当前结果</button>
+            <button type="button" class="btn btn-secondary min-h-11 px-3" :disabled="!selectedNodeIDs.length" @click="selectedNodeKeys = new Set()">清空选择</button>
             <button type="button" class="btn btn-primary min-h-11 px-3" :disabled="!selectedNodeIDs.length" @click="confirmNodeAction('create_dedicated_routes')">批量建专线</button>
-            <button type="button" class="btn btn-secondary min-h-11 px-3" :disabled="!selectedNodeIDs.length" @click="runNodeTest">批量测速</button>
-            <button type="button" class="btn btn-secondary min-h-11 px-3" :disabled="!selectedNodeIDs.length" @click="confirmNodeAction('enable')">启用</button>
-            <button type="button" class="btn btn-secondary min-h-11 px-3" :disabled="!selectedNodeIDs.length" @click="confirmNodeAction('disable')">停用</button>
-            <button type="button" class="btn btn-secondary min-h-11 px-3" :disabled="!selectedNodeIDs.length" @click="confirmNodeAction('exclude')">排除</button>
-            <button type="button" class="btn btn-secondary min-h-11 px-3" :disabled="!selectedNodeIDs.length" @click="confirmNodeAction('restore')">恢复</button>
-            <button type="button" class="ml-auto btn btn-secondary min-h-11 px-3" :disabled="!selectableFilteredNodes.length" @click="toggleAllFilteredNodes">{{ allFilteredNodesSelected ? '取消全选' : '选择当前结果' }}</button>
+            <button type="button" class="btn btn-secondary min-h-11 px-3" :disabled="!selectedNodeIDs.length" title="按所选节点所属订阅批量检测" @click="runNodeTest">批量检测所属订阅</button>
+            <button type="button" class="btn btn-secondary min-h-11 px-3" :disabled="!selectedNodeIDs.length" @click="confirmNodeAction('enable')">批量启用</button>
+            <button type="button" class="btn btn-secondary min-h-11 px-3" :disabled="!selectedNodeIDs.length" @click="confirmNodeAction('disable')">批量停用</button>
+            <button type="button" class="btn btn-secondary min-h-11 px-3" :disabled="!selectedNodeIDs.length" @click="confirmNodeAction('exclude')">批量排除</button>
+            <button type="button" class="btn btn-secondary min-h-11 px-3" :disabled="!selectedNodeIDs.length" @click="confirmNodeAction('restore')">批量恢复</button>
           </div>
 
           <div class="grid min-w-0 gap-3 md:grid-cols-2 2xl:grid-cols-3">
@@ -252,7 +253,7 @@
             <select v-model="routeNodeHealthFilter" class="input min-h-11 min-w-0" aria-label="按状态筛选线路节点"><option value="">全部状态</option><option value="alive">可用</option><option value="down">异常</option><option value="unknown">未检测</option></select>
           </div>
           <div class="mt-2 flex flex-wrap items-center gap-2">
-            <span class="mr-auto text-sm text-gray-600 dark:text-gray-300">已选 {{ routeForm.node_ids.length }} 个</span>
+            <span class="mr-auto text-sm text-gray-600 dark:text-gray-300">当前结果 {{ routeFormNodes.length }} 个 · 已选 {{ routeForm.node_ids.length }} 个</span>
             <button type="button" class="btn btn-secondary min-h-11 px-3" :disabled="!routeFormNodes.length" @click="toggleAllRouteFormNodes">{{ allRouteFormNodesSelected ? '取消当前结果' : '选择当前结果' }}</button>
             <button type="button" class="btn btn-secondary min-h-11 px-3" :disabled="!routeForm.node_ids.length" @click="routeForm.node_ids = []">清空</button>
           </div>
@@ -446,9 +447,9 @@ const toggleNode = (node: MihomoNode) => {
   next.has(key) ? next.delete(key) : next.add(key)
   selectedNodeKeys.value = next
 }
-const toggleAllFilteredNodes = () => {
+const selectAllFilteredNodes = () => {
   const next = new Set(selectedNodeKeys.value)
-  selectableFilteredNodes.value.forEach(node => allFilteredNodesSelected.value ? next.delete(nodeSelectionKey(node)) : next.add(nodeSelectionKey(node)))
+  selectableFilteredNodes.value.forEach(node => next.add(nodeSelectionKey(node)))
   selectedNodeKeys.value = next
 }
 const subscriptionName = (id?: number) => subscriptions.value.find(item => item.id === id)?.name || '-'
