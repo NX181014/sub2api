@@ -549,6 +549,7 @@ func TestManagedSubscriptionRefreshReloadsRuntime(t *testing.T) {
 
 func TestManagedNodesHealthchecksProviderOnceAndSyncsHealth(t *testing.T) {
 	healthchecks, providerRefreshes, configLoads := 0, 0, 0
+	removedAt := time.Now().Add(-time.Hour)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/providers/proxies/primary/healthcheck":
@@ -557,7 +558,8 @@ func TestManagedNodesHealthchecksProviderOnceAndSyncsHealth(t *testing.T) {
 		case r.Method == http.MethodGet && r.URL.Path == "/providers/proxies":
 			_, _ = w.Write([]byte(`{"providers":{"primary":{"proxies":[` +
 				`{"name":"[primary] Node A","alive":true,"history":[{"delay":31}]},` +
-				`{"name":"[primary] Node B","alive":false,"history":[{"delay":87}]}` +
+				`{"name":"[primary] Node B","alive":false,"history":[{"delay":87}]},` +
+				`{"name":"[primary] Removed","alive":true,"history":[{"delay":25}]}` +
 				`]}}}`))
 		case r.Method == http.MethodPut && r.URL.Path == "/providers/proxies/primary":
 			providerRefreshes++
@@ -580,6 +582,7 @@ func TestManagedNodesHealthchecksProviderOnceAndSyncsHealth(t *testing.T) {
 		nodes: []MihomoManagedNode{
 			{ID: 10, SubscriptionID: 1, OriginalName: "Node A"},
 			{ID: 11, SubscriptionID: 1, OriginalName: "Node B", Alive: true},
+			{ID: 12, SubscriptionID: 1, OriginalName: "Removed", UpstreamRemovedAt: &removedAt},
 		},
 	}
 	svc := NewMihomoService(&config.Config{Mihomo: config.MihomoConfig{
@@ -597,5 +600,8 @@ func TestManagedNodesHealthchecksProviderOnceAndSyncsHealth(t *testing.T) {
 	}
 	if got := resources.nodes[1]; got.Alive || got.DelayMS == nil || *got.DelayMS != 87 {
 		t.Fatalf("Node B health = %+v", got)
+	}
+	if got := resources.nodes[2]; got.UpstreamRemovedAt == nil || got.DelayMS != nil {
+		t.Fatalf("removed node was resurrected = %+v", got)
 	}
 }

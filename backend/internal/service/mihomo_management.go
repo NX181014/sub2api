@@ -419,12 +419,15 @@ func (s *MihomoService) syncManagedNodeHealth(ctx context.Context, subscriptionI
 	}
 	observedAt := time.Now().UTC()
 	for i := range nodes {
+		if nodes[i].UpstreamRemovedAt != nil {
+			continue
+		}
 		state, ok := states[nodes[i].OriginalName]
 		if !ok {
 			continue
 		}
 		nodes[i].Alive, nodes[i].DelayMS = state.Alive, state.Delay
-		nodes[i].LastSeenAt, nodes[i].UpstreamRemovedAt = observedAt, nil
+		nodes[i].LastSeenAt = observedAt
 		if err = s.resources.UpdateNode(ctx, &nodes[i]); err != nil {
 			return err
 		}
