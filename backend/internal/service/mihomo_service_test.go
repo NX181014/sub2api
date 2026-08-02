@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -16,6 +17,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
+	"gopkg.in/yaml.v3"
 )
 
 type mihomoProxyRepoStub struct {
@@ -73,6 +75,21 @@ func (s *mihomoResourceRepoStub) GetSubscriptionByID(_ context.Context, id int64
 		}
 	}
 	return nil, ErrMihomoSubscriptionNotFound
+}
+
+func (s *mihomoResourceRepoStub) UpdateSubscription(_ context.Context, item *MihomoSubscription) error {
+	for i := range s.subscriptions {
+		if s.subscriptions[i].ID == item.ID {
+			s.subscriptions[i] = *item
+			return nil
+		}
+	}
+	return ErrMihomoSubscriptionNotFound
+}
+
+func (s *mihomoResourceRepoStub) SyncNodes(_ context.Context, _ int64, nodes []MihomoManagedNode, _ time.Time) error {
+	s.nodes = append([]MihomoManagedNode(nil), nodes...)
+	return nil
 }
 
 func (s *mihomoResourceRepoStub) ListNodes(_ context.Context, params pagination.PaginationParams, _ MihomoNodeFilter) ([]MihomoManagedNode, *pagination.PaginationResult, error) {
@@ -387,7 +404,82 @@ func TestMihomoManagedRuntimeRollbackRestoresConfigAndLegacyProxy(t *testing.T) 
 	if string(restored) != oldConfig {
 		t.Fatalf("config was not restored:\n%s", restored)
 	}
-	if len(loadedPayloads) != 2 || loadedPayloads[1] != oldConfig {
+	if len(loadedPayloads) != 4 || loadedPayloads[1] == oldConfig || loadedPayloads[3] != oldConfig {
 		t.Fatalf("controller payload sequence = %s", fmt.Sprint(loadedPayloads))
+	}
+	for _, index := range []int{0, 2} {
+		var reset, full map[string]any
+		if err = yaml.Unmarshal([]byte(loadedPayloads[index]), &reset); err != nil {
+			t.Fatal(err)
+		}
+		if listeners, ok := reset["listeners"].([]any); !ok || len(listeners) != 0 {
+			t.Fatalf("payload %d did not reset listeners: %#v", index, reset["listeners"])
+		}
+		if err = yaml.Unmarshal([]byte(loadedPayloads[index+1]), &full); err != nil {
+			t.Fatal(err)
+		}
+		delete(reset, "listeners")
+		delete(full, "listeners")
+		if !reflect.DeepEqual(reset, full) {
+			t.Fatalf("payload %d reset a different config", index)
+		}
+	}
+	var applied map[string]any
+	if err = yaml.Unmarshal([]byte(loadedPayloads[1]), &applied); err != nil {
+		t.Fatal(err)
+	}
+	if listeners, ok := applied["listeners"].([]any); !ok || len(listeners) != 1 {
+		t.Fatalf("managed payload did not apply its listener: %#v", applied["listeners"])
+	}
+}
+
+func TestRefreshManagedSubscriptionKeepsUnknownDelayAndSkipsProviderMetadata(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPut && r.URL.Path == "/providers/proxies/primary":
+			w.WriteHeader(http.StatusNoContent)
+		case r.Method == http.MethodGet && r.URL.Path == "/providers/proxies":
+			_, _ = w.Write([]byte(`{"providers":{"primary":{"proxies":[` +
+				`{"name":"[primary] 剩余流量：995.36 GB","alive":true,"history":[]},` +
+				`{"name":"[primary] 套餐到期: 长期有效","alive":true,"history":[]},` +
+				`{"name":"[primary] 未检测节点","alive":false,"history":[]},` +
+				`{"name":"[primary] 已检测节点","alive":true,"history":[{"delay":42}]},` +
+				`{"name":"[primary] 剩余流量专线","alive":true,"history":[{"delay":55}]}` +
+				`]}}}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	configPath := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(configPath, []byte("secret: test-secret\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	resources := &mihomoResourceRepoStub{subscriptions: []MihomoSubscription{{
+		ID: 1, Name: "Primary", ProviderKey: "primary", Status: StatusActive,
+	}}}
+	svc := NewMihomoService(&config.Config{Mihomo: config.MihomoConfig{
+		Enabled: true, ControllerURL: server.URL, ConfigPath: configPath,
+	}}, &mihomoProxyRepoStub{}, nil).SetResourceRepository(resources)
+
+	if err := svc.RefreshManagedSubscription(context.Background(), 1); err != nil {
+		t.Fatal(err)
+	}
+	if len(resources.nodes) != 3 {
+		t.Fatalf("synced nodes = %+v", resources.nodes)
+	}
+	byName := make(map[string]MihomoManagedNode, len(resources.nodes))
+	for _, node := range resources.nodes {
+		byName[node.OriginalName] = node
+	}
+	if node, ok := byName["未检测节点"]; !ok || node.DelayMS != nil {
+		t.Fatalf("unknown node = %+v", node)
+	}
+	if node := byName["已检测节点"]; node.DelayMS == nil || *node.DelayMS != 42 {
+		t.Fatalf("measured node = %+v", node)
+	}
+	if node := byName["剩余流量专线"]; node.DelayMS == nil || *node.DelayMS != 55 {
+		t.Fatalf("normal similarly named node = %+v", node)
 	}
 }

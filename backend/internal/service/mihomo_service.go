@@ -29,7 +29,7 @@ const mihomoResponseLimit = 8 << 20
 type MihomoNode struct {
 	Name  string `json:"name"`
 	Alive bool   `json:"alive"`
-	Delay int    `json:"delay,omitempty"`
+	Delay *int   `json:"delay,omitempty"`
 }
 
 type MihomoModeStatus struct {
@@ -552,12 +552,15 @@ func (s *MihomoService) ApplyManagedRuntime(ctx context.Context) (func(bool) err
 	if err != nil {
 		return nil, err
 	}
-	if err = s.loadPayload(ctx, newRaw); err != nil {
+	if err = s.loadManagedPayload(ctx, newRaw); err != nil {
+		if rollbackErr := s.loadManagedPayload(context.Background(), oldRaw); rollbackErr != nil {
+			slog.Error("mihomo controller rollback failed after managed config load error", "error", rollbackErr)
+		}
 		s.reloadError = err.Error()
 		return nil, err
 	}
 	if err = atomicWriteFile(s.cfg.ConfigPath, newRaw, 0o600); err != nil {
-		if rollbackErr := s.loadPayload(context.Background(), oldRaw); rollbackErr != nil {
+		if rollbackErr := s.loadManagedPayload(context.Background(), oldRaw); rollbackErr != nil {
 			slog.Error("mihomo controller rollback failed after managed config write error", "error", rollbackErr)
 		}
 		s.reloadError = err.Error()
@@ -567,7 +570,7 @@ func (s *MihomoService) ApplyManagedRuntime(ctx context.Context) (func(bool) err
 		if writeErr := atomicWriteFile(s.cfg.ConfigPath, oldRaw, 0o600); writeErr != nil {
 			return writeErr
 		}
-		return s.loadPayload(context.Background(), oldRaw)
+		return s.loadManagedPayload(context.Background(), oldRaw)
 	}
 	if _, err = s.reconcileRouteProxies(ctx); err != nil {
 		if rollbackErr := rollback(); rollbackErr != nil {
@@ -807,9 +810,10 @@ func (s *MihomoService) providerStates(ctx context.Context) (map[string]mihomoPr
 	for providerName, provider := range raw.Providers {
 		state := mihomoProviderState{Configured: true, UpdatedAt: provider.UpdatedAt, SubscriptionInfo: provider.SubscriptionInfo, Nodes: make([]MihomoNode, 0, len(provider.Proxies))}
 		for _, node := range provider.Proxies {
-			delay := 0
+			var delay *int
 			if len(node.History) > 0 {
-				delay = node.History[len(node.History)-1].Delay
+				latest := node.History[len(node.History)-1].Delay
+				delay = &latest
 			}
 			state.Nodes = append(state.Nodes, MihomoNode{Name: node.Name, Alive: node.Alive, Delay: delay})
 		}
@@ -853,12 +857,15 @@ func (s *MihomoService) RefreshManagedSubscription(ctx context.Context, subscrip
 	prefix := "[" + subscription.ProviderKey + "] "
 	managedNodes := make([]MihomoManagedNode, 0, len(provider.Nodes))
 	for _, node := range provider.Nodes {
-		originalName := strings.TrimPrefix(node.Name, prefix)
+		originalName := strings.TrimSpace(strings.TrimPrefix(node.Name, prefix))
+		if strings.HasPrefix(originalName, "剩余流量：") || strings.HasPrefix(originalName, "剩余流量:") ||
+			strings.HasPrefix(originalName, "套餐到期：") || strings.HasPrefix(originalName, "套餐到期:") {
+			continue
+		}
 		digest := sha256.Sum256([]byte(subscription.ProviderKey + "\x00" + originalName))
-		delay := node.Delay
 		managedNodes = append(managedNodes, MihomoManagedNode{
 			SubscriptionID: subscription.ID, NodeKey: fmt.Sprintf("%x", digest[:]), OriginalName: originalName,
-			DisplayName: originalName, Alive: node.Alive, DelayMS: &delay, Tags: []string{}, LastSeenAt: observedAt,
+			DisplayName: originalName, Alive: node.Alive, DelayMS: node.Delay, Tags: []string{}, LastSeenAt: observedAt,
 		})
 	}
 	if err = s.resources.SyncNodes(ctx, subscription.ID, managedNodes, observedAt); err != nil {
@@ -982,6 +989,22 @@ func (s *MihomoService) controllerSecret() (string, error) {
 
 func (s *MihomoService) loadPayload(ctx context.Context, raw []byte) error {
 	return s.controllerJSON(ctx, http.MethodPut, "/configs?force=true", map[string]string{"payload": string(raw)}, nil)
+}
+
+func (s *MihomoService) loadManagedPayload(ctx context.Context, raw []byte) error {
+	var reset map[string]any
+	if err := yaml.Unmarshal(raw, &reset); err != nil {
+		return err
+	}
+	reset["listeners"] = []any{}
+	resetRaw, err := yaml.Marshal(reset)
+	if err != nil {
+		return err
+	}
+	if err = s.loadPayload(ctx, resetRaw); err != nil {
+		return err
+	}
+	return s.loadPayload(ctx, raw)
 }
 
 func (s *MihomoService) reconcileRouteProxies(ctx context.Context) (map[string]int64, error) {

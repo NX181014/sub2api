@@ -122,7 +122,7 @@
               <option v-for="subscription in subscriptions" :key="subscription.id" :value="String(subscription.id)">{{ subscription.name }}</option>
             </select>
             <select v-model="nodeHealthFilter" class="input min-w-0" aria-label="按状态筛选节点">
-              <option value="">全部状态</option><option value="alive">可用</option><option value="down">异常</option><option value="excluded">已排除</option>
+              <option value="">全部状态</option><option value="alive">可用</option><option value="down">异常</option><option value="unknown">未检测</option><option value="excluded">已排除</option>
             </select>
           </div>
 
@@ -146,7 +146,7 @@
                 <div class="min-w-0 flex-1">
                   <div class="flex min-w-0 flex-wrap items-center gap-2">
                     <h3 class="truncate text-sm font-semibold text-gray-900 dark:text-white" :title="node.display_name || node.name">{{ node.display_name || node.name }}</h3>
-                    <span :class="['badge', node.upstream_removed_at ? 'badge-warning' : node.alive && !node.excluded ? 'badge-success' : 'badge-danger']">{{ node.upstream_removed_at ? '上游已移除' : node.excluded ? '已排除' : node.alive ? '可用' : '异常' }}</span>
+                    <span :class="['badge', nodeStatusClass(node)]">{{ nodeStatusLabel(node) }}</span>
                   </div>
                   <p class="mt-1 truncate text-xs text-gray-500 dark:text-gray-400" :title="node.subscription_name || '-'">{{ node.subscription_name || subscriptionName(node.subscription_id) }}</p>
                 </div>
@@ -220,9 +220,10 @@
           <div v-if="workbench.status.last_reload_error" class="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900/60 dark:bg-red-950/20 dark:text-red-300">{{ workbench.status.last_reload_error }}</div>
           <div class="rounded-lg border border-gray-200 p-3 dark:border-dark-700">
             <h3 class="text-sm font-semibold text-gray-900 dark:text-white">出口概况</h3>
-            <div class="mt-3 grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
+            <div class="mt-3 grid grid-cols-2 gap-3 text-sm xl:grid-cols-5">
               <div><span class="text-gray-500">健康线路</span><strong class="ml-2 text-gray-900 dark:text-white">{{ healthyRouteCount }}</strong></div>
-              <div><span class="text-gray-500">异常线路</span><strong class="ml-2 text-gray-900 dark:text-white">{{ routes.length - healthyRouteCount }}</strong></div>
+              <div><span class="text-gray-500">异常线路</span><strong class="ml-2 text-gray-900 dark:text-white">{{ unhealthyRouteCount }}</strong></div>
+              <div><span class="text-gray-500">未检测线路</span><strong class="ml-2 text-gray-900 dark:text-white">{{ unknownRouteCount }}</strong></div>
               <div><span class="text-gray-500">可用节点</span><strong class="ml-2 text-gray-900 dark:text-white">{{ aliveNodeCount }}</strong></div>
               <div><span class="text-gray-500">绑定账号</span><strong class="ml-2 text-gray-900 dark:text-white">{{ totalAccountCount }}</strong></div>
             </div>
@@ -244,7 +245,27 @@
         <div><label for="mihomo-route-name" class="input-label">线路名称</label><input id="mihomo-route-name" v-model.trim="routeForm.name" required class="input" placeholder="例如：香港定向 01" /></div>
         <div><label for="mihomo-route-kind" class="input-label">线路策略</label><select id="mihomo-route-kind" v-model="routeForm.kind" required class="input"><option v-for="option in routeKindOptions" :key="option.value" :value="option.value">{{ option.label }}</option></select><p class="input-hint mt-1">专线固定节点；最低延迟、容灾和动态线路可选择多个节点。</p></div>
         <fieldset><legend class="input-label">订阅范围</legend><div class="mt-1 max-h-36 overflow-y-auto rounded-lg border border-gray-200 p-2 dark:border-dark-700"><label v-for="subscription in subscriptions" :key="subscription.id" class="flex min-h-11 items-center gap-3 px-2"><input type="checkbox" class="h-4 w-4 rounded border-gray-300 text-primary-600" :checked="routeForm.subscription_ids.includes(subscription.id)" @change="toggleRouteSubscription(subscription.id)" /><span class="min-w-0 truncate text-sm text-gray-700 dark:text-gray-200">{{ subscription.name }}</span></label></div></fieldset>
-        <fieldset><legend class="input-label">节点范围</legend><div class="mt-1 max-h-48 overflow-y-auto rounded-lg border border-gray-200 p-2 dark:border-dark-700"><label v-for="node in routeFormNodes" :key="String(nodeIdentity(node))" class="flex min-h-11 items-center gap-3 px-2"><input type="checkbox" class="h-4 w-4 rounded border-gray-300 text-primary-600" :checked="routeNodeSelected(node)" @change="toggleRouteNode(node)" /><span class="min-w-0 flex-1 truncate text-sm text-gray-700 dark:text-gray-200">{{ node.display_name || node.name }}</span><span :class="['badge shrink-0', node.alive ? 'badge-success' : 'badge-danger']">{{ delayLabel(node.delay) }}</span></label></div></fieldset>
+        <fieldset>
+          <legend class="input-label">节点范围</legend>
+          <div class="mt-1 grid gap-2 sm:grid-cols-2">
+            <input v-model.trim="routeNodeQuery" type="search" class="input min-h-11 min-w-0" placeholder="搜索节点、地区或标签" aria-label="搜索线路节点" />
+            <select v-model="routeNodeHealthFilter" class="input min-h-11 min-w-0" aria-label="按状态筛选线路节点"><option value="">全部状态</option><option value="alive">可用</option><option value="down">异常</option><option value="unknown">未检测</option></select>
+          </div>
+          <div class="mt-2 flex flex-wrap items-center gap-2">
+            <span class="mr-auto text-sm text-gray-600 dark:text-gray-300">已选 {{ routeForm.node_ids.length }} 个</span>
+            <button type="button" class="btn btn-secondary min-h-11 px-3" :disabled="!routeFormNodes.length" @click="toggleAllRouteFormNodes">{{ allRouteFormNodesSelected ? '取消当前结果' : '选择当前结果' }}</button>
+            <button type="button" class="btn btn-secondary min-h-11 px-3" :disabled="!routeForm.node_ids.length" @click="routeForm.node_ids = []">清空</button>
+          </div>
+          <div class="mt-2 max-h-48 overflow-y-auto rounded-lg border border-gray-200 p-2 dark:border-dark-700">
+            <label v-for="node in routeFormNodes" :key="String(nodeIdentity(node))" class="flex min-h-11 items-center gap-3 px-2">
+              <input type="checkbox" class="h-4 w-4 rounded border-gray-300 text-primary-600" :checked="routeNodeSelected(node)" @change="toggleRouteNode(node)" />
+              <span class="min-w-0 flex-1 truncate text-sm text-gray-700 dark:text-gray-200">{{ node.display_name || node.name }}</span>
+              <span :class="['badge shrink-0', nodeStatusClass(node)]">{{ nodeStatusLabel(node) }}</span>
+              <span class="shrink-0 text-xs tabular-nums text-gray-500">{{ delayLabel(node.delay) }}</span>
+            </label>
+            <p v-if="!routeFormNodes.length" class="py-6 text-center text-sm text-gray-500 dark:text-gray-400">没有符合条件的节点</p>
+          </div>
+        </fieldset>
         <label class="flex min-h-11 items-center gap-3"><input v-model="routeForm.enabled" type="checkbox" class="h-4 w-4 rounded border-gray-300 text-primary-600" /><span class="text-sm text-gray-700 dark:text-gray-200">启用线路</span></label>
       </template>
       <div><label for="mihomo-entity-reason" class="input-label">{{ isPrimaryAdmin ? '变更原因（可选）' : '变更原因' }}</label><textarea id="mihomo-entity-reason" v-model.trim="entityReason" :required="!isPrimaryAdmin" rows="3" class="input" placeholder="说明用途、影响线路和账号范围"></textarea><p class="input-hint mt-1">{{ dialogPolicyHint }}</p></div>
@@ -312,6 +333,8 @@ const nodeHealthFilter = ref('')
 const routeQuery = ref('')
 const routeKindFilter = ref('')
 const routeHealthFilter = ref('')
+const routeNodeQuery = ref('')
+const routeNodeHealthFilter = ref('')
 const selectedNodeKeys = ref<Set<string>>(new Set())
 const entityDialog = ref<'subscription' | 'route' | null>(null)
 const editingSubscription = ref<MihomoSubscription | null>(null)
@@ -337,8 +360,11 @@ const isPrimaryAdmin = computed(() => authStore.user?.is_primary_admin === true)
 const changeActionLabel = computed(() => isPrimaryAdmin.value ? '直接应用' : '提交审核')
 const changePolicyHint = computed(() => isPrimaryAdmin.value ? '首位管理员的结构变更直接应用并记录审计。' : '结构变更由另一位管理员审核。')
 const dialogPolicyHint = computed(() => isPrimaryAdmin.value ? '提交后直接应用并写入审计记录。' : '提交后由另一位管理员审核，审批详情会展示业务影响。')
+const nodeHealth = (node: MihomoNode) => node.excluded ? 'excluded' : node.delay == null ? 'unknown' : node.alive ? 'alive' : 'down'
 const healthyRouteCount = computed(() => routes.value.filter(route => route.health === 'healthy').length)
-const aliveNodeCount = computed(() => nodes.value.filter(node => node.alive && !node.excluded).length)
+const unhealthyRouteCount = computed(() => routes.value.filter(route => route.health === 'failed' || route.health === 'degraded').length)
+const unknownRouteCount = computed(() => routes.value.filter(route => route.health === 'unknown').length)
+const aliveNodeCount = computed(() => nodes.value.filter(node => nodeHealth(node) === 'alive').length)
 const totalAccountCount = computed(() => routes.value.reduce((total, route) => total + (route.account_count || 0), 0))
 const filteredSubscriptions = computed(() => {
   const query = subscriptionQuery.value.toLocaleLowerCase()
@@ -348,9 +374,7 @@ const filteredNodes = computed(() => {
   const query = nodeQuery.value.toLocaleLowerCase()
   return nodes.value.filter(node => {
     if (nodeSubscriptionFilter.value && String(node.subscription_id) !== nodeSubscriptionFilter.value) return false
-    if (nodeHealthFilter.value === 'alive' && (!node.alive || node.excluded)) return false
-    if (nodeHealthFilter.value === 'down' && node.alive) return false
-    if (nodeHealthFilter.value === 'excluded' && !node.excluded) return false
+    if (nodeHealthFilter.value && nodeHealth(node) !== nodeHealthFilter.value) return false
     return !query || [node.name, node.display_name, node.region, ...(node.tags || [])].some(value => value?.toLocaleLowerCase().includes(query))
   })
 })
@@ -365,7 +389,15 @@ const filteredRoutes = computed(() => {
 const selectedNodeIDs = computed(() => nodes.value.filter(node => !node.upstream_removed_at && isNodeSelected(node)).map(nodeIdentity))
 const selectableFilteredNodes = computed(() => filteredNodes.value.filter(node => !node.upstream_removed_at))
 const allFilteredNodesSelected = computed(() => selectableFilteredNodes.value.length > 0 && selectableFilteredNodes.value.every(isNodeSelected))
-const routeFormNodes = computed(() => nodes.value.filter(node => !node.upstream_removed_at && !node.excluded && (!routeForm.subscription_ids.length || routeForm.subscription_ids.includes(node.subscription_id || 0))))
+const routeFormNodes = computed(() => {
+  const query = routeNodeQuery.value.toLocaleLowerCase()
+  return nodes.value.filter(node => {
+    if (node.upstream_removed_at || node.excluded || (routeForm.subscription_ids.length && !routeForm.subscription_ids.includes(node.subscription_id || 0))) return false
+    if (routeNodeHealthFilter.value && nodeHealth(node) !== routeNodeHealthFilter.value) return false
+    return !query || [node.name, node.display_name, node.region, node.exit_ip, node.subscription_name, ...(node.tags || [])].some(value => value?.toLocaleLowerCase().includes(query))
+  })
+})
+const allRouteFormNodesSelected = computed(() => routeFormNodes.value.length > 0 && routeFormNodes.value.every(routeNodeSelected))
 const entityDialogTitle = computed(() => entityDialog.value === 'subscription' ? `${editingSubscription.value ? '编辑' : '添加'}订阅` : `${editingRoute.value ? '编辑' : '新建'}线路`)
 const confirmTitle = computed(() => {
   if (confirmAction.value?.type === 'legacy-import') return '确认导入现有配置'
@@ -422,6 +454,8 @@ const toggleAllFilteredNodes = () => {
 const subscriptionName = (id?: number) => subscriptions.value.find(item => item.id === id)?.name || '-'
 const subscriptionBadge = (item: MihomoSubscription) => item.enabled && ['healthy', 'active'].includes(item.status) ? 'badge-success' : item.status === 'refreshing' ? 'badge-warning' : 'badge-danger'
 const subscriptionStatusLabel = (item: MihomoSubscription) => !item.enabled ? '已停用' : item.status === 'refreshing' ? '刷新中' : ['healthy', 'active'].includes(item.status) ? '正常' : '异常'
+const nodeStatusLabel = (node: MihomoNode) => node.upstream_removed_at ? '上游已移除' : ({ alive: '可用', down: '异常', unknown: '未检测', excluded: '已排除' })[nodeHealth(node)]
+const nodeStatusClass = (node: MihomoNode) => node.upstream_removed_at ? 'badge-warning' : nodeHealth(node) === 'alive' ? 'badge-success' : nodeHealth(node) === 'unknown' ? 'badge-gray' : 'badge-danger'
 const routeKindLabel = (kind: MihomoRouteKind) => routeKindOptions.find(item => item.value === kind)?.label || kind
 const routeHealthLabel = (health: string) => ({ healthy: '健康', degraded: '降级', failed: '异常', unknown: '未检测' })[health] || health
 const routeHealthClass = (health: string) => health === 'healthy' ? 'badge-success' : health === 'degraded' ? 'badge-warning' : health === 'failed' ? 'badge-danger' : 'badge-gray'
@@ -448,6 +482,8 @@ const openSubscriptionForm = (subscription?: MihomoSubscription) => {
 const openRouteForm = (route?: MihomoRoute) => {
   editingRoute.value = route || null
   Object.assign(routeForm, { name: route?.name || '', kind: route?.kind || 'dedicated', subscription_ids: [...(route?.subscription_ids || [])], node_ids: [...(route?.node_ids || [])], enabled: route?.enabled ?? true })
+  routeNodeQuery.value = ''
+  routeNodeHealthFilter.value = ''
   entityReason.value = ''
   entityDialog.value = 'route'
 }
@@ -457,6 +493,14 @@ const routeNodeSelected = (node: MihomoNode) => routeForm.node_ids.some(id => St
 const toggleRouteNode = (node: MihomoNode) => {
   const id = nodeIdentity(node)
   routeForm.node_ids = routeNodeSelected(node) ? routeForm.node_ids.filter(item => String(item) !== String(id)) : [...routeForm.node_ids, id]
+}
+const toggleAllRouteFormNodes = () => {
+  const filteredKeys = new Set(routeFormNodes.value.map(nodeSelectionKey))
+  if (allRouteFormNodesSelected.value) routeForm.node_ids = routeForm.node_ids.filter(id => !filteredKeys.has(String(id)))
+  else {
+    const selectedKeys = new Set(routeForm.node_ids.map(String))
+    routeForm.node_ids = [...routeForm.node_ids, ...routeFormNodes.value.filter(node => !selectedKeys.has(nodeSelectionKey(node))).map(nodeIdentity)]
+  }
 }
 const handleApprovalResult = async (result: MihomoApprovalResponse, directMessage: string) => {
   if (result.approval_required) { appStore.showSuccess('已提交给其他管理员审核'); emit('approval-submitted'); return }

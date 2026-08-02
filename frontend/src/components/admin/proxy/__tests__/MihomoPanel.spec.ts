@@ -40,7 +40,11 @@ const workbench = {
     node_count: 2,
     alive_count: 2,
   }],
-  nodes: [{ id: 11, name: 'HK-01', subscription_id: 7, subscription_name: '香港主订阅', alive: true, delay: 38 }],
+  nodes: [
+    { id: 11, name: 'HK-01', subscription_id: 7, subscription_name: '香港主订阅', alive: true, delay: 38 },
+    { id: 12, name: '待检测节点', subscription_id: 7, subscription_name: '香港主订阅', alive: false, delay: null },
+    { id: 13, name: '异常节点', subscription_id: 7, subscription_name: '香港主订阅', alive: false, delay: 0 },
+  ],
   routes: [{
     id: 3,
     name: '香港定向 01',
@@ -85,6 +89,50 @@ describe('MihomoPanel', () => {
 
     expect(wrapper.text()).toContain('没有符合条件的线路')
     expect(wrapper.text()).toContain('新建线路')
+  })
+
+  it('shows untested nodes separately from failed nodes', async () => {
+    const wrapper = mount(MihomoPanel)
+    await flushPromises()
+
+    await wrapper.findAll('button').find(button => button.text().includes('节点'))!.trigger('click')
+    await wrapper.get('select[aria-label="按状态筛选节点"]').setValue('unknown')
+
+    expect(wrapper.text()).toContain('待检测节点')
+    expect(wrapper.text()).toContain('未检测')
+    expect(wrapper.text()).not.toContain('异常节点')
+  })
+
+  it('does not count untested routes as failed', async () => {
+    mocks.getWorkbench.mockResolvedValue({
+      ...workbench,
+      routes: [...workbench.routes, { ...workbench.routes[0], id: 4, health: 'unknown' }],
+    })
+    const wrapper = mount(MihomoPanel)
+    await flushPromises()
+
+    await wrapper.findAll('button').find(button => button.text().includes('运行状态'))!.trigger('click')
+    const failed = wrapper.findAll('span').find(item => item.text() === '异常线路')!
+    const unknown = wrapper.findAll('span').find(item => item.text() === '未检测线路')!
+
+    expect(failed.element.nextElementSibling?.textContent).toBe('0')
+    expect(unknown.element.nextElementSibling?.textContent).toBe('1')
+  })
+
+  it('selects the currently filtered route nodes in one action', async () => {
+    const wrapper = mount(MihomoPanel, { global: { stubs: { teleport: true } } })
+    await flushPromises()
+
+    await wrapper.findAll('button').find(button => button.text().includes('新建线路'))!.trigger('click')
+    const form = wrapper.get('#mihomo-entity-form')
+    await form.get('select[aria-label="按状态筛选线路节点"]').setValue('unknown')
+    await form.findAll('button').find(button => button.text() === '选择当前结果')!.trigger('click')
+
+    expect(form.text()).toContain('已选 1 个')
+    expect(form.text()).toContain('待检测节点')
+    expect(form.text()).not.toContain('异常节点')
+    const pendingNode = form.findAll('label').find(label => label.text().includes('待检测节点'))!
+    expect((pendingNode.get('input[type="checkbox"]').element as HTMLInputElement).checked).toBe(true)
   })
 
   it('shows the exact legacy resources before import', async () => {
