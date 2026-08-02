@@ -2,10 +2,12 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -57,6 +59,47 @@ func TestMihomoControllerUsesConfiguredSecret(t *testing.T) {
 func TestMihomoSubscriptionRejectsNonHTTPS(t *testing.T) {
 	if err := validateMihomoSubscriptionURL(context.Background(), "http://example.com/sub"); err == nil {
 		t.Fatal("expected non-HTTPS subscription to be rejected")
+	}
+}
+
+func TestMihomoStatusExposesSubscriptionHostWithoutSecretURL(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/version":
+			_, _ = w.Write([]byte(`{"version":"v-test"}`))
+		case "/providers/proxies":
+			_, _ = w.Write([]byte(`{"providers":{"subscription":{"updatedAt":"now","proxies":[]}}}`))
+		case "/proxies":
+			_, _ = w.Write([]byte(`{"proxies":{}}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	configPath := filepath.Join(t.TempDir(), "config.yaml")
+	const subscriptionURL = "https://subscription.example/sub?token=secret-token"
+	configYAML := "secret: test-secret\nproxy-providers:\n  subscription:\n    url: " + subscriptionURL + "\n"
+	if err := os.WriteFile(configPath, []byte(configYAML), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	svc := NewMihomoService(&config.Config{Mihomo: config.MihomoConfig{
+		Enabled: true, ControllerURL: server.URL, ConfigPath: configPath, ProviderName: "subscription",
+	}}, &mihomoProxyRepoStub{}, nil)
+
+	status, err := svc.Status(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !status.SubscriptionConfigured || status.SubscriptionHost != "subscription.example" {
+		t.Fatalf("unexpected subscription status: %+v", status)
+	}
+	raw, err := json.Marshal(status)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), subscriptionURL) || strings.Contains(string(raw), "secret-token") {
+		t.Fatalf("status leaked subscription credential: %s", raw)
 	}
 }
 

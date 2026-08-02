@@ -12,6 +12,8 @@ export interface MihomoStatus {
   version?: string
   configured: boolean
   provider_name?: string
+  subscription_configured: boolean
+  subscription_host?: string
   updated_at?: string
   node_count: number
   alive_count: number
@@ -21,7 +23,7 @@ export interface MihomoStatus {
 }
 
 export interface MihomoApprovalResponse {
-  approval_required: true
+  approval_required: boolean
   approval: PoolApproval
 }
 

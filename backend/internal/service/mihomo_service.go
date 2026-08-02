@@ -36,16 +36,18 @@ type MihomoModeStatus struct {
 }
 
 type MihomoStatus struct {
-	Enabled      bool                        `json:"enabled"`
-	Version      string                      `json:"version,omitempty"`
-	Configured   bool                        `json:"configured"`
-	ProviderName string                      `json:"provider_name,omitempty"`
-	UpdatedAt    string                      `json:"updated_at,omitempty"`
-	NodeCount    int                         `json:"node_count"`
-	AliveCount   int                         `json:"alive_count"`
-	Nodes        []MihomoNode                `json:"nodes"`
-	Modes        map[string]MihomoModeStatus `json:"modes"`
-	ProxyIDs     map[string]int64            `json:"proxy_ids"`
+	Enabled                bool                        `json:"enabled"`
+	Version                string                      `json:"version,omitempty"`
+	Configured             bool                        `json:"configured"`
+	ProviderName           string                      `json:"provider_name,omitempty"`
+	SubscriptionConfigured bool                        `json:"subscription_configured"`
+	SubscriptionHost       string                      `json:"subscription_host,omitempty"`
+	UpdatedAt              string                      `json:"updated_at,omitempty"`
+	NodeCount              int                         `json:"node_count"`
+	AliveCount             int                         `json:"alive_count"`
+	Nodes                  []MihomoNode                `json:"nodes"`
+	Modes                  map[string]MihomoModeStatus `json:"modes"`
+	ProxyIDs               map[string]int64            `json:"proxy_ids"`
 }
 
 type MihomoService struct {
@@ -87,6 +89,10 @@ func (s *MihomoService) Status(ctx context.Context) (*MihomoStatus, error) {
 	}
 	status.Version, status.ProviderName, status.UpdatedAt = version.Version, s.cfg.ProviderName, provider.UpdatedAt
 	status.Configured = provider.Configured
+	status.SubscriptionConfigured, status.SubscriptionHost, err = s.subscriptionState()
+	if err != nil {
+		return nil, err
+	}
 	status.Nodes = provider.Nodes
 	status.NodeCount = len(provider.Nodes)
 	for _, node := range provider.Nodes {
@@ -99,6 +105,23 @@ func (s *MihomoService) Status(ctx context.Context) (*MihomoStatus, error) {
 	}
 	status.ProxyIDs, err = s.managedProxyIDs(ctx)
 	return status, err
+}
+
+func (s *MihomoService) subscriptionState() (bool, string, error) {
+	_, cfg, err := s.readConfig()
+	if err != nil {
+		return false, "", err
+	}
+	provider := yamlMap(yamlMap(cfg["proxy-providers"])[s.cfg.ProviderName])
+	rawURL := strings.TrimSpace(fmt.Sprint(provider["url"]))
+	if rawURL == "" || rawURL == "<nil>" {
+		return false, "", nil
+	}
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return true, "", nil
+	}
+	return true, parsed.Hostname(), nil
 }
 
 func (s *MihomoService) PrepareSubscriptionApproval(ctx context.Context, rawURL string) (*MihomoApprovalUpdate, string, error) {

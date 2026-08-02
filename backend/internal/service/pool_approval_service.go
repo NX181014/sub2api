@@ -238,8 +238,7 @@ func (s *PoolService) CreateApproval(ctx context.Context, input CreatePoolApprov
 	if input.RequesterID <= 0 {
 		return nil, infraerrors.BadRequest("INVALID_APPROVAL_PARTY", "requester is required")
 	}
-	peerReview := input.RequirePeerReview || !isAccountApprovalAction(input.ActionType)
-	primaryBypass := !peerReview && s.IsPrimaryAdmin(ctx, input.RequesterID)
+	primaryBypass := s.approvalPrimaryBypass(ctx, input)
 	if input.Reason == "" && primaryBypass && input.ActionType == PoolApprovalViewCredential {
 		input.Reason = "primary administrator direct credential access"
 	}
@@ -375,6 +374,14 @@ func (s *PoolService) CreateApproval(ctx context.Context, input CreatePoolApprov
 		return s.ApproveApproval(ctx, created.ID, input.RequesterID, "primary administrator bypass")
 	}
 	return created, nil
+}
+
+func (s *PoolService) approvalPrimaryBypass(ctx context.Context, input CreatePoolApprovalInput) bool {
+	if !s.IsPrimaryAdmin(ctx, input.RequesterID) {
+		return false
+	}
+	return input.ActionType == PoolApprovalUpdateMihomo ||
+		(!input.RequirePeerReview && isAccountApprovalAction(input.ActionType))
 }
 
 func (s *PoolService) RequestCostUpdate(ctx context.Context, costID, accountID, actorID int64, reason string, cost CreateAccountCostInput, poolUpdate *UpdatePoolAccountInput) (*PoolApproval, error) {
@@ -573,7 +580,13 @@ func (s *PoolService) decideApproval(ctx context.Context, id, actorID int64, rea
 	if item.Status != PoolApprovalPending {
 		return nil, infraerrors.Conflict("APPROVAL_ALREADY_DECIDED", "approval request is no longer pending")
 	}
-	if err := validatePoolApprovalDecisionActor(item, actorID, s.IsPrimaryAdmin(txCtx, actorID)); err != nil {
+	canSelfDecide := item.PrimaryBypass && s.IsPrimaryAdmin(txCtx, actorID)
+	if item.ActionType == PoolApprovalUpdateMihomo {
+		canSelfDecide = s.approvalPrimaryBypass(txCtx, CreatePoolApprovalInput{
+			ActionType: PoolApprovalUpdateMihomo, RequesterID: actorID, RequirePeerReview: true,
+		})
+	}
+	if err := validatePoolApprovalDecisionActor(item, actorID, canSelfDecide); err != nil {
 		return nil, err
 	}
 
@@ -1417,11 +1430,11 @@ func optionalTrimmedString(value string) *string {
 	return &value
 }
 
-func validatePoolApprovalDecisionActor(item *PoolApproval, actorID int64, actorIsPrimary bool) error {
+func validatePoolApprovalDecisionActor(item *PoolApproval, actorID int64, canSelfDecide bool) error {
 	if item == nil || actorID <= 0 {
 		return infraerrors.BadRequest("INVALID_APPROVAL_DECISION", "approval and actor are required")
 	}
-	if actorID == item.RequestedByUserID && (!item.PrimaryBypass || !actorIsPrimary) {
+	if actorID == item.RequestedByUserID && !canSelfDecide {
 		return infraerrors.Forbidden("APPROVAL_SELF_DECISION_FORBIDDEN", "requester cannot approve or reject their own request")
 	}
 	return nil

@@ -105,5 +105,10 @@ func (h *MihomoHandler) createApproval(c *gin.Context, actorID int64, resourceKe
 		response.ErrorFrom(c, err)
 		return
 	}
-	response.Accepted(c, gin.H{"approval_required": true, "approval": item})
+	result := gin.H{"approval_required": !item.PrimaryBypass, "approval": item}
+	if item.PrimaryBypass {
+		response.Success(c, result)
+		return
+	}
+	response.Accepted(c, result)
 }

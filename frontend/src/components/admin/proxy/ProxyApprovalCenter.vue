@@ -24,6 +24,7 @@
             <div class="flex flex-wrap gap-2">
               <button v-if="scope === 'reviewable' && approval.status === 'pending'" type="button" class="btn btn-danger min-h-11 px-3" :disabled="busy === approval.id" @click="reject(approval)">驳回</button>
               <button v-if="scope === 'reviewable' && approval.status === 'pending'" type="button" class="btn btn-primary min-h-11 px-3" :disabled="busy === approval.id" @click="approve(approval)">通过</button>
+              <button v-if="scope === 'mine' && isPrimaryAdmin && approval.action_type === 'UPDATE_MIHOMO' && approval.status === 'pending'" type="button" class="btn btn-primary min-h-11 px-3" title="仅系统当前只有一位管理员时可直接应用" :disabled="busy === approval.id" @click="approve(approval, true)">立即应用</button>
               <button v-if="scope === 'mine' && approval.status === 'approved' && revealable(approval)" type="button" class="btn btn-primary min-h-11 px-3" :disabled="busy === approval.id" @click="reveal(approval)">一次性领取</button>
             </div>
           </div>
@@ -55,12 +56,13 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { adminAPI } from '@/api/admin'
 import type { PoolApproval, PoolApprovalAction, PoolApprovalScope, PoolApprovalStatus } from '@/api/admin/sharedPool'
 import type { RevealedProxy } from '@/types'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import { useAppStore } from '@/stores/app'
+import { useAuthStore } from '@/stores/auth'
 
 const props = defineProps<{ show: boolean }>()
 const emit = defineEmits<{
@@ -69,6 +71,8 @@ const emit = defineEmits<{
   'export-revealed': [proxies: RevealedProxy[]]
 }>()
 const appStore = useAppStore()
+const authStore = useAuthStore()
+const isPrimaryAdmin = computed(() => authStore.user?.is_primary_admin === true)
 const scope = ref<PoolApprovalScope>('reviewable')
 const approvals = ref<PoolApproval[]>([])
 const loading = ref(false)
@@ -92,10 +96,10 @@ const load = async () => {
   } finally { loading.value = false }
 }
 const changeScope = (value: PoolApprovalScope) => { scope.value = value; load() }
-const approve = async (approval: PoolApproval) => {
+const approve = async (approval: PoolApproval, immediate = false) => {
   busy.value = approval.id
-  try { await adminAPI.sharedPool.approveApproval(approval.id); appStore.showSuccess('审批已通过'); await load() }
-  catch (error: any) { appStore.showError(error.response?.data?.detail || '审批失败') }
+  try { await adminAPI.sharedPool.approveApproval(approval.id); appStore.showSuccess(immediate ? '变更已立即应用' : '审批已通过'); await load() }
+  catch (error: any) { appStore.showError(error.response?.data?.detail || (immediate ? '立即应用失败' : '审批失败')) }
   finally { busy.value = null }
 }
 const reject = async (approval: PoolApproval) => {

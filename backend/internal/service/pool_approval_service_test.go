@@ -197,7 +197,7 @@ func TestPoolApprovalDecisionRequiresDifferentAdminExceptPrimaryBypass(t *testin
 		t.Fatalf("fixed primary administrator bypass should be allowed: %v", err)
 	}
 	if err := validatePoolApprovalDecisionActor(item, 10, false); infraerrors.Reason(err) != "APPROVAL_SELF_DECISION_FORBIDDEN" {
-		t.Fatalf("stored bypass must still require the current fixed primary identity: %v", err)
+		t.Fatalf("self decision must still require a current bypass: %v", err)
 	}
 }
 
@@ -273,6 +273,28 @@ type primaryAdminSettingRepo struct {
 
 func (r primaryAdminSettingRepo) GetValue(context.Context, string) (string, error) {
 	return r.value, r.err
+}
+
+func TestApprovalPrimaryBypassUsesFixedPrimaryAdmin(t *testing.T) {
+	tests := []struct {
+		name  string
+		input CreatePoolApprovalInput
+		want  bool
+	}{
+		{name: "primary mihomo", input: CreatePoolApprovalInput{ActionType: PoolApprovalUpdateMihomo, RequesterID: 42, RequirePeerReview: true}, want: true},
+		{name: "non-primary mihomo", input: CreatePoolApprovalInput{ActionType: PoolApprovalUpdateMihomo, RequesterID: 41, RequirePeerReview: true}},
+		{name: "primary account", input: CreatePoolApprovalInput{ActionType: PoolApprovalUpdateAccount, RequesterID: 42}, want: true},
+		{name: "forced account peer review", input: CreatePoolApprovalInput{ActionType: PoolApprovalUpdateAccount, RequesterID: 42, RequirePeerReview: true}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pool := NewPoolService(nil, nil, nil, nil, NewSettingService(primaryAdminSettingRepo{value: "42"}, nil))
+			got := pool.approvalPrimaryBypass(context.Background(), tt.input)
+			if got != tt.want {
+				t.Fatalf("approvalPrimaryBypass() = %v, want %v", got, tt.want)
+			}
+		})
+	}
 }
 
 func TestSettingServiceIsPrimaryAdminFailsClosed(t *testing.T) {
