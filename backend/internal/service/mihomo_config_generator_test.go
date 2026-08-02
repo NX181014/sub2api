@@ -18,7 +18,7 @@ func TestGenerateManagedMihomoConfigBuildsMultipleProvidersAndRoutes(t *testing.
 			{ID: 2, ProviderKey: "beta", URL: "https://beta.example/sub", RefreshInterval: 900},
 		},
 		[]mihomoConfigNode{
-			{ID: 11, SubscriptionID: 1, Name: "Hong Kong"},
+			{ID: 11, SubscriptionID: 1, Name: "Hong Kong (01)+"},
 			{ID: 12, SubscriptionID: 2, Name: "Tokyo"},
 			{ID: 13, SubscriptionID: 2, Name: "Excluded", Excluded: true},
 		},
@@ -36,10 +36,20 @@ func TestGenerateManagedMihomoConfigBuildsMultipleProvidersAndRoutes(t *testing.
 	groups, ok := generated["proxy-groups"].([]any)
 	require.True(t, ok)
 	require.Len(t, groups, 3)
+	selectGroup, ok := groups[0].(map[string]any)
+	require.True(t, ok)
 	urlTestGroup, ok := groups[1].(map[string]any)
 	require.True(t, ok)
 	loadBalanceGroup, ok := groups[2].(map[string]any)
 	require.True(t, ok)
+	require.Equal(t, []string{"alpha"}, selectGroup["use"])
+	require.Equal(t, `^(?:\[alpha\] Hong Kong \(01\)\+)$`, selectGroup["filter"])
+	require.Equal(t, []string{"alpha", "beta"}, urlTestGroup["use"])
+	require.Equal(t, `^(?:\[alpha\] Hong Kong \(01\)\+|\[beta\] Tokyo)$`, urlTestGroup["filter"])
+	for _, group := range []map[string]any{selectGroup, urlTestGroup, loadBalanceGroup} {
+		require.NotContains(t, group, "proxies")
+		require.NotContains(t, group["filter"], "Excluded")
+	}
 	if urlTestGroup["type"] != "url-test" || loadBalanceGroup["strategy"] != "consistent-hashing" {
 		t.Fatalf("groups = %#v", groups)
 	}

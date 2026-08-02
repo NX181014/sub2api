@@ -338,6 +338,50 @@ func TestApprovalPrimaryBypassUsesFixedPrimaryAdmin(t *testing.T) {
 	}
 }
 
+type failedPrimaryApprovalRepo struct {
+	PoolApprovalRepository
+	expiredID     int64
+	expiredReason string
+}
+
+func (r *failedPrimaryApprovalRepo) ExpireStale(context.Context, time.Time) error { return nil }
+func (r *failedPrimaryApprovalRepo) CreateApproval(_ context.Context, item *PoolApproval) (*PoolApproval, error) {
+	item.ID = 77
+	return item, nil
+}
+func (r *failedPrimaryApprovalRepo) MarkExpired(_ context.Context, id int64, reason string) error {
+	r.expiredID, r.expiredReason = id, reason
+	return nil
+}
+
+type primaryApprovalAdminService struct{ AdminService }
+
+type primaryApprovalMihomoExecutor struct{}
+
+func (primaryApprovalMihomoExecutor) ValidateApproval(context.Context, string, MihomoApprovalUpdate) error {
+	return nil
+}
+func (primaryApprovalMihomoExecutor) ApprovalRevision(context.Context, string) (string, error) {
+	return "revision", nil
+}
+func (primaryApprovalMihomoExecutor) ApplyApproved(context.Context, MihomoApprovalUpdate) (func(bool) error, error) {
+	return nil, nil
+}
+
+func TestPrimaryBypassFailureExpiresPendingApproval(t *testing.T) {
+	repo := &failedPrimaryApprovalRepo{}
+	pool := NewPoolService(nil, repo, &primaryApprovalAdminService{}, nil, NewSettingService(primaryAdminSettingRepo{value: "42"}, nil))
+	pool.SetMihomoApprovalExecutor(primaryApprovalMihomoExecutor{})
+
+	_, err := pool.CreateApproval(context.Background(), CreatePoolApprovalInput{
+		ActionType: PoolApprovalUpdateMihomo, RequesterID: 42, ResourceKey: "mihomo:refresh",
+		Payload: PoolApprovalPayload{MihomoUpdate: &MihomoApprovalUpdate{Kind: "refresh"}},
+	})
+	if err == nil || repo.expiredID != 77 || repo.expiredReason != "primary administrator direct action failed" {
+		t.Fatalf("err=%v expired_id=%d reason=%q", err, repo.expiredID, repo.expiredReason)
+	}
+}
+
 func TestSettingServiceIsPrimaryAdminFailsClosed(t *testing.T) {
 	tests := []struct {
 		name   string

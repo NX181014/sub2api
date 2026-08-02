@@ -411,7 +411,14 @@ func (s *PoolService) CreateApproval(ctx context.Context, input CreatePoolApprov
 		return nil, err
 	}
 	if created.PrimaryBypass {
-		return s.ApproveApproval(ctx, created.ID, input.RequesterID, "primary administrator bypass")
+		approved, approveErr := s.ApproveApproval(ctx, created.ID, input.RequesterID, "primary administrator bypass")
+		if approveErr != nil {
+			if expireErr := s.approvalRepo.MarkExpired(ctx, created.ID, "primary administrator direct action failed"); expireErr != nil {
+				slog.Error("expire failed primary administrator action", "approval_id", created.ID, "error", expireErr)
+			}
+			return nil, approveErr
+		}
+		return approved, nil
 	}
 	return created, nil
 }

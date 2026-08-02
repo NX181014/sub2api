@@ -20,6 +20,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
+	"github.com/Wei-Shaw/sub2api/internal/util/logredact"
 	"gopkg.in/yaml.v3"
 )
 
@@ -930,7 +931,21 @@ func (s *MihomoService) controllerJSON(ctx context.Context, method, path string,
 		return fmt.Errorf("mihomo response is too large")
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return infraerrors.ServiceUnavailable("MIHOMO_ERROR", "mihomo rejected the operation")
+		message := "mihomo rejected the operation"
+		var detail struct {
+			Message string `json:"message"`
+		}
+		if json.Unmarshal(raw, &detail) == nil {
+			controllerMessage := logredact.RedactText(detail.Message, "secret", "payload", "token", "url")
+			controllerMessage = strings.ReplaceAll(controllerMessage, secret, "***")
+			controllerMessage = strings.TrimSpace(truncateString(controllerMessage, 512))
+			if controllerMessage != "" {
+				message += ": " + controllerMessage
+			}
+		}
+		logPath, _, _ := strings.Cut(path, "?")
+		slog.Warn("mihomo_controller_rejected_operation", "status_code", resp.StatusCode, "path", logPath, "message", message)
+		return infraerrors.ServiceUnavailable("MIHOMO_ERROR", message)
 	}
 	if output != nil && len(raw) > 0 {
 		return json.Unmarshal(raw, output)

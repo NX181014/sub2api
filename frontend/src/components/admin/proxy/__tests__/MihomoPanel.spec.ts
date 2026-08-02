@@ -6,6 +6,7 @@ import MihomoPanel from '../MihomoPanel.vue'
 const mocks = vi.hoisted(() => ({
   getWorkbench: vi.fn(),
   getImportPreview: vi.fn(),
+  importLegacy: vi.fn(),
   showError: vi.fn(),
   showSuccess: vi.fn(),
 }))
@@ -15,6 +16,7 @@ vi.mock('@/api/admin', () => ({
     mihomo: {
       getWorkbench: mocks.getWorkbench,
       getImportPreview: mocks.getImportPreview,
+      importLegacy: mocks.importLegacy,
     },
   },
 }))
@@ -103,5 +105,19 @@ describe('MihomoPanel', () => {
     expect(wrapper.text()).toContain('端口 26781')
     expect(wrapper.text()).toContain('代理 #91')
     expect(wrapper.text()).toContain('5 个账号')
+  })
+
+  it('shows the service error when importing the legacy configuration', async () => {
+    mocks.getWorkbench.mockResolvedValue({ ...workbench, subscriptions: [], nodes: [], routes: [] })
+    mocks.getImportPreview.mockResolvedValue({ available: true, node_count: 8, route_count: 3, affected_account_count: 5, routes: [] })
+    mocks.importLegacy.mockRejectedValue({ message: 'Mihomo 配置校验失败：监听端口已占用' })
+
+    const wrapper = mount(MihomoPanel, { global: { stubs: { teleport: true } } })
+    await flushPromises()
+    await wrapper.findAll('button').find(button => button.text().includes('确认导入'))!.trigger('click')
+    await wrapper.get('#mihomo-confirm-form').trigger('submit')
+    await flushPromises()
+
+    expect(mocks.showError).toHaveBeenCalledWith('Mihomo 配置校验失败：监听端口已占用')
   })
 })

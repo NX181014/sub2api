@@ -386,6 +386,7 @@ const confirmDescription = computed(() => {
   const labels: Record<MihomoNodeActionInput['action'], string> = { test: '测试', exclude: '排除', restore: '恢复', enable: '启用', disable: '停用', create_dedicated_routes: '分别创建专线' }
   return `对已选 ${selectedNodeIDs.value.length} 个节点执行“${labels[action.action]}”。`
 })
+const errorMessage = (error: any, fallback: string) => error?.message || error?.response?.data?.detail || fallback
 
 const load = async () => {
   loading.value = true
@@ -396,10 +397,10 @@ const load = async () => {
     importPreview.value = null
     if (!workbench.value.subscriptions.length && !workbench.value.routes.length) {
       try { importPreview.value = await adminAPI.mihomo.getImportPreview() }
-      catch (error: any) { loadError.value = error.response?.data?.detail || '读取现有 Mihomo 配置失败' }
+      catch (error: any) { loadError.value = errorMessage(error, '读取现有 Mihomo 配置失败') }
     }
   } catch (error: any) {
-    loadError.value = error.response?.data?.detail || '加载 Mihomo 工作台失败'
+    loadError.value = errorMessage(error, '加载 Mihomo 工作台失败')
   } finally { loading.value = false }
 }
 const tabCount = (tab: WorkbenchTab) => tab === 'subscriptions' ? subscriptions.value.length : tab === 'nodes' ? nodes.value.length : tab === 'routes' ? routes.value.length : ''
@@ -476,13 +477,13 @@ const submitEntity = async () => {
     }
     closeEntityDialog()
     await handleApprovalResult(result, 'Mihomo 变更已应用')
-  } catch (error: any) { appStore.showError(error.response?.data?.detail || '处理 Mihomo 变更失败') } finally { submitting.value = false }
+  } catch (error: any) { appStore.showError(errorMessage(error, '处理 Mihomo 变更失败')) } finally { submitting.value = false }
 }
 const testOneRoute = async (route: MihomoRoute) => {
-  try { await adminAPI.mihomo.testRoute(route.id); appStore.showSuccess(`线路“${route.name}”测试完成`); await load() } catch (error: any) { appStore.showError(error.response?.data?.detail || '线路测试失败') }
+  try { await adminAPI.mihomo.testRoute(route.id); appStore.showSuccess(`线路“${route.name}”测试完成`); await load() } catch (error: any) { appStore.showError(errorMessage(error, '线路测试失败')) }
 }
 const runNodeTest = async () => {
-  try { await adminAPI.mihomo.runNodeAction({ action: 'test', node_ids: selectedNodeIDs.value }); appStore.showSuccess('节点测速完成'); await load() } catch (error: any) { appStore.showError(error.response?.data?.detail || '节点测速失败') }
+  try { await adminAPI.mihomo.runNodeAction({ action: 'test', node_ids: selectedNodeIDs.value }); appStore.showSuccess('节点测速完成'); await load() } catch (error: any) { appStore.showError(errorMessage(error, '节点测速失败')) }
 }
 const confirmSubscriptionRefresh = (subscription: MihomoSubscription) => { confirmAction.value = { type: 'subscription-refresh', subscription } }
 const confirmSubscriptionToggle = (subscription: MihomoSubscription) => { confirmAction.value = { type: 'subscription-toggle', subscription } }
@@ -510,7 +511,7 @@ const submitConfirmedAction = async () => {
     else result = await adminAPI.mihomo.runNodeAction({ action: action.action, node_ids: selectedNodeIDs.value, reason: confirmReason.value })
     closeConfirmDialog()
     await handleApprovalResult(result, 'Mihomo 变更已应用')
-  } catch (error: any) { appStore.showError(error.response?.data?.detail || '处理 Mihomo 变更失败') } finally { submitting.value = false }
+  } catch (error: any) { appStore.showError(errorMessage(error, '处理 Mihomo 变更失败')) } finally { submitting.value = false }
 }
 const openManagedProxy = async (proxyID: number) => {
   highlightedProxyID.value = proxyID

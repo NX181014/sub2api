@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 )
 
@@ -184,6 +186,42 @@ func TestMihomoControllerUsesConfiguredSecret(t *testing.T) {
 	}
 	if response.Version != "v-test" {
 		t.Fatalf("version = %q", response.Version)
+	}
+}
+
+func TestMihomoControllerReturnsSanitizedErrorMessage(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"message":"config invalid; secret=test-secret; payload=private-config; url=https://example.com/sub?token=url-secret"}`))
+	}))
+	defer server.Close()
+
+	configPath := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(configPath, []byte("secret: test-secret\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var logs strings.Builder
+	previousLogger := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(previousLogger) })
+
+	svc := NewMihomoService(&config.Config{Mihomo: config.MihomoConfig{
+		Enabled: true, ControllerURL: server.URL, ConfigPath: configPath,
+	}}, nil, nil)
+	err := svc.controllerJSON(context.Background(), http.MethodPut, "/configs?force=true", map[string]string{"payload": "private-config"}, nil)
+	if infraerrors.Reason(err) != "MIHOMO_ERROR" || infraerrors.Message(err) != "mihomo rejected the operation: config invalid; secret=*** payload=*** url=***" {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	logOutput := logs.String()
+	for _, want := range []string{"mihomo_controller_rejected_operation", "status_code=400", "path=/configs", "message="} {
+		if !strings.Contains(logOutput, want) {
+			t.Fatalf("log missing %q: %s", want, logOutput)
+		}
+	}
+	for _, secret := range []string{"test-secret", "private-config", "url-secret", "force=true"} {
+		if strings.Contains(logOutput, secret) || strings.Contains(infraerrors.Message(err), secret) {
+			t.Fatalf("controller error leaked %q: error=%q log=%q", secret, infraerrors.Message(err), logOutput)
+		}
 	}
 }
 

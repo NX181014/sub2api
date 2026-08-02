@@ -65,12 +65,14 @@ func generateManagedMihomoConfig(base map[string]any, subscriptions []mihomoConf
 	}
 
 	nodeNameByID := make(map[int64]string, len(nodes))
+	nodeProviderByID := make(map[int64]string, len(nodes))
 	for _, node := range nodes {
 		subscription, ok := subscriptionByID[node.SubscriptionID]
 		if node.ID <= 0 || !ok || node.Excluded || strings.TrimSpace(node.Name) == "" {
 			continue
 		}
 		nodeNameByID[node.ID] = "[" + subscription.ProviderKey + "] " + strings.TrimSpace(node.Name)
+		nodeProviderByID[node.ID] = subscription.ProviderKey
 	}
 
 	groups := make([]any, 0, len(routes))
@@ -86,23 +88,34 @@ func generateManagedMihomoConfig(base map[string]any, subscriptions []mihomoConf
 		ports[route.ListenerPort] = route.ID
 
 		proxyNames := make([]string, 0, len(route.NodeIDs))
-		seen := make(map[string]struct{}, len(route.NodeIDs))
+		providerKeys := make([]string, 0, len(route.NodeIDs))
+		seenNames := make(map[string]struct{}, len(route.NodeIDs))
+		seenProviders := make(map[string]struct{}, len(route.NodeIDs))
 		for _, nodeID := range route.NodeIDs {
 			name, ok := nodeNameByID[nodeID]
 			if !ok {
 				continue
 			}
-			if _, exists := seen[name]; exists {
-				continue
+			if providerKey := nodeProviderByID[nodeID]; providerKey != "" {
+				if _, exists := seenProviders[providerKey]; !exists {
+					seenProviders[providerKey] = struct{}{}
+					providerKeys = append(providerKeys, providerKey)
+				}
 			}
-			seen[name] = struct{}{}
-			proxyNames = append(proxyNames, name)
+			if _, exists := seenNames[name]; !exists {
+				seenNames[name] = struct{}{}
+				proxyNames = append(proxyNames, name)
+			}
 		}
 		if len(proxyNames) == 0 {
 			return nil, fmt.Errorf("mihomo route %d has no usable nodes", route.ID)
 		}
 		groupName := fmt.Sprintf("SUB2API-ROUTE-%d", route.ID)
-		group, err := buildMihomoRouteGroup(groupName, route.Kind, proxyNames, route.Selector)
+		filters := make([]string, 0, len(proxyNames))
+		for _, name := range proxyNames {
+			filters = append(filters, regexp.QuoteMeta(name))
+		}
+		group, err := buildMihomoRouteGroup(groupName, route.Kind, providerKeys, "^(?:"+strings.Join(filters, "|")+")$", route.Selector)
 		if err != nil {
 			return nil, fmt.Errorf("mihomo route %d: %w", route.ID, err)
 		}
@@ -128,15 +141,19 @@ func generateManagedMihomoConfig(base map[string]any, subscriptions []mihomoConf
 	return managed, nil
 }
 
-func buildMihomoRouteGroup(name, kind string, proxies []string, selector json.RawMessage) (map[string]any, error) {
+func buildMihomoRouteGroup(name, kind string, providers []string, filter string, selector json.RawMessage) (map[string]any, error) {
+	group := map[string]any{"name": name, "use": providers, "filter": filter}
 	kind = strings.ToLower(strings.TrimSpace(kind))
 	switch kind {
 	case "dedicated", "directional", "select":
-		return map[string]any{"name": name, "type": "select", "proxies": proxies}, nil
+		group["type"] = "select"
+		return group, nil
 	case "automatic", "latency", "url-test":
-		return map[string]any{"name": name, "type": "url-test", "proxies": proxies, "url": "https://www.gstatic.com/generate_204", "interval": 300, "tolerance": 50, "lazy": true}, nil
+		group["type"], group["url"], group["interval"], group["tolerance"], group["lazy"] = "url-test", "https://www.gstatic.com/generate_204", 300, 50, true
+		return group, nil
 	case "fallback":
-		return map[string]any{"name": name, "type": "fallback", "proxies": proxies, "url": "https://www.gstatic.com/generate_204", "interval": 300, "lazy": true}, nil
+		group["type"], group["url"], group["interval"], group["lazy"] = "fallback", "https://www.gstatic.com/generate_204", 300, true
+		return group, nil
 	case "dynamic", "load-balance":
 		strategy := "round-robin"
 		if len(selector) > 0 {
@@ -153,7 +170,8 @@ func buildMihomoRouteGroup(name, kind string, proxies []string, selector json.Ra
 		if strategy != "round-robin" && strategy != "consistent-hashing" && strategy != "sticky-sessions" {
 			return nil, fmt.Errorf("unsupported load-balance strategy %q", strategy)
 		}
-		return map[string]any{"name": name, "type": "load-balance", "proxies": proxies, "url": "https://www.gstatic.com/generate_204", "interval": 300, "strategy": strategy, "lazy": true}, nil
+		group["type"], group["url"], group["interval"], group["strategy"], group["lazy"] = "load-balance", "https://www.gstatic.com/generate_204", 300, strategy, true
+		return group, nil
 	default:
 		return nil, fmt.Errorf("unsupported route kind %q", kind)
 	}
