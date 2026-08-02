@@ -25,6 +25,15 @@ const (
 	PoolApprovalViewProxyCredential    = "VIEW_PROXY_CREDENTIAL"
 	PoolApprovalExportProxyCredentials = "EXPORT_PROXY_CREDENTIALS"
 	PoolApprovalUpdateMihomo           = "UPDATE_MIHOMO"
+	MihomoApprovalSubscriptionCreate   = "subscription_create"
+	MihomoApprovalSubscriptionUpdate   = "subscription_update"
+	MihomoApprovalSubscriptionDelete   = "subscription_delete"
+	MihomoApprovalSubscriptionRefresh  = "subscription_refresh"
+	MihomoApprovalRouteCreate          = "route_create"
+	MihomoApprovalRouteUpdate          = "route_update"
+	MihomoApprovalRouteDelete          = "route_delete"
+	MihomoApprovalNodeAction           = "node_action"
+	MihomoApprovalLegacyImport         = "legacy_import"
 
 	PoolApprovalPending  = "pending"
 	PoolApprovalApproved = "approved"
@@ -55,11 +64,40 @@ type PoolApprovalPayload struct {
 }
 
 type MihomoApprovalUpdate struct {
-	Kind             string `json:"kind"`
-	Mode             string `json:"mode,omitempty"`
-	Selection        string `json:"selection,omitempty"`
-	Subscription     string `json:"subscription,omitempty"`
-	SubscriptionHost string `json:"subscription_host,omitempty"`
+	Kind                   string                `json:"kind"`
+	Mode                   string                `json:"mode,omitempty"`
+	Selection              string                `json:"selection,omitempty"`
+	Subscription           string                `json:"subscription,omitempty"`
+	SubscriptionID         int64                 `json:"subscription_id,omitempty"`
+	SubscriptionName       string                `json:"subscription_name,omitempty"`
+	SubscriptionHost       string                `json:"subscription_host,omitempty"`
+	RefreshIntervalMinutes int                   `json:"refresh_interval_minutes,omitempty"`
+	RouteID                int64                 `json:"route_id,omitempty"`
+	RouteName              string                `json:"route_name,omitempty"`
+	RouteKind              string                `json:"route_kind,omitempty"`
+	ListenerPort           int                   `json:"listener_port,omitempty"`
+	ProxyID                int64                 `json:"proxy_id,omitempty"`
+	SubscriptionIDs        []int64               `json:"subscription_ids,omitempty"`
+	NodeIDs                []int64               `json:"node_ids,omitempty"`
+	NodeAction             string                `json:"node_action,omitempty"`
+	Enabled                *bool                 `json:"enabled,omitempty"`
+	NodeCount              int64                 `json:"node_count,omitempty"`
+	RouteCount             int64                 `json:"route_count,omitempty"`
+	AccountCount           int64                 `json:"account_count,omitempty"`
+	ImportProviderName     string                `json:"import_provider_name,omitempty"`
+	ImportRoutes           []MihomoApprovalRoute `json:"import_routes,omitempty"`
+}
+
+type MihomoApprovalRoute struct {
+	Name            string   `json:"name"`
+	Kind            string   `json:"kind"`
+	ListenerPort    int      `json:"listener_port"`
+	ProxyID         int64    `json:"proxy_id"`
+	SubscriptionIDs []int64  `json:"subscription_ids,omitempty"`
+	NodeIDs         []int64  `json:"node_ids,omitempty"`
+	NodeNames       []string `json:"node_names,omitempty"`
+	NodeCount       int64    `json:"node_count,omitempty"`
+	AccountCount    int64    `json:"account_count,omitempty"`
 }
 
 type PoolCostUpdate struct {
@@ -655,6 +693,11 @@ func (s *PoolService) decideApproval(ctx context.Context, id, actorID int64, rea
 	case item.ActionType == PoolApprovalUpdateMihomo:
 		if s.mihomoApprovalExecutor == nil {
 			return nil, fmt.Errorf("mihomo approval executor is not configured")
+		}
+		if update := payload.MihomoUpdate; update != nil && update.Kind == MihomoApprovalRouteDelete && update.ProxyID > 0 {
+			if err = s.approvalRepo.LockProxy(txCtx, update.ProxyID); err != nil {
+				return nil, err
+			}
 		}
 		revision, err = s.mihomoApprovalExecutor.ApprovalRevision(txCtx, item.ResourceKey)
 	default:
@@ -1293,19 +1336,143 @@ func buildProxyExportApprovalSummary(proxies []Proxy) PoolApprovalChangeSummary 
 }
 
 func buildMihomoApprovalSummary(resourceKey string, update *MihomoApprovalUpdate) PoolApprovalChangeSummary {
-	item := PoolApprovalBusinessChange{Key: update.Kind, After: update.Selection, Impact: "mihomo_configuration_changed"}
-	if update.Kind == "subscription" {
-		item.After = update.SubscriptionHost
-		item.Sensitive = true
-	} else if update.Kind == "refresh" {
-		item.After = "provider_nodes_refreshed"
+	objectName := "Mihomo 工作台"
+	groups := make([]PoolApprovalBusinessGroup, 0, 2)
+	impacts := make([]PoolApprovalBusinessImpact, 0, 3)
+	change := func(key string, after any) PoolApprovalBusinessChange {
+		return PoolApprovalBusinessChange{Key: key, After: after, Impact: "mihomo_configuration_changed"}
+	}
+	addImpact := func(key string, count int64) {
+		if count > 0 {
+			impacts = append(impacts, PoolApprovalBusinessImpact{Key: key, Count: count})
+		}
+	}
+
+	switch update.Kind {
+	case "subscription", MihomoApprovalSubscriptionCreate, MihomoApprovalSubscriptionUpdate, MihomoApprovalSubscriptionDelete, MihomoApprovalSubscriptionRefresh:
+		if update.SubscriptionName != "" {
+			objectName = update.SubscriptionName
+		}
+		items := []PoolApprovalBusinessChange{change("subscription_operation", update.Kind)}
+		if update.SubscriptionName != "" {
+			items = append(items, change("subscription_name", update.SubscriptionName))
+		}
+		if update.SubscriptionHost != "" {
+			items = append(items, change("subscription_host", update.SubscriptionHost))
+		}
+		if update.Enabled != nil {
+			items = append(items, change("enabled", *update.Enabled))
+		}
+		if update.RefreshIntervalMinutes > 0 {
+			items = append(items, change("refresh_interval_minutes", update.RefreshIntervalMinutes))
+		}
+		items = append(items,
+			change("node_count", mihomoApprovalCount(update.NodeCount, update.NodeIDs)),
+			change("route_count", update.RouteCount),
+		)
+		groups = append(groups, PoolApprovalBusinessGroup{Key: "subscription", Items: items})
+		addImpact("nodes", mihomoApprovalCount(update.NodeCount, update.NodeIDs))
+		addImpact("routes", update.RouteCount)
+
+	case MihomoApprovalRouteCreate, MihomoApprovalRouteUpdate, MihomoApprovalRouteDelete:
+		if update.RouteName != "" {
+			objectName = update.RouteName
+		}
+		items := []PoolApprovalBusinessChange{
+			change("route_operation", update.Kind),
+			change("route_name", update.RouteName),
+			change("route_kind", update.RouteKind),
+		}
+		if update.ListenerPort > 0 {
+			items = append(items, change("listener_port", update.ListenerPort))
+		}
+		if update.ProxyID > 0 {
+			items = append(items, change("proxy_id", update.ProxyID))
+		}
+		if update.Enabled != nil {
+			items = append(items, change("enabled", *update.Enabled))
+		}
+		items = append(items,
+			change("subscription_count", len(update.SubscriptionIDs)),
+			change("node_count", mihomoApprovalCount(update.NodeCount, update.NodeIDs)),
+			change("bound_account_count", update.AccountCount),
+		)
+		groups = append(groups, PoolApprovalBusinessGroup{Key: "route", Items: items})
+		addImpact("nodes", mihomoApprovalCount(update.NodeCount, update.NodeIDs))
+		addImpact("bound_accounts", update.AccountCount)
+
+	case MihomoApprovalNodeAction:
+		objectName = "Mihomo 节点批量操作"
+		items := []PoolApprovalBusinessChange{
+			change("node_action", update.NodeAction),
+			change("node_count", mihomoApprovalCount(update.NodeCount, update.NodeIDs)),
+		}
+		if len(update.NodeIDs) > 0 {
+			items = append(items, change("node_ids", update.NodeIDs))
+		}
+		if update.RouteCount > 0 {
+			items = append(items, change("route_count", update.RouteCount))
+		}
+		groups = append(groups, PoolApprovalBusinessGroup{Key: "nodes", Items: items})
+		addImpact("nodes", mihomoApprovalCount(update.NodeCount, update.NodeIDs))
+		addImpact("routes", update.RouteCount)
+
+	case MihomoApprovalLegacyImport:
+		objectName = "Mihomo 旧配置导入"
+		items := []PoolApprovalBusinessChange{
+			change("import_provider", update.ImportProviderName),
+			change("subscription_name", update.SubscriptionName),
+			change("subscription_host", update.SubscriptionHost),
+			change("route_count", len(update.ImportRoutes)),
+		}
+		groups = append(groups, PoolApprovalBusinessGroup{Key: "subscription", Items: items})
+		var nodes, accounts int64
+		for index, route := range update.ImportRoutes {
+			nodeCount := mihomoApprovalCount(route.NodeCount, route.NodeIDs)
+			if nodeCount == 0 {
+				nodeCount = int64(len(route.NodeNames))
+			}
+			groups = append(groups, PoolApprovalBusinessGroup{
+				Key: fmt.Sprintf("route_%d", index+1),
+				Items: []PoolApprovalBusinessChange{
+					change("route_name", route.Name),
+					change("route_kind", route.Kind),
+					change("listener_port", route.ListenerPort),
+					change("proxy_id", route.ProxyID),
+					change("node_count", nodeCount),
+					change("bound_account_count", route.AccountCount),
+				},
+			})
+			nodes += nodeCount
+			accounts += route.AccountCount
+		}
+		addImpact("routes", int64(len(update.ImportRoutes)))
+		addImpact("nodes", nodes)
+		addImpact("bound_accounts", accounts)
+
+	case "mode":
+		groups = append(groups, PoolApprovalBusinessGroup{Key: "mihomo", Items: []PoolApprovalBusinessChange{change("mode", update.Selection)}})
+	case "refresh":
+		groups = append(groups, PoolApprovalBusinessGroup{Key: "mihomo", Items: []PoolApprovalBusinessChange{change("refresh", "provider_nodes_refreshed")}})
+	default:
+		groups = append(groups, PoolApprovalBusinessGroup{Key: "mihomo", Items: []PoolApprovalBusinessChange{change("mihomo_operation", update.Kind)}})
+	}
+	if objectName == "Mihomo 工作台" && resourceKey != "" {
+		objectName = resourceKey
 	}
 	return PoolApprovalChangeSummary{Business: PoolApprovalBusinessSummary{
 		Action: PoolApprovalUpdateMihomo,
-		Object: PoolApprovalBusinessObject{Type: "mihomo", Name: "Mihomo 节点池"},
+		Object: PoolApprovalBusinessObject{Type: "mihomo", Name: objectName},
 		Scope:  []string{"mihomo"}, HighRisk: true,
-		Groups: []PoolApprovalBusinessGroup{{Key: "mihomo", Items: []PoolApprovalBusinessChange{item}}},
+		Groups: groups, Impacts: impacts,
 	}}
+}
+
+func mihomoApprovalCount(explicit int64, ids []int64) int64 {
+	if explicit > 0 {
+		return explicit
+	}
+	return int64(len(ids))
 }
 
 func poolApprovalBusinessGroup(field string) (string, string) {

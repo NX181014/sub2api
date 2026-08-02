@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 )
 
 type mihomoProxyRepoStub struct {
@@ -27,6 +29,135 @@ func (s *mihomoProxyRepoStub) Create(_ context.Context, proxy *Proxy) error {
 	proxy.ID = int64(len(s.items) + 1)
 	s.items = append(s.items, *proxy)
 	return nil
+}
+
+func (s *mihomoProxyRepoStub) GetByID(_ context.Context, id int64) (*Proxy, error) {
+	for i := range s.items {
+		if s.items[i].ID == id {
+			item := s.items[i]
+			return &item, nil
+		}
+	}
+	return nil, ErrProxyNotFound
+}
+
+func (s *mihomoProxyRepoStub) Update(_ context.Context, proxy *Proxy) error {
+	for i := range s.items {
+		if s.items[i].ID == proxy.ID {
+			s.items[i] = *proxy
+			return nil
+		}
+	}
+	return ErrProxyNotFound
+}
+
+type mihomoResourceRepoStub struct {
+	MihomoRepository
+	subscriptions []MihomoSubscription
+	nodes         []MihomoManagedNode
+	routes        []MihomoRoute
+	routeNodes    map[int64][]MihomoRouteNode
+}
+
+func (s *mihomoResourceRepoStub) ListSubscriptions(_ context.Context, params pagination.PaginationParams, _ MihomoSubscriptionFilter) ([]MihomoSubscription, *pagination.PaginationResult, error) {
+	return paginateMihomoStub(s.subscriptions, params), nil, nil
+}
+
+func (s *mihomoResourceRepoStub) GetSubscriptionByID(_ context.Context, id int64) (*MihomoSubscription, error) {
+	for i := range s.subscriptions {
+		if s.subscriptions[i].ID == id {
+			item := s.subscriptions[i]
+			return &item, nil
+		}
+	}
+	return nil, ErrMihomoSubscriptionNotFound
+}
+
+func (s *mihomoResourceRepoStub) ListNodes(_ context.Context, params pagination.PaginationParams, _ MihomoNodeFilter) ([]MihomoManagedNode, *pagination.PaginationResult, error) {
+	return paginateMihomoStub(s.nodes, params), nil, nil
+}
+
+func (s *mihomoResourceRepoStub) ListRoutes(_ context.Context, params pagination.PaginationParams, filter MihomoRouteFilter) ([]MihomoRoute, *pagination.PaginationResult, error) {
+	items := make([]MihomoRoute, 0, len(s.routes))
+	for _, route := range s.routes {
+		if filter.Status == "" || route.Status == filter.Status {
+			items = append(items, route)
+		}
+	}
+	return paginateMihomoStub(items, params), nil, nil
+}
+
+func paginateMihomoStub[T any](items []T, params pagination.PaginationParams) []T {
+	start := params.Offset()
+	if start >= len(items) {
+		return []T{}
+	}
+	end := min(start+params.Limit(), len(items))
+	return append([]T(nil), items[start:end]...)
+}
+
+func (s *mihomoResourceRepoStub) ListRouteNodes(_ context.Context, routeID int64) ([]MihomoRouteNode, error) {
+	return append([]MihomoRouteNode(nil), s.routeNodes[routeID]...), nil
+}
+
+func (s *mihomoResourceRepoStub) UpdateRoute(_ context.Context, route *MihomoRoute) error {
+	for i := range s.routes {
+		if s.routes[i].ID == route.ID {
+			s.routes[i] = *route
+			return nil
+		}
+	}
+	return ErrMihomoRouteNotFound
+}
+
+type mihomoPlainEncryptor struct{}
+
+func (mihomoPlainEncryptor) Encrypt(value string) (string, error) { return value, nil }
+func (mihomoPlainEncryptor) Decrypt(value string) (string, error) { return value, nil }
+
+func TestPrepareManagedSubscriptionDeleteUsesApprovalKind(t *testing.T) {
+	resources := &mihomoResourceRepoStub{subscriptions: []MihomoSubscription{{ID: 17, Name: "existing"}}}
+	svc := NewMihomoService(&config.Config{Mihomo: config.MihomoConfig{Enabled: true}}, &mihomoProxyRepoStub{}, nil).SetResourceRepository(resources)
+
+	update, err := svc.PrepareManagedSubscriptionApproval(context.Background(), MihomoApprovalSubscriptionDelete, 17, "", "", false, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if update.Kind != MihomoApprovalSubscriptionDelete || update.SubscriptionID != 17 {
+		t.Fatalf("unexpected update: %+v", update)
+	}
+}
+
+func TestPrepareManagedSubscriptionRefreshUsesApprovalKind(t *testing.T) {
+	resources := &mihomoResourceRepoStub{subscriptions: []MihomoSubscription{{ID: 17, Name: "existing"}}}
+	svc := NewMihomoService(&config.Config{Mihomo: config.MihomoConfig{Enabled: true}}, &mihomoProxyRepoStub{}, nil).SetResourceRepository(resources)
+
+	update, err := svc.PrepareManagedSubscriptionApproval(context.Background(), MihomoApprovalSubscriptionRefresh, 17, "", "", false, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if update.Kind != MihomoApprovalSubscriptionRefresh || update.SubscriptionName != "existing" {
+		t.Fatalf("unexpected update: %+v", update)
+	}
+}
+
+func TestMihomoWorkbenchIncludesEveryNodeAndUpstreamTombstones(t *testing.T) {
+	removedAt := time.Now().UTC()
+	nodes := make([]MihomoManagedNode, 1001)
+	for i := range nodes {
+		nodes[i] = MihomoManagedNode{ID: int64(i + 1), SubscriptionID: 1, NodeKey: fmt.Sprint(i + 1), OriginalName: fmt.Sprintf("node-%d", i+1), LastSeenAt: removedAt}
+	}
+	nodes[len(nodes)-1].UpstreamRemovedAt = &removedAt
+	resources := &mihomoResourceRepoStub{subscriptions: []MihomoSubscription{{ID: 1, Name: "all"}}, nodes: nodes}
+	svc := NewMihomoService(&config.Config{}, &mihomoProxyRepoStub{}, nil).SetResourceRepository(resources)
+
+	workbench, err := svc.Workbench(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(workbench.Nodes) != len(nodes) || workbench.Nodes[len(nodes)-1].UpstreamRemovedAt == nil {
+		t.Fatalf("workbench nodes = %d, tombstone = %v", len(workbench.Nodes), workbench.Nodes[len(workbench.Nodes)-1].UpstreamRemovedAt)
+	}
 }
 
 func TestMihomoControllerUsesConfiguredSecret(t *testing.T) {
@@ -131,8 +262,8 @@ func TestMihomoApprovalLockHeldUntilFinalized(t *testing.T) {
 	go func() {
 		close(started)
 		svc.mu.Lock()
-		svc.mu.Unlock()
 		close(acquired)
+		svc.mu.Unlock()
 	}()
 	<-started
 	select {
@@ -147,5 +278,78 @@ func TestMihomoApprovalLockHeldUntilFinalized(t *testing.T) {
 	case <-acquired:
 	case <-time.After(time.Second):
 		t.Fatal("mihomo lock remained held after approval transaction finalized")
+	}
+}
+
+func TestMihomoManagedRuntimeRollbackRestoresConfigAndLegacyProxy(t *testing.T) {
+	var loadedPayloads []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPut || r.URL.Path != "/configs" {
+			http.NotFound(w, r)
+			return
+		}
+		var request struct {
+			Payload string `json:"payload"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatal(err)
+		}
+		loadedPayloads = append(loadedPayloads, request.Payload)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	configPath := filepath.Join(t.TempDir(), "config.yaml")
+	oldConfig := "secret: test-secret\nexternal-controller: 0.0.0.0:26790\nproxy-groups:\n  - name: PROXY\n    type: select\n    proxies: [DIRECT]\n"
+	if err := os.WriteFile(configPath, []byte(oldConfig), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	legacySource := "mihomo:automatic"
+	proxyRepo := &mihomoProxyRepoStub{items: []Proxy{{
+		ID: 44, Name: "Mihomo automatic", Protocol: "socks5h", Host: "mihomo", Port: 26781,
+		Status: StatusActive, ManagedSource: &legacySource,
+	}}}
+	resources := &mihomoResourceRepoStub{
+		subscriptions: []MihomoSubscription{{
+			ID: 1, Name: "Primary", ProviderKey: "primary", URLCiphertext: []byte("https://subscription.example/sub"),
+			RefreshIntervalSeconds: 600, Status: StatusActive,
+		}},
+		nodes: []MihomoManagedNode{{
+			ID: 10, SubscriptionID: 1, NodeKey: "node-10", OriginalName: "Hong Kong", Alive: true,
+		}},
+		routes:     []MihomoRoute{{ID: 20, Name: "Automatic", Kind: "latency", ListenerPort: 26781, Status: StatusActive}},
+		routeNodes: map[int64][]MihomoRouteNode{20: {{RouteID: 20, NodeID: 10, Priority: 1}}},
+	}
+	svc := NewMihomoService(&config.Config{Mihomo: config.MihomoConfig{
+		Enabled: true, ControllerURL: server.URL, ConfigPath: configPath, ProxyHost: "mihomo",
+		AutomaticPort: 26781, DirectionalPort: 26782, DynamicPort: 26783,
+	}}, proxyRepo, mihomoPlainEncryptor{}).SetResourceRepository(resources)
+
+	finalize, err := svc.ApplyManagedRuntime(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resources.routes[0].ProxyID == nil || *resources.routes[0].ProxyID != 44 {
+		t.Fatalf("legacy proxy was not reused: %+v", resources.routes[0])
+	}
+	generated, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(generated), "SUB2API-ROUTE-20") || strings.Contains(string(generated), "name: PROXY") {
+		t.Fatalf("managed config was not installed:\n%s", generated)
+	}
+	if err = finalize(false); err != nil {
+		t.Fatal(err)
+	}
+	restored, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(restored) != oldConfig {
+		t.Fatalf("config was not restored:\n%s", restored)
+	}
+	if len(loadedPayloads) != 2 || loadedPayloads[1] != oldConfig {
+		t.Fatalf("controller payload sequence = %s", fmt.Sprint(loadedPayloads))
 	}
 }

@@ -46,6 +46,16 @@ func ProvideOAuthRefreshAPI(accountRepo AccountRepository, tokenCache GeminiToke
 	return NewOAuthRefreshAPI(accountRepo, tokenCache)
 }
 
+func ProvideMihomoService(
+	cfg *config.Config,
+	proxyRepo ProxyRepository,
+	encryptor SecretEncryptor,
+	resources MihomoRepository,
+	prober ProxyExitInfoProber,
+) *MihomoService {
+	return NewMihomoService(cfg, proxyRepo, encryptor).SetResourceRepository(resources).SetProxyProber(prober)
+}
+
 func ProvideBatchImageModelPricingResolver(resolver *ModelPricingResolver) *BatchImageModelPricingResolver {
 	return &BatchImageModelPricingResolver{Resolver: resolver}
 }
@@ -781,7 +791,7 @@ var ProviderSet = wire.NewSet(
 	NewContentModerationService,
 	NewAffiliateService,
 	NewPoolService,
-	NewMihomoService,
+	ProvideMihomoService,
 	ProvidePaymentConfigService,
 	ProvidePaymentService,
 	ProvidePaymentOrderExpiryService,

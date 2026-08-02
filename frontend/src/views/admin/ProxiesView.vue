@@ -3,7 +3,11 @@
     <TablePageLayout>
       <template #filters>
         <div class="space-y-4">
-          <MihomoPanel @approval-submitted="handleApprovalSubmitted" />
+          <MihomoPanel
+            ref="mihomoPanelRef"
+            @approval-submitted="handleApprovalSubmitted"
+            @routes-loaded="handleMihomoRoutesLoaded"
+          />
           <div class="flex flex-wrap items-center gap-3">
           <!-- Left: Search + Filters -->
           <div class="relative w-full sm:w-64">
@@ -37,6 +41,24 @@
               @change="loadProxies"
             />
           </div>
+
+          <select v-model="proxySourceFilter" class="input w-full sm:w-36" aria-label="按代理来源筛选">
+            <option value="">全部来源</option>
+            <option value="manual">手动代理</option>
+            <option value="mihomo">Mihomo 线路</option>
+          </select>
+          <select v-model="mihomoSubscriptionFilter" class="input w-full sm:w-40" aria-label="按 Mihomo 订阅筛选">
+            <option value="">全部订阅</option>
+            <option v-for="option in mihomoSubscriptionOptions" :key="option.id" :value="String(option.id)">{{ option.name }}</option>
+          </select>
+          <select v-model="mihomoKindFilter" class="input w-full sm:w-36" aria-label="按 Mihomo 策略筛选">
+            <option value="">全部策略</option>
+            <option value="dedicated">专线</option><option value="automatic">最低延迟</option><option value="fallback">故障转移</option><option value="dynamic">动态轮换</option><option value="directional">定向</option>
+          </select>
+          <select v-model="mihomoHealthFilter" class="input w-full sm:w-36" aria-label="按 Mihomo 健康状态筛选">
+            <option value="">全部健康状态</option>
+            <option value="healthy">健康</option><option value="degraded">降级</option><option value="failed">异常</option><option value="unknown">未检测</option>
+          </select>
 
           <!-- Right: All action buttons -->
           <div class="flex flex-1 flex-wrap items-center justify-end gap-2">
@@ -86,10 +108,10 @@
       </template>
 
       <template #table>
-        <div ref="proxyTableRef" class="hidden min-h-0 flex-1 flex-col overflow-hidden lg:flex">
+        <div ref="proxyTableRef" class="hidden min-h-0 flex-1 flex-col overflow-hidden min-[1180px]:flex">
         <DataTable
           :columns="columns"
-          :data="proxies"
+          :data="displayedProxies"
           :loading="loading"
           :server-side-sort="true"
           default-sort-key="id"
@@ -116,8 +138,18 @@
             />
           </template>
 
-          <template #cell-name="{ value }">
-            <span class="font-medium text-gray-900 dark:text-white">{{ value }}</span>
+          <template #cell-name="{ row, value }">
+            <button
+              v-if="row.managed_source"
+              type="button"
+              class="min-w-0 max-w-full text-left"
+              title="打开 Mihomo 线路工作台"
+              @click="openManagedProxy(row)"
+            >
+              <span class="block truncate font-medium text-gray-900 hover:text-primary-600 dark:text-white dark:hover:text-primary-400">{{ value }}</span>
+              <span class="mt-0.5 block text-xs text-gray-500">托管代理 #{{ row.id }}</span>
+            </button>
+            <span v-else class="font-medium text-gray-900 dark:text-white">{{ value }}</span>
           </template>
 
           <template #cell-protocol="{ value }">
@@ -130,16 +162,20 @@
             <span v-else class="text-sm text-gray-400">-</span>
           </template>
 
-          <template #cell-address="{ row }">
-            <span :class="['badge', row.connection_configured ? 'badge-success' : 'badge-danger']">
-              {{ t(row.connection_configured ? 'admin.proxies.connectionConfigured' : 'admin.proxies.connectionMissing') }}
-            </span>
+          <template #cell-source="{ row }">
+            <div v-if="managedRoute(row)" class="min-w-0">
+              <span class="badge badge-primary">Mihomo</span>
+              <span class="mt-1 block max-w-36 truncate text-xs text-gray-500" :title="routeSubscriptionLabel(managedRoute(row))">{{ routeSubscriptionLabel(managedRoute(row)) }}</span>
+            </div>
+            <div v-else class="flex flex-col gap-1"><span class="badge badge-gray">手动</span><span :class="['badge', row.connection_configured ? 'badge-success' : 'badge-danger']">{{ t(row.connection_configured ? 'admin.proxies.connectionConfigured' : 'admin.proxies.connectionMissing') }}</span></div>
           </template>
 
-          <template #cell-auth="{ row }">
-            <span :class="['badge', row.auth_configured ? 'badge-primary' : 'badge-gray']">
-              {{ t(row.auth_configured ? 'admin.proxies.authConfigured' : 'admin.proxies.authNotConfigured') }}
-            </span>
+          <template #cell-route="{ row }">
+            <div v-if="managedRoute(row)" class="min-w-0">
+              <span class="badge badge-gray">{{ mihomoRouteKindLabel(managedRoute(row)!.kind) }}</span>
+              <span class="mt-1 block max-w-40 truncate text-xs text-gray-600 dark:text-gray-300" :title="managedRoute(row)?.current_node || '-'">{{ managedRoute(row)?.current_node || '-' }}</span>
+            </div>
+            <span v-else :class="['badge', row.auth_configured ? 'badge-primary' : 'badge-gray']">{{ t(row.auth_configured ? 'admin.proxies.authConfigured' : 'admin.proxies.authNotConfigured') }}</span>
           </template>
 
           <template #cell-location="{ row }">
@@ -159,12 +195,12 @@
 
           <template #cell-account_count="{ row, value }">
             <button
-              v-if="(value || 0) > 0"
+              v-if="(managedRoute(row)?.account_count ?? value ?? 0) > 0"
               type="button"
               class="inline-flex items-center rounded bg-gray-100 px-2 py-0.5 text-xs font-medium text-primary-700 hover:bg-gray-200 dark:bg-dark-600 dark:text-primary-300 dark:hover:bg-dark-500"
               @click="openAccountsModal(row)"
             >
-              {{ t('admin.groups.accountsCount', { count: value || 0 }) }}
+              {{ t('admin.groups.accountsCount', { count: managedRoute(row)?.account_count ?? value ?? 0 }) }}
             </button>
             <span
               v-else
@@ -176,8 +212,12 @@
 
           <template #cell-latency="{ row }">
             <div class="flex flex-col gap-1">
+              <template v-if="managedRoute(row)">
+                <span :class="['badge', mihomoHealthClass(managedRoute(row)!.health)]">{{ mihomoHealthLabel(managedRoute(row)!.health) }}</span>
+                <span class="text-xs tabular-nums text-gray-500">{{ typeof managedRoute(row)?.latency_ms === 'number' ? `${managedRoute(row)?.latency_ms}ms` : '-' }}</span>
+              </template>
               <span
-                v-if="row.latency_status === 'failed'"
+                v-else-if="row.latency_status === 'failed'"
                 class="badge badge-danger"
                 :title="row.latency_message || undefined"
               >
@@ -215,14 +255,14 @@
             <span class="text-xs text-gray-600 dark:text-gray-300">{{ formatDateTime(row.created_at) }}</span>
           </template>
 
-          <template #cell-status="{ value }">
+          <template #cell-status="{ row, value }">
             <span
               :class="[
                 'badge',
-                value === 'active' ? 'badge-success' : value === 'expired' ? 'badge-danger' : 'badge-danger'
+                managedRoute(row) ? mihomoHealthClass(managedRoute(row)!.health) : value === 'active' ? 'badge-success' : value === 'expired' ? 'badge-danger' : 'badge-danger'
               ]"
             >
-              {{ t('admin.accounts.status.' + value) }}
+              {{ managedRoute(row) ? mihomoHealthLabel(managedRoute(row)!.health) : t('admin.accounts.status.' + value) }}
             </span>
           </template>
 
@@ -285,11 +325,11 @@
                 <span class="text-xs">{{ t('admin.proxies.qualityCheck') }}</span>
               </button>
               <button
-                @click="openProxyCredentialRequest(row)"
+                @click="row.managed_source ? openManagedProxy(row) : openProxyCredentialRequest(row)"
                 class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-primary-600 dark:hover:bg-dark-700 dark:hover:text-primary-400"
               >
-                <Icon name="eye" size="sm" />
-                <span class="text-xs">{{ t('common.view') }}</span>
+                <Icon :name="row.managed_source ? 'cog' : 'eye'" size="sm" />
+                <span class="text-xs">{{ row.managed_source ? '管理' : t('common.view') }}</span>
               </button>
               <button
                 v-if="!row.managed_source"
@@ -312,9 +352,9 @@
           </template>
         </DataTable>
         </div>
-        <div class="grid gap-3 p-1 lg:hidden">
+        <div class="grid gap-3 p-1 min-[1180px]:hidden">
           <article
-            v-for="proxy in proxies"
+            v-for="proxy in displayedProxies"
             :key="proxy.id"
             class="min-w-0 rounded-lg border border-gray-200 bg-white p-4 dark:border-dark-700 dark:bg-dark-800"
           >
@@ -326,36 +366,37 @@
                   <span v-if="proxy.managed_source" class="badge badge-primary">Mihomo</span>
                 </div>
                 <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">#{{ proxy.id }} · {{ formatLocation(proxy) || '-' }}</p>
+                <p v-if="managedRoute(proxy)" class="mt-1 truncate text-xs text-gray-500" :title="routeSubscriptionLabel(managedRoute(proxy))">{{ routeSubscriptionLabel(managedRoute(proxy)) }} · {{ mihomoRouteKindLabel(managedRoute(proxy)!.kind) }}</p>
               </div>
-              <span :class="['badge shrink-0 whitespace-nowrap', proxy.status === 'active' ? 'badge-success' : 'badge-danger']">
-                {{ t('admin.accounts.status.' + proxy.status) }}
+              <span :class="['badge shrink-0 whitespace-nowrap', managedRoute(proxy) ? mihomoHealthClass(managedRoute(proxy)!.health) : proxy.status === 'active' ? 'badge-success' : 'badge-danger']">
+                {{ managedRoute(proxy) ? mihomoHealthLabel(managedRoute(proxy)!.health) : t('admin.accounts.status.' + proxy.status) }}
               </span>
             </div>
             <dl class="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
               <div>
-                <dt class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.proxies.columns.address') }}</dt>
-                <dd class="mt-1 font-medium text-gray-800 dark:text-gray-100">{{ t(proxy.connection_configured ? 'admin.proxies.connectionConfigured' : 'admin.proxies.connectionMissing') }}</dd>
+                <dt class="text-xs text-gray-500 dark:text-gray-400">{{ managedRoute(proxy) ? '当前节点' : t('admin.proxies.columns.address') }}</dt>
+                <dd class="mt-1 truncate font-medium text-gray-800 dark:text-gray-100" :title="managedRoute(proxy)?.current_node || undefined">{{ managedRoute(proxy)?.current_node || t(proxy.connection_configured ? 'admin.proxies.connectionConfigured' : 'admin.proxies.connectionMissing') }}</dd>
               </div>
               <div>
-                <dt class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.proxies.columns.auth') }}</dt>
-                <dd class="mt-1 font-medium text-gray-800 dark:text-gray-100">{{ t(proxy.auth_configured ? 'admin.proxies.authConfigured' : 'admin.proxies.authNotConfigured') }}</dd>
+                <dt class="text-xs text-gray-500 dark:text-gray-400">{{ managedRoute(proxy) ? '出口 IP' : t('admin.proxies.columns.auth') }}</dt>
+                <dd class="mt-1 truncate font-medium text-gray-800 dark:text-gray-100" :title="managedRoute(proxy)?.exit_ip || undefined">{{ managedRoute(proxy)?.exit_ip || t(proxy.auth_configured ? 'admin.proxies.authConfigured' : 'admin.proxies.authNotConfigured') }}</dd>
               </div>
               <div>
                 <dt class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.proxies.columns.accounts') }}</dt>
-                <dd class="mt-1 font-medium text-gray-800 dark:text-gray-100">{{ proxy.account_count || 0 }}</dd>
+                <dd class="mt-1 font-medium text-gray-800 dark:text-gray-100">{{ managedRoute(proxy)?.account_count ?? proxy.account_count ?? 0 }}</dd>
               </div>
               <div>
                 <dt class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.proxies.columns.latency') }}</dt>
-                <dd class="mt-1 font-medium text-gray-800 dark:text-gray-100">{{ typeof proxy.latency_ms === 'number' ? `${proxy.latency_ms}ms` : '-' }}</dd>
+                <dd class="mt-1 font-medium text-gray-800 dark:text-gray-100">{{ typeof (managedRoute(proxy)?.latency_ms ?? proxy.latency_ms) === 'number' ? `${managedRoute(proxy)?.latency_ms ?? proxy.latency_ms}ms` : '-' }}</dd>
               </div>
             </dl>
             <div class="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
               <button type="button" class="btn btn-secondary min-h-11 px-2" @click="handleTestConnection(proxy)">{{ t('admin.proxies.testConnection') }}</button>
-              <button type="button" class="btn btn-secondary min-h-11 px-2" @click="openProxyCredentialRequest(proxy)">{{ t('common.view') }}</button>
+              <button type="button" class="btn btn-secondary min-h-11 px-2" @click="proxy.managed_source ? openManagedProxy(proxy) : openProxyCredentialRequest(proxy)">{{ proxy.managed_source ? '管理线路' : t('common.view') }}</button>
               <button v-if="!proxy.managed_source" type="button" class="btn btn-secondary min-h-11 px-2" @click="openProxyCredentialRequest(proxy)">{{ t('common.edit') }}</button>
             </div>
           </article>
-          <EmptyState v-if="!loading && proxies.length === 0" :title="t('admin.proxies.noProxiesYet')" :description="t('admin.proxies.createFirstProxy')" :action-text="t('admin.proxies.createProxy')" @action="showCreateModal = true" />
+          <EmptyState v-if="!loading && displayedProxies.length === 0" :title="t('admin.proxies.noProxiesYet')" :description="t('admin.proxies.createFirstProxy')" :action-text="t('admin.proxies.createProxy')" @action="showCreateModal = true" />
         </div>
       </template>
 
@@ -987,6 +1028,7 @@ import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { adminAPI } from '@/api/admin'
+import type { MihomoRoute } from '@/api/admin/mihomo'
 import type { Proxy, ProxyAccountSummary, ProxyProtocol, ProxyQualityCheckResult, RevealedProxy } from '@/types'
 import type { Column } from '@/components/common/types'
 import AppLayout from '@/components/layout/AppLayout.vue'
@@ -1017,8 +1059,8 @@ const columns = computed<Column[]>(() => [
   { key: 'select', label: '', sortable: false },
   { key: 'name', label: t('admin.proxies.columns.name'), sortable: true },
   { key: 'protocol', label: t('admin.proxies.columns.protocol'), sortable: true },
-  { key: 'address', label: t('admin.proxies.columns.address'), sortable: false },
-  { key: 'auth', label: t('admin.proxies.columns.auth'), sortable: false },
+  { key: 'source', label: '来源 / 订阅', sortable: false },
+  { key: 'route', label: '线路 / 节点', sortable: false },
   { key: 'location', label: t('admin.proxies.columns.location'), sortable: false },
   { key: 'account_count', label: t('admin.proxies.columns.accounts'), sortable: true },
   { key: 'latency', label: t('admin.proxies.columns.latency'), sortable: false },
@@ -1058,6 +1100,12 @@ const editStatusOptions = computed(() => [
 ])
 
 const proxies = ref<Proxy[]>([])
+const mihomoRoutes = ref<MihomoRoute[]>([])
+const mihomoPanelRef = ref<{ openManagedProxy: (proxyID: number) => void } | null>(null)
+const proxySourceFilter = ref('')
+const mihomoSubscriptionFilter = ref('')
+const mihomoKindFilter = ref('')
+const mihomoHealthFilter = ref('')
 const loading = ref(false)
 const searchQuery = ref('')
 const filters = reactive({
@@ -1074,6 +1122,23 @@ const sortState = reactive({
   sort_by: 'id',
   sort_order: 'desc' as 'asc' | 'desc'
 })
+const mihomoRoutesByProxyID = computed(() => new Map(mihomoRoutes.value.map(route => [route.proxy_id, route])))
+const mihomoSubscriptionOptions = computed(() => {
+  const items = new Map<number, string>()
+  mihomoRoutes.value.forEach(route => route.subscription_ids.forEach((id, index) => items.set(id, route.subscription_names?.[index] || `订阅 #${id}`)))
+  return Array.from(items, ([id, name]) => ({ id, name }))
+})
+const displayedProxies = computed(() => proxies.value.filter(proxy => {
+  const route = mihomoRoutesByProxyID.value.get(proxy.id)
+  const isManaged = Boolean(proxy.managed_source || route)
+  if (proxySourceFilter.value === 'manual' && isManaged) return false
+  if (proxySourceFilter.value === 'mihomo' && !isManaged) return false
+  if (mihomoSubscriptionFilter.value && !route?.subscription_ids.some(id => String(id) === mihomoSubscriptionFilter.value)) return false
+  if (mihomoKindFilter.value && route?.kind !== mihomoKindFilter.value) return false
+  if (mihomoHealthFilter.value && route?.health !== mihomoHealthFilter.value) return false
+  if ((mihomoSubscriptionFilter.value || mihomoKindFilter.value || mihomoHealthFilter.value) && !route) return false
+  return true
+}))
 
 const showCreateModal = ref(false)
 const createPasswordVisible = ref(false)
@@ -1105,7 +1170,7 @@ const {
   toggleVisible,
   batchUpdate
 } = useTableSelection<Proxy>({
-  rows: proxies,
+  rows: displayedProxies,
   getId: (proxy) => proxy.id
 })
 useSwipeSelect(proxyTableRef, {
@@ -1556,7 +1621,17 @@ const applyQualityResult = (proxyId: number, result: ProxyQualityCheckResult) =>
   target.quality_checked = result.checked_at
 }
 
+const managedRoute = (proxy: Proxy) => mihomoRoutesByProxyID.value.get(proxy.id)
+const routeSubscriptionLabel = (route?: MihomoRoute) => route?.subscription_names?.join('、') || route?.subscription_ids.map(id => `订阅 #${id}`).join('、') || '-'
+const mihomoRouteKindLabel = (kind: MihomoRoute['kind']) => ({ dedicated: '专线', automatic: '最低延迟', latency: '最低延迟', fallback: '故障转移', dynamic: '动态轮换', directional: '定向' })[kind] || kind
+const mihomoHealthLabel = (health: MihomoRoute['health']) => ({ healthy: '健康', degraded: '降级', failed: '异常', unknown: '未检测' })[health] || health
+const mihomoHealthClass = (health: MihomoRoute['health']) => health === 'healthy' ? 'badge-success' : health === 'degraded' ? 'badge-warning' : health === 'failed' ? 'badge-danger' : 'badge-gray'
+const handleMihomoRoutesLoaded = (routes: MihomoRoute[]) => { mihomoRoutes.value = routes }
+const openManagedProxy = (proxy: Proxy) => { mihomoPanelRef.value?.openManagedProxy(proxy.id) }
+
 const formatLocation = (proxy: Proxy) => {
+  const route = managedRoute(proxy)
+  if (route?.exit_ip) return route.exit_ip
   const parts = [proxy.country, proxy.city].filter(Boolean) as string[]
   return parts.join(' · ')
 }

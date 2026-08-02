@@ -3,6 +3,7 @@ package service
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -50,12 +51,87 @@ type MihomoStatus struct {
 	ProxyIDs               map[string]int64            `json:"proxy_ids"`
 }
 
+type MihomoRuntimeStatus struct {
+	Enabled             bool       `json:"enabled"`
+	Version             string     `json:"version,omitempty"`
+	Configured          bool       `json:"configured"`
+	ControllerConnected bool       `json:"controller_connected"`
+	ConfigValid         bool       `json:"config_valid"`
+	GeneratedAt         *time.Time `json:"generated_at,omitempty"`
+	LastReloadAt        *time.Time `json:"last_reload_at,omitempty"`
+	LastReloadError     string     `json:"last_reload_error,omitempty"`
+}
+
+type MihomoWorkbenchSubscription struct {
+	ID                     int64      `json:"id"`
+	Name                   string     `json:"name"`
+	Enabled                bool       `json:"enabled"`
+	Status                 string     `json:"status"`
+	MaskedURL              string     `json:"masked_url,omitempty"`
+	SourceHost             string     `json:"source_host,omitempty"`
+	RefreshIntervalMinutes int        `json:"refresh_interval_minutes"`
+	NodeCount              int        `json:"node_count"`
+	AliveCount             int        `json:"alive_count"`
+	UsedBytes              *int64     `json:"used_bytes,omitempty"`
+	TotalBytes             *int64     `json:"total_bytes,omitempty"`
+	ExpiresAt              *time.Time `json:"expires_at,omitempty"`
+	LastRefreshedAt        *time.Time `json:"last_refreshed_at,omitempty"`
+	LastError              string     `json:"last_error,omitempty"`
+}
+
+type MihomoWorkbenchNode struct {
+	ID                int64      `json:"id"`
+	Key               string     `json:"key"`
+	Name              string     `json:"name"`
+	DisplayName       string     `json:"display_name,omitempty"`
+	SubscriptionID    int64      `json:"subscription_id"`
+	SubscriptionName  string     `json:"subscription_name,omitempty"`
+	Alive             bool       `json:"alive"`
+	Delay             *int       `json:"delay,omitempty"`
+	Region            string     `json:"region,omitempty"`
+	Tags              []string   `json:"tags"`
+	Enabled           bool       `json:"enabled"`
+	Excluded          bool       `json:"excluded"`
+	LastSeenAt        *time.Time `json:"last_seen_at,omitempty"`
+	UpstreamRemovedAt *time.Time `json:"upstream_removed_at,omitempty"`
+}
+
+type MihomoWorkbenchRoute struct {
+	ID                int64      `json:"id"`
+	Name              string     `json:"name"`
+	Kind              string     `json:"kind"`
+	SubscriptionIDs   []int64    `json:"subscription_ids"`
+	SubscriptionNames []string   `json:"subscription_names,omitempty"`
+	NodeIDs           []int64    `json:"node_ids"`
+	ListenerPort      int        `json:"listener_port"`
+	ProxyID           int64      `json:"proxy_id"`
+	Enabled           bool       `json:"enabled"`
+	CurrentNode       string     `json:"current_node,omitempty"`
+	ExitIP            string     `json:"exit_ip,omitempty"`
+	Health            string     `json:"health"`
+	LatencyMS         *int       `json:"latency_ms,omitempty"`
+	AccountCount      int64      `json:"account_count"`
+	LastCheckedAt     *time.Time `json:"last_checked_at,omitempty"`
+}
+
+type MihomoWorkbench struct {
+	Status        MihomoRuntimeStatus           `json:"status"`
+	Subscriptions []MihomoWorkbenchSubscription `json:"subscriptions"`
+	Nodes         []MihomoWorkbenchNode         `json:"nodes"`
+	Routes        []MihomoWorkbenchRoute        `json:"routes"`
+}
+
 type MihomoService struct {
-	cfg       config.MihomoConfig
-	proxyRepo ProxyRepository
-	encryptor SecretEncryptor
-	client    *http.Client
-	mu        sync.Mutex
+	cfg         config.MihomoConfig
+	proxyRepo   ProxyRepository
+	proxyProber ProxyExitInfoProber
+	resources   MihomoRepository
+	encryptor   SecretEncryptor
+	client      *http.Client
+	mu          sync.Mutex
+	generatedAt *time.Time
+	reloadedAt  *time.Time
+	reloadError string
 }
 
 func NewMihomoService(cfg *config.Config, proxyRepo ProxyRepository, encryptor SecretEncryptor) *MihomoService {
@@ -66,6 +142,18 @@ func NewMihomoService(cfg *config.Config, proxyRepo ProxyRepository, encryptor S
 			CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 		},
 	}
+}
+
+// SetResourceRepository enables the database-backed multi-subscription runtime.
+// The existing constructor stays source-compatible during the one-time migration.
+func (s *MihomoService) SetResourceRepository(resources MihomoRepository) *MihomoService {
+	s.resources = resources
+	return s
+}
+
+func (s *MihomoService) SetProxyProber(prober ProxyExitInfoProber) *MihomoService {
+	s.proxyProber = prober
+	return s
 }
 
 func (s *MihomoService) Status(ctx context.Context) (*MihomoStatus, error) {
@@ -105,6 +193,150 @@ func (s *MihomoService) Status(ctx context.Context) (*MihomoStatus, error) {
 	}
 	status.ProxyIDs, err = s.managedProxyIDs(ctx)
 	return status, err
+}
+
+func (s *MihomoService) Workbench(ctx context.Context) (*MihomoWorkbench, error) {
+	if s.resources == nil {
+		return nil, infraerrors.ServiceUnavailable("MIHOMO_RESOURCES_UNAVAILABLE", "mihomo managed resources are not configured")
+	}
+	subscriptions, err := s.allMihomoSubscriptions(ctx, MihomoSubscriptionFilter{})
+	if err != nil {
+		return nil, err
+	}
+	nodes, err := s.allMihomoNodes(ctx, MihomoNodeFilter{IncludeRemoved: true})
+	if err != nil {
+		return nil, err
+	}
+	routes, err := s.allMihomoRoutes(ctx, MihomoRouteFilter{})
+	if err != nil {
+		return nil, err
+	}
+
+	workbench := &MihomoWorkbench{
+		Status:        MihomoRuntimeStatus{Enabled: s.cfg.Enabled, Configured: len(subscriptions) > 0 && len(routes) > 0},
+		Subscriptions: make([]MihomoWorkbenchSubscription, 0, len(subscriptions)),
+		Nodes:         make([]MihomoWorkbenchNode, 0, len(nodes)),
+		Routes:        make([]MihomoWorkbenchRoute, 0, len(routes)),
+	}
+	if _, _, readErr := s.readConfig(); readErr == nil {
+		workbench.Status.ConfigValid = true
+	}
+	var version struct {
+		Version string `json:"version"`
+	}
+	runtimeGroups := map[string]string{}
+	if s.cfg.Enabled {
+		if controllerErr := s.controllerJSON(ctx, http.MethodGet, "/version", nil, &version); controllerErr == nil {
+			workbench.Status.ControllerConnected = true
+			workbench.Status.Version = version.Version
+			if groups, groupsErr := s.proxyGroups(ctx); groupsErr == nil {
+				runtimeGroups = groups
+			}
+		}
+	}
+	s.mu.Lock()
+	workbench.Status.GeneratedAt = s.generatedAt
+	workbench.Status.LastReloadAt = s.reloadedAt
+	workbench.Status.LastReloadError = s.reloadError
+	s.mu.Unlock()
+
+	subscriptionNameByID := make(map[int64]string, len(subscriptions))
+	counts := make(map[int64][2]int, len(subscriptions))
+	for _, node := range nodes {
+		count := counts[node.SubscriptionID]
+		count[0]++
+		if node.Alive && node.UpstreamRemovedAt == nil && !node.Excluded {
+			count[1]++
+		}
+		counts[node.SubscriptionID] = count
+	}
+	for _, subscription := range subscriptions {
+		subscriptionNameByID[subscription.ID] = subscription.Name
+		count := counts[subscription.ID]
+		maskedURL := ""
+		if subscription.MaskedHost != "" {
+			maskedURL = "https://" + subscription.MaskedHost + "/..."
+		}
+		workbench.Subscriptions = append(workbench.Subscriptions, MihomoWorkbenchSubscription{
+			ID: subscription.ID, Name: subscription.Name, Enabled: subscription.Status == StatusActive,
+			Status: subscription.Status, MaskedURL: maskedURL, SourceHost: subscription.MaskedHost,
+			RefreshIntervalMinutes: subscription.RefreshIntervalSeconds / 60, NodeCount: count[0], AliveCount: count[1],
+			UsedBytes: subscription.QuotaUsedBytes, TotalBytes: subscription.QuotaTotalBytes, ExpiresAt: subscription.ExpiresAt,
+			LastRefreshedAt: subscription.LastRefreshedAt, LastError: subscription.LastError,
+		})
+	}
+
+	nodeByID := make(map[int64]MihomoManagedNode, len(nodes))
+	for _, node := range nodes {
+		nodeByID[node.ID] = node
+		lastSeen := node.LastSeenAt
+		workbench.Nodes = append(workbench.Nodes, MihomoWorkbenchNode{
+			ID: node.ID, Key: node.NodeKey, Name: node.OriginalName, DisplayName: node.DisplayName,
+			SubscriptionID: node.SubscriptionID, SubscriptionName: subscriptionNameByID[node.SubscriptionID],
+			Alive: node.Alive, Delay: node.DelayMS, Region: node.Region, Tags: node.Tags,
+			Enabled: node.UpstreamRemovedAt == nil && !node.Excluded, Excluded: node.Excluded,
+			LastSeenAt: &lastSeen, UpstreamRemovedAt: node.UpstreamRemovedAt,
+		})
+	}
+
+	for _, route := range routes {
+		routeNodes, listErr := s.resources.ListRouteNodes(ctx, route.ID)
+		if listErr != nil {
+			return nil, listErr
+		}
+		nodeIDs := make([]int64, 0, len(routeNodes))
+		subscriptionIDs := make([]int64, 0, len(routeNodes))
+		subscriptionNames := make([]string, 0, len(routeNodes))
+		seenSubscriptions := make(map[int64]struct{}, len(routeNodes))
+		for _, relation := range routeNodes {
+			nodeIDs = append(nodeIDs, relation.NodeID)
+			node, ok := nodeByID[relation.NodeID]
+			if !ok {
+				continue
+			}
+			if _, exists := seenSubscriptions[node.SubscriptionID]; exists {
+				continue
+			}
+			seenSubscriptions[node.SubscriptionID] = struct{}{}
+			subscriptionIDs = append(subscriptionIDs, node.SubscriptionID)
+			subscriptionNames = append(subscriptionNames, subscriptionNameByID[node.SubscriptionID])
+		}
+		proxyID, accountCount := int64(0), int64(0)
+		if route.ProxyID != nil {
+			proxyID = *route.ProxyID
+			if s.proxyRepo != nil {
+				accountCount, err = s.proxyRepo.CountAccountsByProxyID(ctx, proxyID)
+				if err != nil {
+					return nil, err
+				}
+			}
+		}
+		currentNode := runtimeGroups[fmt.Sprintf("SUB2API-ROUTE-%d", route.ID)]
+		if currentNode == "" && route.CurrentNodeID != nil {
+			if node, ok := nodeByID[*route.CurrentNodeID]; ok {
+				currentNode = node.DisplayName
+				if currentNode == "" {
+					currentNode = node.OriginalName
+				}
+			}
+		}
+		health := "unknown"
+		if route.ExitHealthy != nil {
+			if *route.ExitHealthy {
+				health = "healthy"
+			} else {
+				health = "failed"
+			}
+		}
+		workbench.Routes = append(workbench.Routes, MihomoWorkbenchRoute{
+			ID: route.ID, Name: route.Name, Kind: route.Kind, SubscriptionIDs: subscriptionIDs,
+			SubscriptionNames: subscriptionNames, NodeIDs: nodeIDs, ListenerPort: route.ListenerPort,
+			ProxyID: proxyID, Enabled: route.Status == StatusActive, CurrentNode: currentNode,
+			ExitIP: route.ExitIP, Health: health, LatencyMS: route.ExitDelayMS,
+			AccountCount: accountCount, LastCheckedAt: route.LastCheckedAt,
+		})
+	}
+	return workbench, nil
 }
 
 func (s *MihomoService) subscriptionState() (bool, string, error) {
@@ -169,6 +401,9 @@ func (s *MihomoService) ValidateApproval(ctx context.Context, resourceKey string
 	}
 	switch update.Kind {
 	case "subscription":
+		if err := s.ensureLegacyMutationAvailable(ctx); err != nil {
+			return err
+		}
 		if resourceKey != "mihomo:subscription" || update.Subscription == "" || update.Mode != "" || update.Selection != "" || s.encryptor == nil {
 			return infraerrors.BadRequest("INVALID_MIHOMO_UPDATE", "invalid mihomo subscription update")
 		}
@@ -185,16 +420,25 @@ func (s *MihomoService) ValidateApproval(ctx context.Context, resourceKey string
 		}
 		return nil
 	case "mode":
+		if err := s.ensureLegacyMutationAvailable(ctx); err != nil {
+			return err
+		}
 		if resourceKey != "mihomo:"+update.Mode || update.Subscription != "" || update.SubscriptionHost != "" {
 			return infraerrors.BadRequest("INVALID_MIHOMO_UPDATE", "invalid mihomo mode update")
 		}
 		return s.validateModeSelection(ctx, update.Mode, update.Selection)
 	case "refresh":
+		if err := s.ensureLegacyMutationAvailable(ctx); err != nil {
+			return err
+		}
 		if resourceKey != "mihomo:refresh" || update.Mode != "" || update.Selection != "" || update.Subscription != "" || update.SubscriptionHost != "" {
 			return infraerrors.BadRequest("INVALID_MIHOMO_UPDATE", "invalid mihomo refresh update")
 		}
 		return nil
 	default:
+		if isManagedMihomoApprovalKind(update.Kind) {
+			return s.validateManagedApproval(ctx, resourceKey, update)
+		}
 		return infraerrors.BadRequest("INVALID_MIHOMO_UPDATE", "invalid mihomo update")
 	}
 }
@@ -204,6 +448,9 @@ func (s *MihomoService) Refresh(ctx context.Context) error {
 }
 
 func (s *MihomoService) ApprovalRevision(ctx context.Context, resourceKey string) (string, error) {
+	if isManagedMihomoResourceKey(resourceKey) {
+		return s.managedApprovalRevision(ctx, resourceKey)
+	}
 	if resourceKey == "mihomo:subscription" || resourceKey == "mihomo:refresh" {
 		raw, cfg, err := s.readConfig()
 		if err != nil {
@@ -225,6 +472,12 @@ func (s *MihomoService) ApprovalRevision(ctx context.Context, resourceKey string
 }
 
 func (s *MihomoService) ApplyApproved(ctx context.Context, update MihomoApprovalUpdate) (func(bool) error, error) {
+	if isManagedMihomoApprovalKind(update.Kind) {
+		return s.applyManagedApproved(ctx, update)
+	}
+	if err := s.ensureLegacyMutationAvailable(ctx); err != nil {
+		return nil, err
+	}
 	s.mu.Lock()
 	lockTransferred := false
 	defer func() {
@@ -234,13 +487,14 @@ func (s *MihomoService) ApplyApproved(ctx context.Context, update MihomoApproval
 	}()
 	var rollback func() error
 	var err error
-	if update.Kind == "subscription" {
+	switch update.Kind {
+	case "subscription":
 		rollback, err = s.applySubscription(ctx, update.Subscription)
-	} else if update.Kind == "mode" {
+	case "mode":
 		rollback, err = s.applyMode(ctx, update.Mode, update.Selection)
-	} else if update.Kind == "refresh" {
+	case "refresh":
 		err = s.Refresh(ctx)
-	} else {
+	default:
 		return nil, infraerrors.BadRequest("INVALID_MIHOMO_UPDATE", "invalid mihomo update")
 	}
 	if err != nil {
@@ -262,6 +516,135 @@ func (s *MihomoService) ApplyApproved(ctx context.Context, update MihomoApproval
 		}
 		return nil
 	}, nil
+}
+
+// ApplyManagedRuntime loads a database-backed candidate config and keeps the
+// config lock until the surrounding approval transaction is finalized.
+func (s *MihomoService) ApplyManagedRuntime(ctx context.Context) (func(bool) error, error) {
+	if !s.cfg.Enabled {
+		return nil, infraerrors.ServiceUnavailable("MIHOMO_DISABLED", "mihomo integration is disabled")
+	}
+	if s.resources == nil {
+		return nil, infraerrors.ServiceUnavailable("MIHOMO_RESOURCES_UNAVAILABLE", "mihomo managed resources are not configured")
+	}
+	s.mu.Lock()
+	lockTransferred := false
+	defer func() {
+		if !lockTransferred {
+			s.mu.Unlock()
+		}
+	}()
+
+	oldRaw, base, err := s.readConfig()
+	if err != nil {
+		return nil, err
+	}
+	subscriptions, nodes, routes, err := s.managedConfigInputs(ctx)
+	if err != nil {
+		return nil, err
+	}
+	generated, err := generateManagedMihomoConfig(base, subscriptions, nodes, routes)
+	if err != nil {
+		return nil, infraerrors.BadRequest("INVALID_MIHOMO_CONFIG", err.Error())
+	}
+	newRaw, err := yaml.Marshal(generated)
+	if err != nil {
+		return nil, err
+	}
+	if err = s.loadPayload(ctx, newRaw); err != nil {
+		s.reloadError = err.Error()
+		return nil, err
+	}
+	if err = atomicWriteFile(s.cfg.ConfigPath, newRaw, 0o600); err != nil {
+		if rollbackErr := s.loadPayload(context.Background(), oldRaw); rollbackErr != nil {
+			slog.Error("mihomo controller rollback failed after managed config write error", "error", rollbackErr)
+		}
+		s.reloadError = err.Error()
+		return nil, err
+	}
+	rollback := func() error {
+		if writeErr := atomicWriteFile(s.cfg.ConfigPath, oldRaw, 0o600); writeErr != nil {
+			return writeErr
+		}
+		return s.loadPayload(context.Background(), oldRaw)
+	}
+	if _, err = s.reconcileRouteProxies(ctx); err != nil {
+		if rollbackErr := rollback(); rollbackErr != nil {
+			slog.Error("mihomo managed config rollback failed after proxy reconciliation", "error", rollbackErr)
+		}
+		s.reloadError = err.Error()
+		return nil, err
+	}
+	now := time.Now().UTC()
+	s.generatedAt, s.reloadedAt, s.reloadError = &now, &now, ""
+	lockTransferred = true
+	return func(committed bool) error {
+		defer s.mu.Unlock()
+		if committed {
+			return nil
+		}
+		if rollbackErr := rollback(); rollbackErr != nil {
+			s.reloadError = rollbackErr.Error()
+			return rollbackErr
+		}
+		s.generatedAt, s.reloadedAt = nil, nil
+		return nil
+	}, nil
+}
+
+func (s *MihomoService) managedConfigInputs(ctx context.Context) ([]mihomoConfigSubscription, []mihomoConfigNode, []mihomoConfigRoute, error) {
+	subscriptions, err := s.allMihomoSubscriptions(ctx, MihomoSubscriptionFilter{Status: StatusActive})
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	nodes, err := s.allMihomoNodes(ctx, MihomoNodeFilter{})
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	routes, err := s.allMihomoRoutes(ctx, MihomoRouteFilter{Status: StatusActive})
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
+	configSubscriptions := make([]mihomoConfigSubscription, 0, len(subscriptions))
+	for _, subscription := range subscriptions {
+		if s.encryptor == nil {
+			return nil, nil, nil, fmt.Errorf("secret encryptor is not configured")
+		}
+		rawURL, decryptErr := s.encryptor.Decrypt(string(subscription.URLCiphertext))
+		if decryptErr != nil {
+			return nil, nil, nil, fmt.Errorf("decrypt Mihomo subscription %d: %w", subscription.ID, decryptErr)
+		}
+		configSubscriptions = append(configSubscriptions, mihomoConfigSubscription{
+			ID: subscription.ID, Name: subscription.Name, ProviderKey: subscription.ProviderKey,
+			URL: rawURL, RefreshInterval: subscription.RefreshIntervalSeconds,
+		})
+	}
+	configNodes := make([]mihomoConfigNode, 0, len(nodes))
+	for _, node := range nodes {
+		if node.UpstreamRemovedAt != nil {
+			continue
+		}
+		configNodes = append(configNodes, mihomoConfigNode{
+			ID: node.ID, SubscriptionID: node.SubscriptionID, Name: node.OriginalName, Excluded: node.Excluded,
+		})
+	}
+	configRoutes := make([]mihomoConfigRoute, 0, len(routes))
+	for _, route := range routes {
+		relations, listErr := s.resources.ListRouteNodes(ctx, route.ID)
+		if listErr != nil {
+			return nil, nil, nil, listErr
+		}
+		nodeIDs := make([]int64, 0, len(relations))
+		for _, relation := range relations {
+			nodeIDs = append(nodeIDs, relation.NodeID)
+		}
+		configRoutes = append(configRoutes, mihomoConfigRoute{
+			ID: route.ID, Name: route.Name, Kind: route.Kind, ListenerPort: route.ListenerPort,
+			Selector: route.Selector, NodeIDs: nodeIDs,
+		})
+	}
+	return configSubscriptions, configNodes, configRoutes, nil
 }
 
 var mihomoGroups = map[string]string{
@@ -377,16 +760,37 @@ func (s *MihomoService) selectProxy(ctx context.Context, group, selection string
 }
 
 type mihomoProviderState struct {
-	Configured bool
-	UpdatedAt  string
-	Nodes      []MihomoNode
+	Configured       bool
+	UpdatedAt        string
+	SubscriptionInfo *mihomoSubscriptionInfo
+	Nodes            []MihomoNode
+}
+
+type mihomoSubscriptionInfo struct {
+	Download int64 `json:"Download"`
+	Upload   int64 `json:"Upload"`
+	Total    int64 `json:"Total"`
+	Expire   int64 `json:"Expire"`
 }
 
 func (s *MihomoService) providerState(ctx context.Context) (*mihomoProviderState, error) {
+	providers, err := s.providerStates(ctx)
+	if err != nil {
+		return nil, err
+	}
+	provider, ok := providers[s.cfg.ProviderName]
+	if !ok {
+		return &mihomoProviderState{}, nil
+	}
+	return &provider, nil
+}
+
+func (s *MihomoService) providerStates(ctx context.Context) (map[string]mihomoProviderState, error) {
 	var raw struct {
 		Providers map[string]struct {
-			UpdatedAt string `json:"updatedAt"`
-			Proxies   []struct {
+			UpdatedAt        string                  `json:"updatedAt"`
+			SubscriptionInfo *mihomoSubscriptionInfo `json:"subscriptionInfo"`
+			Proxies          []struct {
 				Name    string `json:"name"`
 				Alive   bool   `json:"alive"`
 				History []struct {
@@ -398,20 +802,81 @@ func (s *MihomoService) providerState(ctx context.Context) (*mihomoProviderState
 	if err := s.controllerJSON(ctx, http.MethodGet, "/providers/proxies", nil, &raw); err != nil {
 		return nil, err
 	}
-	p, ok := raw.Providers[s.cfg.ProviderName]
-	if !ok {
-		return &mihomoProviderState{}, nil
-	}
-	out := &mihomoProviderState{Configured: true, UpdatedAt: p.UpdatedAt, Nodes: make([]MihomoNode, 0, len(p.Proxies))}
-	for _, node := range p.Proxies {
-		delay := 0
-		if len(node.History) > 0 {
-			delay = node.History[len(node.History)-1].Delay
+	out := make(map[string]mihomoProviderState, len(raw.Providers))
+	for providerName, provider := range raw.Providers {
+		state := mihomoProviderState{Configured: true, UpdatedAt: provider.UpdatedAt, SubscriptionInfo: provider.SubscriptionInfo, Nodes: make([]MihomoNode, 0, len(provider.Proxies))}
+		for _, node := range provider.Proxies {
+			delay := 0
+			if len(node.History) > 0 {
+				delay = node.History[len(node.History)-1].Delay
+			}
+			state.Nodes = append(state.Nodes, MihomoNode{Name: node.Name, Alive: node.Alive, Delay: delay})
 		}
-		out.Nodes = append(out.Nodes, MihomoNode{Name: node.Name, Alive: node.Alive, Delay: delay})
+		sort.Slice(state.Nodes, func(i, j int) bool { return state.Nodes[i].Name < state.Nodes[j].Name })
+		out[providerName] = state
 	}
-	sort.Slice(out.Nodes, func(i, j int) bool { return out.Nodes[i].Name < out.Nodes[j].Name })
 	return out, nil
+}
+
+func (s *MihomoService) RefreshManagedSubscription(ctx context.Context, subscriptionID int64) error {
+	if s.resources == nil {
+		return infraerrors.ServiceUnavailable("MIHOMO_RESOURCES_UNAVAILABLE", "mihomo managed resources are not configured")
+	}
+	subscription, err := s.resources.GetSubscriptionByID(ctx, subscriptionID)
+	if err != nil {
+		return err
+	}
+	if subscription.Status != StatusActive {
+		return infraerrors.BadRequest("MIHOMO_SUBSCRIPTION_DISABLED", "mihomo subscription is disabled")
+	}
+	refreshErr := s.controllerJSON(ctx, http.MethodPut, "/providers/proxies/"+url.PathEscape(subscription.ProviderKey), map[string]any{}, nil)
+	if refreshErr != nil {
+		subscription.LastError = refreshErr.Error()
+		_ = s.resources.UpdateSubscription(ctx, subscription)
+		return refreshErr
+	}
+	providers, refreshErr := s.providerStates(ctx)
+	if refreshErr != nil {
+		subscription.LastError = refreshErr.Error()
+		_ = s.resources.UpdateSubscription(ctx, subscription)
+		return refreshErr
+	}
+	provider, ok := providers[subscription.ProviderKey]
+	if !ok {
+		refreshErr = fmt.Errorf("mihomo provider %q is missing after refresh", subscription.ProviderKey)
+		subscription.LastError = refreshErr.Error()
+		_ = s.resources.UpdateSubscription(ctx, subscription)
+		return refreshErr
+	}
+	observedAt := time.Now().UTC()
+	prefix := "[" + subscription.ProviderKey + "] "
+	managedNodes := make([]MihomoManagedNode, 0, len(provider.Nodes))
+	for _, node := range provider.Nodes {
+		originalName := strings.TrimPrefix(node.Name, prefix)
+		digest := sha256.Sum256([]byte(subscription.ProviderKey + "\x00" + originalName))
+		delay := node.Delay
+		managedNodes = append(managedNodes, MihomoManagedNode{
+			SubscriptionID: subscription.ID, NodeKey: fmt.Sprintf("%x", digest[:]), OriginalName: originalName,
+			DisplayName: originalName, Alive: node.Alive, DelayMS: &delay, Tags: []string{}, LastSeenAt: observedAt,
+		})
+	}
+	if err = s.resources.SyncNodes(ctx, subscription.ID, managedNodes, observedAt); err != nil {
+		return err
+	}
+	subscription.LastRefreshedAt = &observedAt
+	subscription.LastError = ""
+	if provider.SubscriptionInfo != nil {
+		used := provider.SubscriptionInfo.Upload + provider.SubscriptionInfo.Download
+		total := provider.SubscriptionInfo.Total
+		subscription.QuotaUsedBytes, subscription.QuotaTotalBytes = &used, &total
+		if provider.SubscriptionInfo.Expire > 0 {
+			expiresAt := time.Unix(provider.SubscriptionInfo.Expire, 0).UTC()
+			subscription.ExpiresAt = &expiresAt
+		} else {
+			subscription.ExpiresAt = nil
+		}
+	}
+	return s.resources.UpdateSubscription(ctx, subscription)
 }
 
 func (s *MihomoService) proxyGroups(ctx context.Context) (map[string]string, error) {
@@ -502,6 +967,119 @@ func (s *MihomoService) controllerSecret() (string, error) {
 
 func (s *MihomoService) loadPayload(ctx context.Context, raw []byte) error {
 	return s.controllerJSON(ctx, http.MethodPut, "/configs?force=true", map[string]string{"payload": string(raw)}, nil)
+}
+
+func (s *MihomoService) reconcileRouteProxies(ctx context.Context) (map[string]int64, error) {
+	if s.resources == nil {
+		return nil, infraerrors.ServiceUnavailable("MIHOMO_RESOURCES_UNAVAILABLE", "mihomo managed resources are not configured")
+	}
+	routes, err := s.allMihomoRoutes(ctx, MihomoRouteFilter{IncludeDeleted: true})
+	if err != nil {
+		return nil, err
+	}
+	existing, err := s.proxyRepo.ListActive(ctx)
+	if err != nil {
+		return nil, err
+	}
+	result := make(map[string]int64, len(routes))
+	for i := range routes {
+		route := &routes[i]
+		active := route.Status == StatusActive && route.DeletedAt == nil
+		if !active {
+			if route.ProxyID == nil {
+				continue
+			}
+			proxy, getErr := s.proxyRepo.GetByID(ctx, *route.ProxyID)
+			if getErr != nil {
+				return nil, getErr
+			}
+			if proxy.Status != StatusDisabled {
+				proxy.Status = StatusDisabled
+				if updateErr := s.proxyRepo.Update(ctx, proxy); updateErr != nil {
+					return nil, updateErr
+				}
+			}
+			continue
+		}
+
+		canonicalSource := fmt.Sprintf("mihomo:route:%d", route.ID)
+		var managed *Proxy
+		if route.ProxyID != nil {
+			managed, err = s.proxyRepo.GetByID(ctx, *route.ProxyID)
+			if err != nil {
+				return nil, err
+			}
+		} else {
+			legacySource := s.legacyManagedSource(route.ListenerPort)
+			for j := range existing {
+				candidate := &existing[j]
+				if candidate.ManagedSource != nil && (*candidate.ManagedSource == canonicalSource || legacySource != "" && *candidate.ManagedSource == legacySource) {
+					managed = candidate
+					break
+				}
+			}
+		}
+		for j := range existing {
+			candidate := &existing[j]
+			if managed != nil && candidate.ID == managed.ID {
+				continue
+			}
+			if candidate.Host == s.cfg.ProxyHost && candidate.Port == route.ListenerPort {
+				return nil, infraerrors.Conflict("MIHOMO_PROXY_CONFLICT", "another proxy already uses the Mihomo route endpoint")
+			}
+		}
+		if managed == nil {
+			source := canonicalSource
+			managed = &Proxy{
+				Name: "Mihomo · " + route.Name, Protocol: "socks5h", Host: s.cfg.ProxyHost,
+				Port: route.ListenerPort, Status: StatusActive, FallbackMode: FallbackModeNone,
+				ExpiryWarnDays: 7, ManagedSource: &source,
+			}
+			if err = s.proxyRepo.Create(ctx, managed); err != nil {
+				return nil, err
+			}
+			existing = append(existing, *managed)
+		} else {
+			changed := managed.Name != "Mihomo · "+route.Name || managed.Protocol != "socks5h" || managed.Host != s.cfg.ProxyHost || managed.Port != route.ListenerPort || managed.Status != StatusActive
+			managed.Name, managed.Protocol, managed.Host, managed.Port, managed.Status = "Mihomo · "+route.Name, "socks5h", s.cfg.ProxyHost, route.ListenerPort, StatusActive
+			if managed.ManagedSource == nil || !isLegacyMihomoSource(*managed.ManagedSource) {
+				if managed.ManagedSource == nil || *managed.ManagedSource != canonicalSource {
+					changed = true
+				}
+				managed.ManagedSource = &canonicalSource
+			}
+			if changed {
+				if err = s.proxyRepo.Update(ctx, managed); err != nil {
+					return nil, err
+				}
+			}
+		}
+		result[fmt.Sprint(route.ID)] = managed.ID
+		if route.ProxyID == nil || *route.ProxyID != managed.ID {
+			route.ProxyID = &managed.ID
+			if err = s.resources.UpdateRoute(ctx, route); err != nil {
+				return nil, err
+			}
+		}
+	}
+	return result, nil
+}
+
+func (s *MihomoService) legacyManagedSource(port int) string {
+	switch port {
+	case s.cfg.AutomaticPort:
+		return "mihomo:automatic"
+	case s.cfg.DirectionalPort:
+		return "mihomo:directional"
+	case s.cfg.DynamicPort:
+		return "mihomo:dynamic"
+	default:
+		return ""
+	}
+}
+
+func isLegacyMihomoSource(source string) bool {
+	return source == "mihomo:automatic" || source == "mihomo:directional" || source == "mihomo:dynamic"
 }
 
 func (s *MihomoService) reconcileManagedProxies(ctx context.Context) (map[string]int64, error) {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -262,6 +263,43 @@ func TestProxyUpdateSummaryDoesNotRevealCurrentEndpoint(t *testing.T) {
 	}
 	if strings.Contains(string(encoded), "current.example") || !strings.Contains(string(encoded), "next.example") {
 		t.Fatalf("summary must hide the current endpoint and show the requested endpoint: %s", encoded)
+	}
+}
+
+func TestMihomoApprovalSummaryShowsImportDetailsWithoutSubscriptionSecret(t *testing.T) {
+	summary := buildMihomoApprovalSummary("mihomo:import", &MihomoApprovalUpdate{
+		Kind: MihomoApprovalLegacyImport, Subscription: "encrypted-subscription-url",
+		SubscriptionName: "现有订阅", SubscriptionHost: "subscription.example", ImportProviderName: "legacy-provider",
+		ImportRoutes: []MihomoApprovalRoute{{
+			Name: "香港自动", Kind: "automatic", ListenerPort: 26784, ProxyID: 92,
+			NodeCount: 7, AccountCount: 3,
+		}},
+	})
+	encoded, err := json.Marshal(summary)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), "encrypted-subscription-url") {
+		t.Fatalf("mihomo summary leaked the encrypted subscription: %s", encoded)
+	}
+	if summary.Business.Object.Name != "Mihomo 旧配置导入" || len(summary.Business.Groups) != 2 {
+		t.Fatalf("unexpected import summary: %#v", summary.Business)
+	}
+	route := summary.Business.Groups[1]
+	want := map[string]any{
+		"route_name": "香港自动", "route_kind": "automatic", "listener_port": 26784,
+		"proxy_id": int64(92), "node_count": int64(7), "bound_account_count": int64(3),
+	}
+	for _, item := range route.Items {
+		if expected, ok := want[item.Key]; ok {
+			if !reflect.DeepEqual(item.After, expected) {
+				t.Fatalf("%s = %#v, want %#v", item.Key, item.After, expected)
+			}
+			delete(want, item.Key)
+		}
+	}
+	if len(want) != 0 {
+		t.Fatalf("missing route business details: %#v", want)
 	}
 }
 
