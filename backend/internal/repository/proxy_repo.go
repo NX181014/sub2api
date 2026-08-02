@@ -34,7 +34,7 @@ func newProxyRepositoryWithSQL(client *dbent.Client, sqlq sqlExecutor) *proxyRep
 }
 
 func (r *proxyRepository) Create(ctx context.Context, proxyIn *service.Proxy) error {
-	builder := r.client.Proxy.Create().
+	builder := clientFromContext(ctx, r.client).Proxy.Create().
 		SetName(proxyIn.Name).
 		SetProtocol(proxyIn.Protocol).
 		SetHost(proxyIn.Host).
@@ -54,6 +54,9 @@ func (r *proxyRepository) Create(ctx context.Context, proxyIn *service.Proxy) er
 	if proxyIn.BackupProxyID != nil {
 		builder.SetBackupProxyID(*proxyIn.BackupProxyID)
 	}
+	if proxyIn.ManagedSource != nil {
+		builder.SetManagedSource(*proxyIn.ManagedSource)
+	}
 
 	created, err := builder.Save(ctx)
 	if err == nil {
@@ -63,7 +66,7 @@ func (r *proxyRepository) Create(ctx context.Context, proxyIn *service.Proxy) er
 }
 
 func (r *proxyRepository) GetByID(ctx context.Context, id int64) (*service.Proxy, error) {
-	m, err := r.client.Proxy.Get(ctx, id)
+	m, err := clientFromContext(ctx, r.client).Proxy.Get(ctx, id)
 	if err != nil {
 		if dbent.IsNotFound(err) {
 			return nil, service.ErrProxyNotFound
@@ -78,7 +81,7 @@ func (r *proxyRepository) ListByIDs(ctx context.Context, ids []int64) ([]service
 		return []service.Proxy{}, nil
 	}
 
-	proxies, err := r.client.Proxy.Query().
+	proxies, err := clientFromContext(ctx, r.client).Proxy.Query().
 		Where(proxy.IDIn(ids...)).
 		All(ctx)
 	if err != nil {
@@ -275,7 +278,7 @@ func enqueueProxyProbeAccountChanges(ctx context.Context, exec sqlExecutor, acco
 }
 
 func (r *proxyRepository) Delete(ctx context.Context, id int64) error {
-	_, err := r.client.Proxy.Delete().Where(proxy.IDEQ(id)).Exec(ctx)
+	_, err := clientFromContext(ctx, r.client).Proxy.Delete().Where(proxy.IDEQ(id)).Exec(ctx)
 	return err
 }
 
@@ -437,7 +440,7 @@ func proxyListOrder(params pagination.PaginationParams) []func(*entsql.Selector)
 }
 
 func (r *proxyRepository) ListActive(ctx context.Context) ([]service.Proxy, error) {
-	proxies, err := r.client.Proxy.Query().
+	proxies, err := clientFromContext(ctx, r.client).Proxy.Query().
 		Where(proxy.StatusEQ(service.StatusActive)).
 		All(ctx)
 	if err != nil {
@@ -597,6 +600,7 @@ func proxyEntityToService(m *dbent.Proxy) *service.Proxy {
 		FallbackMode:   m.FallbackMode,
 		BackupProxyID:  m.BackupProxyID,
 		ExpiryWarnDays: m.ExpiryWarnDays,
+		ManagedSource:  m.ManagedSource,
 	}
 	if m.Username != nil {
 		out.Username = *m.Username

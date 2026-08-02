@@ -477,19 +477,22 @@ func ProxyFromService(p *service.Proxy) *Proxy {
 		return nil
 	}
 	return &Proxy{
-		ID:             p.ID,
-		Name:           p.Name,
-		Protocol:       p.Protocol,
-		Host:           p.Host,
-		Port:           p.Port,
-		Username:       p.Username,
-		Status:         p.Status,
-		CreatedAt:      p.CreatedAt,
-		UpdatedAt:      p.UpdatedAt,
-		ExpiresAt:      p.ExpiresAt,
-		FallbackMode:   p.FallbackMode,
-		BackupProxyID:  p.BackupProxyID,
-		ExpiryWarnDays: p.ExpiryWarnDays,
+		ID:                   p.ID,
+		Name:                 p.Name,
+		Protocol:             p.Protocol,
+		Host:                 p.Host,
+		Port:                 p.Port,
+		Username:             p.Username,
+		Status:               p.Status,
+		CreatedAt:            p.CreatedAt,
+		UpdatedAt:            p.UpdatedAt,
+		ExpiresAt:            p.ExpiresAt,
+		FallbackMode:         p.FallbackMode,
+		BackupProxyID:        p.BackupProxyID,
+		ExpiryWarnDays:       p.ExpiryWarnDays,
+		ManagedSource:        p.ManagedSource,
+		ConnectionConfigured: p.Host != "" && p.Port > 0,
+		AuthConfigured:       p.Username != "" || p.Password != "",
 	}
 }
 
@@ -528,6 +531,9 @@ func ProxyFromServiceAdmin(p *service.Proxy) *AdminProxy {
 	}
 	return &AdminProxy{
 		Proxy:    *base,
+		Host:     p.Host,
+		Port:     p.Port,
+		Username: p.Username,
 		Password: p.Password,
 	}
 }

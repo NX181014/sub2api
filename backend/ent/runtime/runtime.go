@@ -1885,6 +1885,10 @@ func init() {
 	proxyDescExpiryWarnDays := proxyFields[10].Descriptor()
 	// proxy.DefaultExpiryWarnDays holds the default value on creation for the expiry_warn_days field.
 	proxy.DefaultExpiryWarnDays = proxyDescExpiryWarnDays.Default.(int)
+	// proxyDescManagedSource is the schema descriptor for managed_source field.
+	proxyDescManagedSource := proxyFields[11].Descriptor()
+	// proxy.ManagedSourceValidator is a validator for the "managed_source" field. It is called by the builders before save.
+	proxy.ManagedSourceValidator = proxyDescManagedSource.Validators[0].(func(string) error)
 	purchasesourceMixin := schema.PurchaseSource{}.Mixin()
 	purchasesourceMixinFields0 := purchasesourceMixin[0].Fields()
 	_ = purchasesourceMixinFields0

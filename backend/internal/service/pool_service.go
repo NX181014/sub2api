@@ -538,12 +538,13 @@ type PoolRepository interface {
 }
 
 type PoolService struct {
-	repo         PoolRepository
-	approvalRepo PoolApprovalRepository
-	adminService AdminService
-	entClient    *dbent.Client
-	settings     *SettingService
-	tokenCache   TokenCacheInvalidator
+	repo                   PoolRepository
+	approvalRepo           PoolApprovalRepository
+	adminService           AdminService
+	entClient              *dbent.Client
+	settings               *SettingService
+	tokenCache             TokenCacheInvalidator
+	mihomoApprovalExecutor MihomoApprovalExecutor
 }
 
 func NewPoolService(repo PoolRepository, approvalRepo PoolApprovalRepository, adminService AdminService, entClient *dbent.Client, settings *SettingService) *PoolService {
@@ -553,6 +554,18 @@ func NewPoolService(repo PoolRepository, approvalRepo PoolApprovalRepository, ad
 func (s *PoolService) SetTokenCacheInvalidator(invalidator TokenCacheInvalidator) {
 	if s != nil {
 		s.tokenCache = invalidator
+	}
+}
+
+type MihomoApprovalExecutor interface {
+	ValidateApproval(ctx context.Context, resourceKey string, update MihomoApprovalUpdate) error
+	ApprovalRevision(ctx context.Context, resourceKey string) (string, error)
+	ApplyApproved(ctx context.Context, update MihomoApprovalUpdate) (finalize func(committed bool) error, err error)
+}
+
+func (s *PoolService) SetMihomoApprovalExecutor(executor MihomoApprovalExecutor) {
+	if s != nil {
+		s.mihomoApprovalExecutor = executor
 	}
 }
 

@@ -187,6 +187,20 @@ func (_c *ProxyCreate) SetNillableExpiryWarnDays(v *int) *ProxyCreate {
 	return _c
 }
 
+// SetManagedSource sets the "managed_source" field.
+func (_c *ProxyCreate) SetManagedSource(v string) *ProxyCreate {
+	_c.mutation.SetManagedSource(v)
+	return _c
+}
+
+// SetNillableManagedSource sets the "managed_source" field if the given value is not nil.
+func (_c *ProxyCreate) SetNillableManagedSource(v *string) *ProxyCreate {
+	if v != nil {
+		_c.SetManagedSource(*v)
+	}
+	return _c
+}
+
 // AddAccountIDs adds the "accounts" edge to the Account entity by IDs.
 func (_c *ProxyCreate) AddAccountIDs(ids ...int64) *ProxyCreate {
 	_c.mutation.AddAccountIDs(ids...)
@@ -337,6 +351,11 @@ func (_c *ProxyCreate) check() error {
 	if _, ok := _c.mutation.ExpiryWarnDays(); !ok {
 		return &ValidationError{Name: "expiry_warn_days", err: errors.New(`ent: missing required field "Proxy.expiry_warn_days"`)}
 	}
+	if v, ok := _c.mutation.ManagedSource(); ok {
+		if err := proxy.ManagedSourceValidator(v); err != nil {
+			return &ValidationError{Name: "managed_source", err: fmt.Errorf(`ent: validator failed for field "Proxy.managed_source": %w`, err)}
+		}
+	}
 	return nil
 }
 
@@ -415,6 +434,10 @@ func (_c *ProxyCreate) createSpec() (*Proxy, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.ExpiryWarnDays(); ok {
 		_spec.SetField(proxy.FieldExpiryWarnDays, field.TypeInt, value)
 		_node.ExpiryWarnDays = value
+	}
+	if value, ok := _c.mutation.ManagedSource(); ok {
+		_spec.SetField(proxy.FieldManagedSource, field.TypeString, value)
+		_node.ManagedSource = &value
 	}
 	if nodes := _c.mutation.AccountsIDs(); len(nodes) > 0 {
 		edge := &sqlgraph.EdgeSpec{
@@ -712,6 +735,9 @@ func (u *ProxyUpsertOne) UpdateNewValues() *ProxyUpsertOne {
 	u.create.conflict = append(u.create.conflict, sql.ResolveWith(func(s *sql.UpdateSet) {
 		if _, exists := u.create.mutation.CreatedAt(); exists {
 			s.SetIgnore(proxy.FieldCreatedAt)
+		}
+		if _, exists := u.create.mutation.ManagedSource(); exists {
+			s.SetIgnore(proxy.FieldManagedSource)
 		}
 	}))
 	return u
@@ -1153,6 +1179,9 @@ func (u *ProxyUpsertBulk) UpdateNewValues() *ProxyUpsertBulk {
 		for _, b := range u.create.builders {
 			if _, exists := b.mutation.CreatedAt(); exists {
 				s.SetIgnore(proxy.FieldCreatedAt)
+			}
+			if _, exists := b.mutation.ManagedSource(); exists {
+				s.SetIgnore(proxy.FieldManagedSource)
 			}
 		}
 	}))

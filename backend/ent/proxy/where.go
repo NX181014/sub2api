@@ -125,6 +125,11 @@ func ExpiryWarnDays(v int) predicate.Proxy {
 	return predicate.Proxy(sql.FieldEQ(FieldExpiryWarnDays, v))
 }
 
+// ManagedSource applies equality check predicate on the "managed_source" field. It's identical to ManagedSourceEQ.
+func ManagedSource(v string) predicate.Proxy {
+	return predicate.Proxy(sql.FieldEQ(FieldManagedSource, v))
+}
+
 // CreatedAtEQ applies the EQ predicate on the "created_at" field.
 func CreatedAtEQ(v time.Time) predicate.Proxy {
 	return predicate.Proxy(sql.FieldEQ(FieldCreatedAt, v))
@@ -888,6 +893,81 @@ func ExpiryWarnDaysLT(v int) predicate.Proxy {
 // ExpiryWarnDaysLTE applies the LTE predicate on the "expiry_warn_days" field.
 func ExpiryWarnDaysLTE(v int) predicate.Proxy {
 	return predicate.Proxy(sql.FieldLTE(FieldExpiryWarnDays, v))
+}
+
+// ManagedSourceEQ applies the EQ predicate on the "managed_source" field.
+func ManagedSourceEQ(v string) predicate.Proxy {
+	return predicate.Proxy(sql.FieldEQ(FieldManagedSource, v))
+}
+
+// ManagedSourceNEQ applies the NEQ predicate on the "managed_source" field.
+func ManagedSourceNEQ(v string) predicate.Proxy {
+	return predicate.Proxy(sql.FieldNEQ(FieldManagedSource, v))
+}
+
+// ManagedSourceIn applies the In predicate on the "managed_source" field.
+func ManagedSourceIn(vs ...string) predicate.Proxy {
+	return predicate.Proxy(sql.FieldIn(FieldManagedSource, vs...))
+}
+
+// ManagedSourceNotIn applies the NotIn predicate on the "managed_source" field.
+func ManagedSourceNotIn(vs ...string) predicate.Proxy {
+	return predicate.Proxy(sql.FieldNotIn(FieldManagedSource, vs...))
+}
+
+// ManagedSourceGT applies the GT predicate on the "managed_source" field.
+func ManagedSourceGT(v string) predicate.Proxy {
+	return predicate.Proxy(sql.FieldGT(FieldManagedSource, v))
+}
+
+// ManagedSourceGTE applies the GTE predicate on the "managed_source" field.
+func ManagedSourceGTE(v string) predicate.Proxy {
+	return predicate.Proxy(sql.FieldGTE(FieldManagedSource, v))
+}
+
+// ManagedSourceLT applies the LT predicate on the "managed_source" field.
+func ManagedSourceLT(v string) predicate.Proxy {
+	return predicate.Proxy(sql.FieldLT(FieldManagedSource, v))
+}
+
+// ManagedSourceLTE applies the LTE predicate on the "managed_source" field.
+func ManagedSourceLTE(v string) predicate.Proxy {
+	return predicate.Proxy(sql.FieldLTE(FieldManagedSource, v))
+}
+
+// ManagedSourceContains applies the Contains predicate on the "managed_source" field.
+func ManagedSourceContains(v string) predicate.Proxy {
+	return predicate.Proxy(sql.FieldContains(FieldManagedSource, v))
+}
+
+// ManagedSourceHasPrefix applies the HasPrefix predicate on the "managed_source" field.
+func ManagedSourceHasPrefix(v string) predicate.Proxy {
+	return predicate.Proxy(sql.FieldHasPrefix(FieldManagedSource, v))
+}
+
+// ManagedSourceHasSuffix applies the HasSuffix predicate on the "managed_source" field.
+func ManagedSourceHasSuffix(v string) predicate.Proxy {
+	return predicate.Proxy(sql.FieldHasSuffix(FieldManagedSource, v))
+}
+
+// ManagedSourceIsNil applies the IsNil predicate on the "managed_source" field.
+func ManagedSourceIsNil() predicate.Proxy {
+	return predicate.Proxy(sql.FieldIsNull(FieldManagedSource))
+}
+
+// ManagedSourceNotNil applies the NotNil predicate on the "managed_source" field.
+func ManagedSourceNotNil() predicate.Proxy {
+	return predicate.Proxy(sql.FieldNotNull(FieldManagedSource))
+}
+
+// ManagedSourceEqualFold applies the EqualFold predicate on the "managed_source" field.
+func ManagedSourceEqualFold(v string) predicate.Proxy {
+	return predicate.Proxy(sql.FieldEqualFold(FieldManagedSource, v))
+}
+
+// ManagedSourceContainsFold applies the ContainsFold predicate on the "managed_source" field.
+func ManagedSourceContainsFold(v string) predicate.Proxy {
+	return predicate.Proxy(sql.FieldContainsFold(FieldManagedSource, v))
 }
 
 // HasAccounts applies the HasEdge predicate on the "accounts" edge.

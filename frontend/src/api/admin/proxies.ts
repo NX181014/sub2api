@@ -14,6 +14,7 @@ import type {
   AdminDataPayload,
   AdminDataImportResult
 } from '@/types'
+import type { PoolApproval } from './sharedPool'
 
 /**
  * List all proxies with pagination
@@ -93,8 +94,11 @@ export async function create(proxyData: CreateProxyRequest): Promise<Proxy> {
  * @param updates - Fields to update
  * @returns Updated proxy
  */
-export async function update(id: number, updates: UpdateProxyRequest): Promise<Proxy> {
-  const { data } = await apiClient.put<Proxy>(`/admin/proxies/${id}`, updates)
+export async function update(id: number, updates: UpdateProxyRequest): Promise<{
+  approval_required: true
+  approval: PoolApproval
+}> {
+  const { data } = await apiClient.put<{ approval_required: true; approval: PoolApproval }>(`/admin/proxies/${id}`, updates)
   return data
 }
 
@@ -114,8 +118,8 @@ export async function deleteProxy(id: number): Promise<{ message: string }> {
  * @param status - New status
  * @returns Updated proxy
  */
-export async function toggleStatus(id: number, status: 'active' | 'inactive'): Promise<Proxy> {
-  return update(id, { status })
+export async function toggleStatus(id: number, status: 'active' | 'inactive', approvalReason: string) {
+  return update(id, { status, approval_reason: approvalReason })
 }
 
 /**

@@ -2,7 +2,9 @@
   <AppLayout>
     <TablePageLayout>
       <template #filters>
-        <div class="flex flex-wrap items-center gap-3">
+        <div class="space-y-4">
+          <MihomoPanel @approval-submitted="handleApprovalSubmitted" />
+          <div class="flex flex-wrap items-center gap-3">
           <!-- Left: Search + Filters -->
           <div class="relative w-full sm:w-64">
             <Icon
@@ -64,20 +66,15 @@
               <Icon name="shield" size="md" class="mr-2" :class="batchQualityChecking ? 'animate-pulse' : ''" />
               {{ t('admin.proxies.batchQualityCheck') }}
             </button>
-            <button
-              @click="openBatchDelete"
-              :disabled="selectedCount === 0"
-              class="btn btn-danger"
-              :title="t('admin.proxies.batchDeleteAction')"
-            >
-              <Icon name="trash" size="md" class="mr-2" />
-              {{ t('admin.proxies.batchDeleteAction') }}
-            </button>
             <button @click="showImportData = true" class="btn btn-secondary">
               {{ t('admin.proxies.dataImport') }}
             </button>
-            <button @click="showExportDataDialog = true" class="btn btn-secondary">
+            <button @click="openExportApproval" class="btn btn-secondary">
               {{ selectedCount > 0 ? t('admin.proxies.dataExportSelected') : t('admin.proxies.dataExport') }}
+            </button>
+            <button @click="showProxyApprovalCenter = true" class="btn btn-secondary">
+              <Icon name="shield" size="md" class="mr-2" />
+              {{ t('admin.sharedPool.approval.title') }}
             </button>
             <button @click="showCreateModal = true" class="btn btn-primary">
               <Icon name="plus" size="md" class="mr-2" />
@@ -85,10 +82,11 @@
             </button>
           </div>
         </div>
+        </div>
       </template>
 
       <template #table>
-        <div ref="proxyTableRef" class="flex min-h-0 flex-1 flex-col overflow-hidden">
+        <div ref="proxyTableRef" class="hidden min-h-0 flex-1 flex-col overflow-hidden lg:flex">
         <DataTable
           :columns="columns"
           :data="proxies"
@@ -133,54 +131,15 @@
           </template>
 
           <template #cell-address="{ row }">
-            <div class="flex items-center gap-1.5">
-              <code class="code text-xs">{{ row.host }}:{{ row.port }}</code>
-              <div class="relative">
-                <button
-                  type="button"
-                  class="rounded p-0.5 text-gray-400 hover:text-primary-600 dark:hover:text-primary-400"
-                  :title="t('admin.proxies.copyProxyUrl')"
-                  @click.stop="copyProxyUrl(row)"
-                  @contextmenu.prevent="toggleCopyMenu(row.id)"
-                >
-                  <Icon name="copy" size="sm" />
-                </button>
-                <!-- 右键展开格式选择菜单 -->
-                <div
-                  v-if="copyMenuProxyId === row.id"
-                  class="absolute left-0 top-full z-50 mt-1 w-auto min-w-[180px] rounded-lg border border-gray-200 bg-white py-1 shadow-lg dark:border-dark-500 dark:bg-dark-700"
-                >
-                  <button
-                    v-for="fmt in getCopyFormats(row)"
-                    :key="fmt.label"
-                    class="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-gray-100 dark:hover:bg-dark-600"
-                    @click.stop="copyFormat(fmt.value)"
-                  >
-                    <span class="truncate font-mono text-gray-600 dark:text-gray-300">{{ fmt.label }}</span>
-                  </button>
-                </div>
-              </div>
-            </div>
+            <span :class="['badge', row.connection_configured ? 'badge-success' : 'badge-danger']">
+              {{ t(row.connection_configured ? 'admin.proxies.connectionConfigured' : 'admin.proxies.connectionMissing') }}
+            </span>
           </template>
 
           <template #cell-auth="{ row }">
-            <div v-if="row.username || row.password" class="flex items-center gap-1.5">
-              <div class="flex flex-col text-xs">
-                <span v-if="row.username" class="text-gray-700 dark:text-gray-200">{{ row.username }}</span>
-                <span v-if="row.password" class="font-mono text-gray-500 dark:text-gray-400">
-                  {{ visiblePasswordIds.has(row.id) ? row.password : '••••••' }}
-                </span>
-              </div>
-              <button
-                v-if="row.password"
-                type="button"
-                class="ml-1 rounded p-0.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
-                @click.stop="visiblePasswordIds.has(row.id) ? visiblePasswordIds.delete(row.id) : visiblePasswordIds.add(row.id)"
-              >
-                <Icon :name="visiblePasswordIds.has(row.id) ? 'eyeOff' : 'eye'" size="sm" />
-              </button>
-            </div>
-            <span v-else class="text-sm text-gray-400">-</span>
+            <span :class="['badge', row.auth_configured ? 'badge-primary' : 'badge-gray']">
+              {{ t(row.auth_configured ? 'admin.proxies.authConfigured' : 'admin.proxies.authNotConfigured') }}
+            </span>
           </template>
 
           <template #cell-location="{ row }">
@@ -326,18 +285,19 @@
                 <span class="text-xs">{{ t('admin.proxies.qualityCheck') }}</span>
               </button>
               <button
-                @click="handleEdit(row)"
+                @click="openProxyCredentialRequest(row)"
+                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-primary-600 dark:hover:bg-dark-700 dark:hover:text-primary-400"
+              >
+                <Icon name="eye" size="sm" />
+                <span class="text-xs">{{ t('common.view') }}</span>
+              </button>
+              <button
+                v-if="!row.managed_source"
+                @click="openProxyCredentialRequest(row)"
                 class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-primary-600 dark:hover:bg-dark-700 dark:hover:text-primary-400"
               >
                 <Icon name="edit" size="sm" />
                 <span class="text-xs">{{ t('common.edit') }}</span>
-              </button>
-              <button
-                @click="handleDelete(row)"
-                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20 dark:hover:text-red-400"
-              >
-                <Icon name="trash" size="sm" />
-                <span class="text-xs">{{ t('common.delete') }}</span>
               </button>
             </div>
           </template>
@@ -352,6 +312,51 @@
           </template>
         </DataTable>
         </div>
+        <div class="grid gap-3 p-1 lg:hidden">
+          <article
+            v-for="proxy in proxies"
+            :key="proxy.id"
+            class="min-w-0 rounded-lg border border-gray-200 bg-white p-4 dark:border-dark-700 dark:bg-dark-800"
+          >
+            <div class="flex min-w-0 items-start justify-between gap-3">
+              <div class="min-w-0 flex-1">
+                <div class="flex min-w-0 flex-wrap items-center gap-2">
+                  <h3 class="truncate font-semibold text-gray-900 dark:text-white" :title="proxy.name">{{ proxy.name }}</h3>
+                  <span class="badge badge-gray">{{ proxy.protocol.toUpperCase() }}</span>
+                  <span v-if="proxy.managed_source" class="badge badge-primary">Mihomo</span>
+                </div>
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">#{{ proxy.id }} · {{ formatLocation(proxy) || '-' }}</p>
+              </div>
+              <span :class="['badge shrink-0 whitespace-nowrap', proxy.status === 'active' ? 'badge-success' : 'badge-danger']">
+                {{ t('admin.accounts.status.' + proxy.status) }}
+              </span>
+            </div>
+            <dl class="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
+              <div>
+                <dt class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.proxies.columns.address') }}</dt>
+                <dd class="mt-1 font-medium text-gray-800 dark:text-gray-100">{{ t(proxy.connection_configured ? 'admin.proxies.connectionConfigured' : 'admin.proxies.connectionMissing') }}</dd>
+              </div>
+              <div>
+                <dt class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.proxies.columns.auth') }}</dt>
+                <dd class="mt-1 font-medium text-gray-800 dark:text-gray-100">{{ t(proxy.auth_configured ? 'admin.proxies.authConfigured' : 'admin.proxies.authNotConfigured') }}</dd>
+              </div>
+              <div>
+                <dt class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.proxies.columns.accounts') }}</dt>
+                <dd class="mt-1 font-medium text-gray-800 dark:text-gray-100">{{ proxy.account_count || 0 }}</dd>
+              </div>
+              <div>
+                <dt class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.proxies.columns.latency') }}</dt>
+                <dd class="mt-1 font-medium text-gray-800 dark:text-gray-100">{{ typeof proxy.latency_ms === 'number' ? `${proxy.latency_ms}ms` : '-' }}</dd>
+              </div>
+            </dl>
+            <div class="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
+              <button type="button" class="btn btn-secondary min-h-11 px-2" @click="handleTestConnection(proxy)">{{ t('admin.proxies.testConnection') }}</button>
+              <button type="button" class="btn btn-secondary min-h-11 px-2" @click="openProxyCredentialRequest(proxy)">{{ t('common.view') }}</button>
+              <button v-if="!proxy.managed_source" type="button" class="btn btn-secondary min-h-11 px-2" @click="openProxyCredentialRequest(proxy)">{{ t('common.edit') }}</button>
+            </div>
+          </article>
+          <EmptyState v-if="!loading && proxies.length === 0" :title="t('admin.proxies.noProxiesYet')" :description="t('admin.proxies.createFirstProxy')" :action-text="t('admin.proxies.createProxy')" @action="showCreateModal = true" />
+        </div>
       </template>
 
       <template #pagination>
@@ -365,6 +370,49 @@
         />
       </template>
     </TablePageLayout>
+
+    <ProxyApprovalCenter
+      :show="showProxyApprovalCenter"
+      @close="showProxyApprovalCenter = false"
+      @proxy-revealed="handleProxyRevealed"
+      @export-revealed="handleExportRevealed"
+    />
+
+    <BaseDialog :show="showApprovalRequestDialog" :title="approvalRequestTitle" width="normal" @close="closeApprovalRequest">
+      <form id="proxy-approval-request-form" class="space-y-4" @submit.prevent="submitApprovalRequest">
+        <div class="rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm dark:border-dark-700 dark:bg-dark-900/40">
+          {{ approvalRequestAction === 'export' ? `导出 ${approvalRequestIDs.length || '全部'} 个代理的连接信息` : `查看并编辑 ${approvalRequestProxy?.name || ''} 的连接信息` }}
+        </div>
+        <div>
+          <label for="proxy-approval-reason" class="input-label">用途与原因</label>
+          <textarea id="proxy-approval-reason" v-model.trim="approvalRequestReason" required rows="3" class="input" placeholder="说明查看或导出的业务用途，供另一位管理员审核"></textarea>
+        </div>
+      </form>
+      <template #footer>
+        <div class="flex justify-end gap-2">
+          <button type="button" class="btn btn-secondary min-h-11" @click="closeApprovalRequest">取消</button>
+          <button type="submit" form="proxy-approval-request-form" class="btn btn-primary min-h-11" :disabled="submitting || !approvalRequestReason">{{ submitting ? '提交中…' : '提交审核' }}</button>
+        </div>
+      </template>
+    </BaseDialog>
+
+    <BaseDialog :show="Boolean(revealedProxy)" :title="`代理连接信息 · ${revealedProxy?.name || ''}`" width="normal" @close="closeRevealedProxy">
+      <div v-if="revealedProxy" class="space-y-3">
+        <div class="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/20 dark:text-amber-300">仅本次显示，关闭后即从页面内存清除。</div>
+        <dl class="grid gap-3 text-sm sm:grid-cols-2">
+          <div><dt class="text-gray-500">服务器</dt><dd class="mt-1 break-all font-mono text-gray-900 dark:text-white">{{ revealedProxy.host }}</dd></div>
+          <div><dt class="text-gray-500">端口</dt><dd class="mt-1 font-mono text-gray-900 dark:text-white">{{ revealedProxy.port }}</dd></div>
+          <div><dt class="text-gray-500">用户名</dt><dd class="mt-1 break-all font-mono text-gray-900 dark:text-white">{{ revealedProxy.username || '-' }}</dd></div>
+          <div><dt class="text-gray-500">密码</dt><dd class="mt-1 break-all font-mono text-gray-900 dark:text-white">{{ revealedProxy.password || '-' }}</dd></div>
+        </dl>
+      </div>
+      <template #footer>
+        <div class="flex flex-wrap justify-end gap-2">
+          <button type="button" class="btn btn-secondary min-h-11" @click="copyRevealedProxy">复制连接</button>
+          <button v-if="revealedProxy && !revealedProxy.managed_source" type="button" class="btn btn-primary min-h-11" @click="editRevealedProxy">编辑并提交审核</button>
+        </div>
+      </template>
+    </BaseDialog>
 
     <!-- Create Proxy Modal -->
     <BaseDialog
@@ -760,6 +808,10 @@
           <label class="input-label">{{ t('admin.proxies.backupProxy') }}</label>
           <Select v-model="editForm.backup_proxy_id" :options="backupProxyOptions(editingProxy?.id)" />
         </div>
+        <div>
+          <label class="input-label" for="proxy-update-reason">变更原因</label>
+          <textarea id="proxy-update-reason" v-model.trim="editForm.approval_reason" required rows="3" class="input" placeholder="说明变更内容和影响范围，供另一位管理员审核"></textarea>
+        </div>
 
       </form>
 
@@ -800,39 +852,6 @@
         </div>
       </template>
     </BaseDialog>
-
-    <!-- Delete Confirmation Dialog -->
-    <ConfirmDialog
-      :show="showDeleteDialog"
-      :title="t('admin.proxies.deleteProxy')"
-      :message="t('admin.proxies.deleteConfirm', { name: deletingProxy?.name })"
-      :confirm-text="t('common.delete')"
-      :cancel-text="t('common.cancel')"
-      :danger="true"
-      @confirm="confirmDelete"
-      @cancel="showDeleteDialog = false"
-    />
-
-    <!-- Batch Delete Confirmation Dialog -->
-    <ConfirmDialog
-      :show="showBatchDeleteDialog"
-      :title="t('admin.proxies.batchDelete')"
-      :message="t('admin.proxies.batchDeleteConfirm', { count: selectedCount })"
-      :confirm-text="t('common.delete')"
-      :cancel-text="t('common.cancel')"
-      :danger="true"
-      @confirm="confirmBatchDelete"
-      @cancel="showBatchDeleteDialog = false"
-    />
-    <ConfirmDialog
-      :show="showExportDataDialog"
-      :title="t('admin.proxies.dataExport')"
-      :message="t('admin.proxies.dataExportConfirmMessage')"
-      :confirm-text="t('admin.proxies.dataExportConfirm')"
-      :cancel-text="t('common.cancel')"
-      @confirm="handleExportData"
-      @cancel="showExportDataDialog = false"
-    />
 
     <ImportDataModal
       :show="showImportData"
@@ -968,20 +987,21 @@ import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { adminAPI } from '@/api/admin'
-import type { Proxy, ProxyAccountSummary, ProxyProtocol, ProxyQualityCheckResult } from '@/types'
+import type { Proxy, ProxyAccountSummary, ProxyProtocol, ProxyQualityCheckResult, RevealedProxy } from '@/types'
 import type { Column } from '@/components/common/types'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import TablePageLayout from '@/components/layout/TablePageLayout.vue'
 import DataTable from '@/components/common/DataTable.vue'
 import Pagination from '@/components/common/Pagination.vue'
 import BaseDialog from '@/components/common/BaseDialog.vue'
-import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
 import ImportDataModal from '@/components/admin/proxy/ImportDataModal.vue'
 import Select from '@/components/common/Select.vue'
 import ProxyAdBanner from '@/components/common/ProxyAdBanner.vue'
 import Icon from '@/components/icons/Icon.vue'
 import PlatformTypeBadge from '@/components/common/PlatformTypeBadge.vue'
+import MihomoPanel from '@/components/admin/proxy/MihomoPanel.vue'
+import ProxyApprovalCenter from '@/components/admin/proxy/ProxyApprovalCenter.vue'
 import { useClipboard } from '@/composables/useClipboard'
 import { useSwipeSelect } from '@/composables/useSwipeSelect'
 import { useTableSelection } from '@/composables/useTableSelection'
@@ -1038,8 +1058,6 @@ const editStatusOptions = computed(() => [
 ])
 
 const proxies = ref<Proxy[]>([])
-const visiblePasswordIds = reactive(new Set<number>())
-const copyMenuProxyId = ref<number | null>(null)
 const loading = ref(false)
 const searchQuery = ref('')
 const filters = reactive({
@@ -1063,12 +1081,15 @@ const showEditModal = ref(false)
 const editPasswordVisible = ref(false)
 const editPasswordDirty = ref(false)
 const showImportData = ref(false)
-const showDeleteDialog = ref(false)
-const showBatchDeleteDialog = ref(false)
-const showExportDataDialog = ref(false)
+const showProxyApprovalCenter = ref(false)
+const showApprovalRequestDialog = ref(false)
+const approvalRequestAction = ref<'view' | 'export'>('view')
+const approvalRequestProxy = ref<Proxy | null>(null)
+const approvalRequestIDs = ref<number[]>([])
+const approvalRequestReason = ref('')
+const revealedProxy = ref<RevealedProxy | null>(null)
 const showAccountsModal = ref(false)
 const submitting = ref(false)
-const exportingData = ref(false)
 const testingProxyIds = ref<Set<number>>(new Set())
 const qualityCheckingProxyIds = ref<Set<number>>(new Set())
 const batchTesting = ref(false)
@@ -1081,8 +1102,6 @@ const {
   isSelected,
   select,
   deselect,
-  clear: clearSelectedProxies,
-  removeMany: removeSelectedProxies,
   toggleVisible,
   batchUpdate
 } = useTableSelection<Proxy>({
@@ -1099,7 +1118,6 @@ const accountsProxy = ref<Proxy | null>(null)
 const proxyAccounts = ref<ProxyAccountSummary[]>([])
 const accountsLoading = ref(false)
 const editingProxy = ref<Proxy | null>(null)
-const deletingProxy = ref<Proxy | null>(null)
 const showQualityReportDialog = ref(false)
 const qualityReportProxy = ref<Proxy | null>(null)
 const qualityReport = ref<ProxyQualityCheckResult | null>(null)
@@ -1146,6 +1164,7 @@ const editForm = reactive({
   fallback_mode: 'none' as 'none' | 'proxy' | 'direct',
   backup_proxy_id: null as number | null,
   expiry_warn_days: 7 as number,
+  approval_reason: '',
 })
 
 const allProxiesForBackup = ref<Proxy[]>([])
@@ -1155,7 +1174,7 @@ const loadBackupProxyOptions = async () => {
 const backupProxyOptions = (excludeId?: number) =>
   allProxiesForBackup.value
     .filter(p => p.id !== excludeId)
-    .map(p => ({ label: `${p.name} (${p.host}:${p.port})`, value: p.id }))
+    .map(p => ({ label: p.name, value: p.id }))
 
 let abortController: AbortController | null = null
 
@@ -1402,7 +1421,7 @@ const handleCreateProxy = async () => {
   }
 }
 
-const handleEdit = (proxy: Proxy) => {
+const handleEdit = (proxy: RevealedProxy) => {
   editingProxy.value = proxy
   editForm.name = proxy.name
   editForm.protocol = proxy.protocol
@@ -1415,6 +1434,7 @@ const handleEdit = (proxy: Proxy) => {
   editForm.fallback_mode = proxy.fallback_mode || 'none'
   editForm.backup_proxy_id = proxy.backup_proxy_id ?? null
   editForm.expiry_warn_days = proxy.expiry_warn_days ?? 7
+  editForm.approval_reason = ''
   editPasswordVisible.value = false
   editPasswordDirty.value = false
   showEditModal.value = true
@@ -1425,6 +1445,11 @@ const closeEditModal = () => {
   editingProxy.value = null
   editPasswordVisible.value = false
   editPasswordDirty.value = false
+  editForm.host = ''
+  editForm.port = 0
+  editForm.username = ''
+  editForm.password = ''
+  editForm.approval_reason = ''
 }
 
 const handleUpdateProxy = async () => {
@@ -1441,6 +1466,10 @@ const handleUpdateProxy = async () => {
     appStore.showError(t('admin.proxies.portInvalid'))
     return
   }
+  if (!editForm.approval_reason.trim()) {
+    appStore.showError('请填写变更原因')
+    return
+  }
 
   submitting.value = true
   try {
@@ -1455,6 +1484,7 @@ const handleUpdateProxy = async () => {
       fallback_mode: editForm.fallback_mode,
       backup_proxy_id: editForm.fallback_mode === 'proxy' ? editForm.backup_proxy_id : null,
       expiry_warn_days: editForm.expiry_warn_days,
+      approval_reason: editForm.approval_reason,
     }
 
     // Only include password if user actually modified the field
@@ -1463,9 +1493,9 @@ const handleUpdateProxy = async () => {
     }
 
     await adminAPI.proxies.update(editingProxy.value.id, updateData)
-    appStore.showSuccess(t('admin.proxies.proxyUpdated'))
+    appStore.showSuccess('代理变更已提交给其他管理员审核')
     closeEditModal()
-    loadProxies()
+    showProxyApprovalCenter.value = true
   } catch (error: any) {
     appStore.showError(error.response?.data?.detail || t('admin.proxies.failedToUpdate'))
     console.error('Error updating proxy:', error)
@@ -1893,23 +1923,95 @@ const handleBatchQualityCheck = async () => {
   }
 }
 
+const approvalRequestTitle = computed(() => approvalRequestAction.value === 'export' ? '申请导出代理连接信息' : '申请查看代理连接信息')
+
+const openProxyCredentialRequest = (proxy: Proxy) => {
+  approvalRequestAction.value = 'view'
+  approvalRequestProxy.value = proxy
+  approvalRequestIDs.value = []
+  approvalRequestReason.value = ''
+  showApprovalRequestDialog.value = true
+}
+
+const openExportApproval = () => {
+  approvalRequestAction.value = 'export'
+  approvalRequestProxy.value = null
+  approvalRequestIDs.value = Array.from(selectedProxyIds.value)
+  approvalRequestReason.value = ''
+  showApprovalRequestDialog.value = true
+}
+
+const closeApprovalRequest = () => {
+  showApprovalRequestDialog.value = false
+  approvalRequestProxy.value = null
+  approvalRequestIDs.value = []
+  approvalRequestReason.value = ''
+}
+
+const submitApprovalRequest = async () => {
+  if (!approvalRequestReason.value.trim()) return
+  submitting.value = true
+  try {
+    if (approvalRequestAction.value === 'view' && approvalRequestProxy.value) {
+      await adminAPI.sharedPool.createApproval({
+        action_type: 'VIEW_PROXY_CREDENTIAL',
+        proxy_id: approvalRequestProxy.value.id,
+        reason: approvalRequestReason.value
+      })
+    } else {
+      const proxyIDs = approvalRequestIDs.value.length > 0
+        ? approvalRequestIDs.value
+        : (await fetchAllProxiesForBatch()).map((proxy) => proxy.id)
+      if (proxyIDs.length === 0) {
+        appStore.showInfo(t('admin.proxies.noProxiesYet'))
+        return
+      }
+      await adminAPI.sharedPool.createApproval({
+        action_type: 'EXPORT_PROXY_CREDENTIALS',
+        reason: approvalRequestReason.value,
+        payload: { proxy_ids: proxyIDs }
+      })
+    }
+    appStore.showSuccess('已提交给其他管理员审核')
+    closeApprovalRequest()
+    showProxyApprovalCenter.value = true
+  } catch (error: any) {
+    appStore.showError(error.response?.data?.detail || '提交审核失败')
+  } finally { submitting.value = false }
+}
+
+const handleApprovalSubmitted = () => { showProxyApprovalCenter.value = true }
+const handleProxyRevealed = (proxy: RevealedProxy) => { revealedProxy.value = proxy }
+const closeRevealedProxy = () => { revealedProxy.value = null }
+const copyRevealedProxy = () => {
+  if (!revealedProxy.value) return
+  const p = revealedProxy.value
+  const auth = p.username || p.password ? `${encodeURIComponent(p.username || '')}:${encodeURIComponent(p.password || '')}@` : ''
+  copyToClipboard(`${p.protocol}://${auth}${p.host}:${p.port}`, '连接信息已复制')
+}
+const editRevealedProxy = () => {
+  if (!revealedProxy.value) return
+  const proxy = revealedProxy.value
+  closeRevealedProxy()
+  handleEdit(proxy)
+}
+
 const formatExportTimestamp = () => {
   const now = new Date()
   const pad2 = (value: number) => String(value).padStart(2, '0')
   return `${now.getFullYear()}${pad2(now.getMonth() + 1)}${pad2(now.getDate())}${pad2(now.getHours())}${pad2(now.getMinutes())}${pad2(now.getSeconds())}`
 }
 
-const handleExportData = async () => {
-  if (exportingData.value) return
-  exportingData.value = true
+const handleExportRevealed = (items: RevealedProxy[]) => {
+  const dataPayload = {
+    type: 'proxies', version: 1, exported_at: new Date().toISOString(),
+    proxies: items.map(proxy => ({
+      proxy_key: `proxy-${proxy.id}`, name: proxy.name, protocol: proxy.protocol,
+      host: proxy.host, port: proxy.port, username: proxy.username || null,
+      password: proxy.password || null, status: proxy.status === 'expired' ? 'inactive' : proxy.status
+    })), accounts: []
+  }
   try {
-    const dataPayload = await adminAPI.proxies.exportData(
-      selectedCount.value > 0
-        ? { ids: Array.from(selectedProxyIds.value) }
-        : {
-            filters: buildProxyQueryFilters()
-          }
-    )
     const timestamp = formatExportTimestamp()
     const filename = `sub2api-proxy-${timestamp}.json`
     const blob = new Blob([JSON.stringify(dataPayload, null, 2)], { type: 'application/json' })
@@ -1919,71 +2021,9 @@ const handleExportData = async () => {
     link.download = filename
     link.click()
     URL.revokeObjectURL(url)
-    appStore.showSuccess(t('admin.proxies.dataExported'))
+    appStore.showSuccess('代理连接信息已导出')
   } catch (error: any) {
-    appStore.showError(error?.message || t('admin.proxies.dataExportFailed'))
-  } finally {
-    exportingData.value = false
-    showExportDataDialog.value = false
-  }
-}
-
-const handleDelete = (proxy: Proxy) => {
-  if ((proxy.account_count || 0) > 0) {
-    appStore.showError(t('admin.proxies.deleteBlockedInUse'))
-    return
-  }
-  deletingProxy.value = proxy
-  showDeleteDialog.value = true
-}
-
-const openBatchDelete = () => {
-  if (selectedCount.value === 0) {
-    return
-  }
-  showBatchDeleteDialog.value = true
-}
-
-const confirmDelete = async () => {
-  if (!deletingProxy.value) return
-
-  try {
-    await adminAPI.proxies.delete(deletingProxy.value.id)
-    appStore.showSuccess(t('admin.proxies.proxyDeleted'))
-    showDeleteDialog.value = false
-    removeSelectedProxies([deletingProxy.value.id])
-    deletingProxy.value = null
-    loadProxies()
-  } catch (error: any) {
-    appStore.showError(error.response?.data?.detail || t('admin.proxies.failedToDelete'))
-    console.error('Error deleting proxy:', error)
-  }
-}
-
-const confirmBatchDelete = async () => {
-  const ids = Array.from(selectedProxyIds.value)
-  if (ids.length === 0) {
-    showBatchDeleteDialog.value = false
-    return
-  }
-
-  try {
-    const result = await adminAPI.proxies.batchDelete(ids)
-    const deleted = result.deleted_ids?.length || 0
-    const skipped = result.skipped?.length || 0
-
-    if (deleted > 0) {
-      appStore.showSuccess(t('admin.proxies.batchDeleteDone', { deleted, skipped }))
-    } else if (skipped > 0) {
-      appStore.showInfo(t('admin.proxies.batchDeleteSkipped', { skipped }))
-    }
-
-    clearSelectedProxies()
-    showBatchDeleteDialog.value = false
-    loadProxies()
-  } catch (error: any) {
-    appStore.showError(error.response?.data?.detail || t('admin.proxies.batchDeleteFailed'))
-    console.error('Error batch deleting proxies:', error)
+    appStore.showError(error?.message || '导出失败')
   }
 }
 
@@ -2010,60 +2050,13 @@ const closeAccountsModal = () => {
 }
 
 // ── Proxy URL copy ──
-function buildAuthPart(row: any): string {
-  const user = row.username ? encodeURIComponent(row.username) : ''
-  const pass = row.password ? encodeURIComponent(row.password) : ''
-  if (user && pass) return `${user}:${pass}@`
-  if (user) return `${user}@`
-  if (pass) return `:${pass}@`
-  return ''
-}
-
-function buildProxyUrl(row: any): string {
-  return `${row.protocol}://${buildAuthPart(row)}${row.host}:${row.port}`
-}
-
-function getCopyFormats(row: any) {
-  const hasAuth = row.username || row.password
-  const fullUrl = buildProxyUrl(row)
-  const formats = [
-    { label: fullUrl, value: fullUrl },
-  ]
-  if (hasAuth) {
-    const withoutProtocol = fullUrl.replace(/^[^:]+:\/\//, '')
-    formats.push({ label: withoutProtocol, value: withoutProtocol })
-  }
-  formats.push({ label: `${row.host}:${row.port}`, value: `${row.host}:${row.port}` })
-  return formats
-}
-
-function copyProxyUrl(row: any) {
-  copyToClipboard(buildProxyUrl(row), t('admin.proxies.urlCopied'))
-  copyMenuProxyId.value = null
-}
-
-function toggleCopyMenu(id: number) {
-  copyMenuProxyId.value = copyMenuProxyId.value === id ? null : id
-}
-
-function copyFormat(value: string) {
-  copyToClipboard(value, t('admin.proxies.urlCopied'))
-  copyMenuProxyId.value = null
-}
-
-function closeCopyMenu() {
-  copyMenuProxyId.value = null
-}
-
 onMounted(() => {
   loadProxies()
   loadBackupProxyOptions()
-  document.addEventListener('click', closeCopyMenu)
 })
 
 onUnmounted(() => {
   clearTimeout(searchTimeout)
   abortController?.abort()
-  document.removeEventListener('click', closeCopyMenu)
 })
 </script>

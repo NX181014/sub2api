@@ -832,11 +832,10 @@ export interface Proxy {
   id: number
   name: string
   protocol: ProxyProtocol
-  host: string
-  port: number
-  username: string | null
-  password?: string | null
   status: 'active' | 'inactive' | 'expired'
+  managed_source?: string | null
+  connection_configured: boolean
+  auth_configured: boolean
   account_count?: number // Number of accounts using this proxy
   latency_ms?: number
   latency_status?: 'success' | 'failed'
@@ -1427,6 +1426,14 @@ export interface UpdateProxyRequest {
   fallback_mode?: 'none' | 'proxy' | 'direct'
   backup_proxy_id?: number | null
   expiry_warn_days?: number
+  approval_reason: string
+}
+
+export interface RevealedProxy extends Proxy {
+  host: string
+  port: number
+  username?: string | null
+  password?: string | null
 }
 
 export interface AdminDataPayload {

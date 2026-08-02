@@ -42,6 +42,7 @@ type AdminHandlers struct {
 	Compliance             *admin.ComplianceHandler
 	AuditLog               *admin.AuditLogHandler
 	Pool                   *admin.PoolHandler
+	Mihomo                 *admin.MihomoHandler
 }
 
 // Handlers contains all HTTP handlers

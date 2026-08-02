@@ -2,6 +2,7 @@ package admin
 
 import (
 	"context"
+	"net/http"
 	"strconv"
 	"strings"
 	"time"
@@ -16,6 +17,11 @@ import (
 // ProxyHandler handles admin proxy management
 type ProxyHandler struct {
 	adminService service.AdminService
+	poolService  *service.PoolService
+}
+
+func (h *ProxyHandler) SetPoolService(poolService *service.PoolService) {
+	h.poolService = poolService
 }
 
 // NewProxyHandler creates a new admin proxy handler
@@ -52,6 +58,7 @@ type UpdateProxyRequest struct {
 	FallbackMode   string `json:"fallback_mode" binding:"omitempty,oneof=none proxy direct"`
 	BackupProxyID  *int64 `json:"backup_proxy_id"`
 	ExpiryWarnDays int    `json:"expiry_warn_days" binding:"omitempty,min=0"`
+	ApprovalReason string `json:"approval_reason" binding:"required,max=1000"`
 }
 
 // List handles listing all proxies with pagination
@@ -75,9 +82,9 @@ func (h *ProxyHandler) List(c *gin.Context) {
 		return
 	}
 
-	out := make([]dto.AdminProxyWithAccountCount, 0, len(proxies))
+	out := make([]dto.ProxyWithAccountCount, 0, len(proxies))
 	for i := range proxies {
-		out = append(out, *dto.ProxyWithAccountCountFromServiceAdmin(&proxies[i]))
+		out = append(out, *dto.ProxyWithAccountCountFromService(&proxies[i]))
 	}
 	response.Paginated(c, out, total, page, pageSize)
 }
@@ -94,9 +101,9 @@ func (h *ProxyHandler) GetAll(c *gin.Context) {
 			response.ErrorFrom(c, err)
 			return
 		}
-		out := make([]dto.AdminProxyWithAccountCount, 0, len(proxies))
+		out := make([]dto.ProxyWithAccountCount, 0, len(proxies))
 		for i := range proxies {
-			out = append(out, *dto.ProxyWithAccountCountFromServiceAdmin(&proxies[i]))
+			out = append(out, *dto.ProxyWithAccountCountFromService(&proxies[i]))
 		}
 		response.Success(c, out)
 		return
@@ -108,9 +115,9 @@ func (h *ProxyHandler) GetAll(c *gin.Context) {
 		return
 	}
 
-	out := make([]dto.AdminProxy, 0, len(proxies))
+	out := make([]dto.Proxy, 0, len(proxies))
 	for i := range proxies {
-		out = append(out, *dto.ProxyFromServiceAdmin(&proxies[i]))
+		out = append(out, *dto.ProxyFromService(&proxies[i]))
 	}
 	response.Success(c, out)
 }
@@ -130,7 +137,7 @@ func (h *ProxyHandler) GetByID(c *gin.Context) {
 		return
 	}
 
-	response.Success(c, dto.ProxyFromServiceAdmin(proxy))
+	response.Success(c, dto.ProxyFromService(proxy))
 }
 
 // Create handles creating a new proxy
@@ -163,7 +170,7 @@ func (h *ProxyHandler) Create(c *gin.Context) {
 		if err != nil {
 			return nil, err
 		}
-		return dto.ProxyFromServiceAdmin(proxy), nil
+		return dto.ProxyFromService(proxy), nil
 	})
 }
 
@@ -187,7 +194,24 @@ func (h *ProxyHandler) Update(c *gin.Context) {
 		t := time.Unix(*req.ExpiresAt, 0).UTC()
 		expiresAt = &t
 	}
-	proxy, err := h.adminService.UpdateProxy(c.Request.Context(), proxyID, &service.UpdateProxyInput{
+	if h.poolService == nil {
+		response.ErrorFrom(c, service.ErrPoolApprovalNotFound)
+		return
+	}
+	actorID, ok := poolActorID(c)
+	if !ok {
+		return
+	}
+	current, err := h.adminService.GetProxy(c.Request.Context(), proxyID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	if current.ManagedSource != nil {
+		response.Error(c, http.StatusConflict, "Managed proxies are changed from the Mihomo panel")
+		return
+	}
+	update := &service.UpdateProxyInput{
 		Name:           strings.TrimSpace(req.Name),
 		Protocol:       strings.TrimSpace(req.Protocol),
 		Host:           strings.TrimSpace(req.Host),
@@ -199,53 +223,33 @@ func (h *ProxyHandler) Update(c *gin.Context) {
 		FallbackMode:   strings.TrimSpace(req.FallbackMode),
 		BackupProxyID:  req.BackupProxyID,
 		ExpiryWarnDays: req.ExpiryWarnDays,
+	}
+	if update.Password == "" {
+		update.Password = current.Password
+	}
+	approval, err := h.poolService.CreateApproval(c.Request.Context(), service.CreatePoolApprovalInput{
+		ActionType: service.PoolApprovalUpdateProxy, ProxyID: &proxyID,
+		RequesterID: actorID, Reason: strings.TrimSpace(req.ApprovalReason),
+		RequirePeerReview: true, Payload: service.PoolApprovalPayload{ProxyUpdate: update},
 	})
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
 	}
 
-	response.Success(c, dto.ProxyFromServiceAdmin(proxy))
+	response.Accepted(c, gin.H{"approval_required": true, "approval": approval})
 }
 
 // Delete handles deleting a proxy
 // DELETE /api/v1/admin/proxies/:id
 func (h *ProxyHandler) Delete(c *gin.Context) {
-	proxyID, err := strconv.ParseInt(c.Param("id"), 10, 64)
-	if err != nil {
-		response.BadRequest(c, "Invalid proxy ID")
-		return
-	}
-
-	err = h.adminService.DeleteProxy(c.Request.Context(), proxyID)
-	if err != nil {
-		response.ErrorFrom(c, err)
-		return
-	}
-
-	response.Success(c, gin.H{"message": "Proxy deleted successfully"})
+	response.Forbidden(c, "Proxy deletion requires peer approval")
 }
 
 // BatchDelete handles batch deleting proxies
 // POST /api/v1/admin/proxies/batch-delete
 func (h *ProxyHandler) BatchDelete(c *gin.Context) {
-	type BatchDeleteRequest struct {
-		IDs []int64 `json:"ids" binding:"required,min=1"`
-	}
-
-	var req BatchDeleteRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		response.BadRequest(c, "Invalid request: "+err.Error())
-		return
-	}
-
-	result, err := h.adminService.BatchDeleteProxies(c.Request.Context(), req.IDs)
-	if err != nil {
-		response.ErrorFrom(c, err)
-		return
-	}
-
-	response.Success(c, result)
+	response.Forbidden(c, "Batch proxy deletion requires peer approval")
 }
 
 // Test handles testing proxy connectivity

@@ -905,10 +905,7 @@
     </BaseDialog>
     <ConfirmDialog :show="showCreateShadowDialog" :title="t('admin.accounts.createSparkShadow')" :message="t('admin.accounts.createSparkShadowConfirm', { name: creatingShadowAcc?.name })" @confirm="confirmCreateSparkShadow" @cancel="showCreateShadowDialog = false" />
     <ConfirmDialog :show="showExportDataDialog" :title="t('admin.accounts.dataExport')" :message="t('admin.accounts.dataExportConfirmMessage')" :confirm-text="t('admin.accounts.dataExportConfirm')" :cancel-text="t('common.cancel')" @confirm="handleExportData" @cancel="showExportDataDialog = false">
-      <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
-        <input type="checkbox" class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500" v-model="includeProxyOnExport" />
-        <span>{{ t('admin.accounts.dataExportIncludeProxies') }}</span>
-      </label>
+      <p class="text-sm text-gray-600 dark:text-gray-300">{{ t('admin.accounts.dataExportIncludeProxies') }}</p>
     </ConfirmDialog>
     <ErrorPassthroughRulesModal :show="showErrorPassthrough" @close="showErrorPassthrough = false" />
     <TLSFingerprintProfilesModal :show="showTLSFingerprintProfiles" @close="showTLSFingerprintProfiles = false" />
@@ -1346,7 +1343,6 @@ const showEdit = ref(false)
 const showSync = ref(false)
 const showImportData = ref(false)
 const showExportDataDialog = ref(false)
-const includeProxyOnExport = ref(true)
 const showBulkEdit = ref(false)
 const bulkEditTarget = ref<AccountBulkEditTarget | null>(null)
 const showTempUnsched = ref(false)
@@ -3213,6 +3209,7 @@ const closeCredentialDialog = () => {
 }
 
 const revealCredential = async (approval: PoolApproval) => {
+  if (!approval.account_id) return
   approvalActionID.value = approval.id
   credentialSubmitting.value = true
   try {
@@ -3687,7 +3684,6 @@ const formatExportTimestamp = () => {
   return `${now.getFullYear()}${pad2(now.getMonth() + 1)}${pad2(now.getDate())}${pad2(now.getHours())}${pad2(now.getMinutes())}${pad2(now.getSeconds())}`
 }
 const openExportDataDialog = () => {
-  includeProxyOnExport.value = true
   showExportDataDialog.value = true
 }
 const handleExportData = async () => {
@@ -3696,9 +3692,9 @@ const handleExportData = async () => {
   try {
     const dataPayload = await accountExportStepUp.run(() => adminAPI.accounts.exportData(
       selIds.value.length > 0
-        ? { ids: selIds.value, includeProxies: includeProxyOnExport.value }
+        ? { ids: selIds.value, includeProxies: false }
         : {
-            includeProxies: includeProxyOnExport.value,
+            includeProxies: false,
             filters: buildAccountQueryFilters()
           }
     ))

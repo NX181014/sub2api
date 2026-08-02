@@ -46,11 +46,16 @@ func ProvideAdminHandlers(
 	complianceHandler *admin.ComplianceHandler,
 	auditLogHandler *admin.AuditLogHandler,
 	poolHandler *admin.PoolHandler,
+	mihomoHandler *admin.MihomoHandler,
+	poolService *service.PoolService,
+	mihomoService *service.MihomoService,
 	upstreamBillingProbe *service.UpstreamBillingProbeService,
 	ollamaCloudUsage *service.OllamaCloudUsageService,
 ) *AdminHandlers {
 	accountHandler.SetUpstreamBillingProbeService(upstreamBillingProbe)
 	accountHandler.SetOllamaCloudUsageService(ollamaCloudUsage)
+	proxyHandler.SetPoolService(poolService)
+	poolService.SetMihomoApprovalExecutor(mihomoService)
 	return &AdminHandlers{
 		Dashboard:              dashboardHandler,
 		User:                   userHandler,
@@ -87,6 +92,7 @@ func ProvideAdminHandlers(
 		Compliance:             complianceHandler,
 		AuditLog:               auditLogHandler,
 		Pool:                   poolHandler,
+		Mihomo:                 mihomoHandler,
 	}
 }
 
@@ -273,6 +279,7 @@ var ProviderSet = wire.NewSet(
 	admin.NewComplianceHandler,
 	admin.NewAuditLogHandler,
 	admin.NewPoolHandler,
+	admin.NewMihomoHandler,
 
 	// AdminHandlers and Handlers constructors
 	ProvideAdminHandlers,

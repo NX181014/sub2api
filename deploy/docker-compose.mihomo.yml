@@ -1,0 +1,35 @@
+services:
+  sub2api:
+    environment:
+      - MIHOMO_ENABLED=true
+      - MIHOMO_CONTROLLER_URL=http://mihomo:26790
+      - MIHOMO_CONFIG_PATH=/app/data/mihomo/config.yaml
+      - MIHOMO_PROVIDER_NAME=${MIHOMO_PROVIDER_NAME:-subscription}
+      - MIHOMO_PROXY_HOST=mihomo
+      - MIHOMO_AUTOMATIC_PORT=${MIHOMO_AUTOMATIC_PORT:-26781}
+      - MIHOMO_DIRECTIONAL_PORT=${MIHOMO_DIRECTIONAL_PORT:-26782}
+      - MIHOMO_DYNAMIC_PORT=${MIHOMO_DYNAMIC_PORT:-26783}
+    volumes:
+      - ${MIHOMO_CONFIG_DIR:-/opt/mihomo/config}:/app/data/mihomo
+    depends_on:
+      mihomo:
+        condition: service_healthy
+
+  mihomo:
+    image: ${MIHOMO_IMAGE:-metacubex/mihomo:v1.19.29}
+    container_name: mihomo
+    restart: unless-stopped
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    volumes:
+      - ${MIHOMO_CONFIG_DIR:-/opt/mihomo/config}:/root/.config/mihomo
+    networks:
+      - sub2api-network
+    healthcheck:
+      test: ["CMD", "/mihomo", "-t", "-f", "/root/.config/mihomo/config.yaml"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s

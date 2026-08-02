@@ -224,6 +224,45 @@ func TestValidatePoolApprovalPayload(t *testing.T) {
 	if err := validateApprovalPayload(PoolApprovalUpdateAccount, PoolApprovalPayload{AccountUpdate: &UpdateAccountInput{Name: "x"}, DeleteOptions: deleteOptions}); infraerrors.Reason(err) != "INVALID_UPDATE_APPROVAL_PAYLOAD" {
 		t.Fatalf("unexpected mixed update/delete payload result: %v", err)
 	}
+	proxyUpdate := &UpdateProxyInput{Name: "proxy", Protocol: "socks5", Host: "proxy.example", Port: 1080, Status: StatusActive, FallbackMode: FallbackModeNone}
+	if err := validateApprovalPayload(PoolApprovalUpdateProxy, PoolApprovalPayload{ProxyUpdate: proxyUpdate}); err != nil {
+		t.Fatalf("valid proxy update rejected: %v", err)
+	}
+	if err := validateApprovalPayload(PoolApprovalUpdateProxy, PoolApprovalPayload{ProxyUpdate: proxyUpdate, Reauthorize: true}); infraerrors.Reason(err) != "INVALID_PROXY_APPROVAL_PAYLOAD" {
+		t.Fatalf("unexpected mixed proxy payload result: %v", err)
+	}
+}
+
+func TestProxyExportApprovalRevisionTracksRevealedConnection(t *testing.T) {
+	proxies := []Proxy{{ID: 2, Host: "second.example", Port: 1080}, {ID: 1, Host: "first.example", Port: 1080, Password: "before"}}
+	base, err := proxyExportApprovalRevision(append([]Proxy(nil), proxies...))
+	if err != nil {
+		t.Fatal(err)
+	}
+	proxies[1].Password = "after"
+	changed, err := proxyExportApprovalRevision(append([]Proxy(nil), proxies...))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if base == changed {
+		t.Fatal("a changed proxy connection must stale an approved export")
+	}
+}
+
+func TestProxyUpdateSummaryDoesNotRevealCurrentEndpoint(t *testing.T) {
+	summary := buildProxyApprovalSummary(PoolApprovalUpdateProxy, &Proxy{
+		ID: 1, Name: "proxy", Protocol: "socks5", Host: "current.example", Port: 1080,
+	}, &UpdateProxyInput{
+		Name: "proxy", Protocol: "socks5", Host: "next.example", Port: 1080,
+		Status: StatusActive, FallbackMode: FallbackModeNone,
+	}, 0)
+	encoded, err := json.Marshal(summary)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), "current.example") || !strings.Contains(string(encoded), "next.example") {
+		t.Fatalf("summary must hide the current endpoint and show the requested endpoint: %s", encoded)
+	}
 }
 
 type primaryAdminSettingRepo struct {

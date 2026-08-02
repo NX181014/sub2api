@@ -6,9 +6,17 @@ export type PoolAvailabilityStatus = 'normal' | 'error' | 'rate_limited' | 'over
 export type PoolSettlementStatus = 'draft' | 'locked' | 'paid'
 export type PoolLifecycleEventType = 'banned_confirmed' | 'recovered' | 'refund' | 'replaced' | 'retired'
 export type PoolCostEntryType = 'purchase' | 'renewal' | 'topup' | 'price_version' | 'refund' | 'adjustment' | 'replacement_in' | 'replacement_out' | 'write_off'
-export type PoolApprovalAction = 'UPDATE_ACCOUNT' | 'VIEW_CREDENTIAL' | 'DELETE_ACCOUNT'
+export type PoolApprovalAction =
+  | 'UPDATE_ACCOUNT'
+  | 'VIEW_CREDENTIAL'
+  | 'DELETE_ACCOUNT'
+  | 'UPDATE_PROXY'
+  | 'VIEW_PROXY_CREDENTIAL'
+  | 'EXPORT_PROXY_CREDENTIALS'
+  | 'UPDATE_MIHOMO'
 export type PoolApprovalStatus = 'pending' | 'approved' | 'rejected' | 'expired' | 'consumed'
 export type PoolApprovalScope = 'reviewable' | 'mine' | 'processed'
+export type PoolApprovalObjectType = 'account' | 'proxy' | 'proxy_export' | 'mihomo'
 
 export interface SharedPoolAccountRuntime {
   account_status?: string | null
@@ -34,7 +42,7 @@ export interface PoolApprovalBusinessChange {
 
 export interface PoolApprovalBusinessSummary {
   action: PoolApprovalAction
-  object: { type: 'account'; id: number; name: string }
+  object: { type: PoolApprovalObjectType; id: number; name: string }
   scope?: string[]
   groups?: Array<{ key: string; items: PoolApprovalBusinessChange[] }>
   impacts?: Array<{ key: string; count: number }>
@@ -54,8 +62,12 @@ export interface PoolApprovalChanges {
 export interface PoolApproval {
   id: number
   action_type: PoolApprovalAction
-  account_id: number
-  account_name: string
+  object_type: PoolApprovalObjectType
+  account_id?: number | null
+  account_name?: string | null
+  proxy_id?: number | null
+  proxy_name?: string | null
+  resource_key?: string | null
   status: PoolApprovalStatus
   reason: string
   base_revision?: string | null
@@ -83,17 +95,30 @@ export interface PoolApprovalList {
 
 export interface CreatePoolApprovalRequest {
   action_type: PoolApprovalAction
-  account_id: number
+  account_id?: number
+  proxy_id?: number
+  resource_key?: string
   reason: string
   payload?: {
     account_update?: Record<string, unknown>
     pool_update?: Record<string, unknown>
+    proxy_ids?: number[]
   }
 }
 
 export interface PoolCredentialReveal {
   account_id: number
   credentials: Record<string, unknown>
+  revealed_at: string
+}
+
+export interface PoolProxyCredentialReveal {
+  proxy: import('@/types').RevealedProxy
+  revealed_at: string
+}
+
+export interface PoolProxyExportReveal {
+  proxies: import('@/types').RevealedProxy[]
   revealed_at: string
 }
 
@@ -1148,6 +1173,8 @@ export async function listApprovals(params: {
   action_type?: PoolApprovalAction
   account_id?: number
   requested_by_user_id?: number
+  object_type?: PoolApprovalObjectType
+  proxy_id?: number
   scope?: PoolApprovalScope
   high_risk?: boolean
   page?: number
@@ -1173,6 +1200,16 @@ export async function rejectApproval(id: number, reason: string): Promise<PoolAp
 
 export async function revealApproval(id: number): Promise<PoolCredentialReveal> {
   const { data } = await apiClient.post<PoolCredentialReveal>(`/admin/pool/approvals/${id}/reveal`)
+  return data
+}
+
+export async function revealProxyApproval(id: number): Promise<PoolProxyCredentialReveal> {
+  const { data } = await apiClient.post<PoolProxyCredentialReveal>(`/admin/pool/approvals/${id}/reveal-proxy`)
+  return data
+}
+
+export async function revealProxyExportApproval(id: number): Promise<PoolProxyExportReveal> {
+  const { data } = await apiClient.post<PoolProxyExportReveal>(`/admin/pool/approvals/${id}/reveal-proxy-export`)
   return data
 }
 
@@ -1202,5 +1239,7 @@ export default {
   listApprovals,
   approveApproval,
   rejectApproval,
-  revealApproval
+  revealApproval,
+  revealProxyApproval,
+  revealProxyExportApproval
 }

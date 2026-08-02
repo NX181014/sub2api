@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/handler/dto"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
@@ -169,7 +170,9 @@ func (h *PoolHandler) UpdateAccount(c *gin.Context) {
 type createPoolApprovalRequest struct {
 	ActionType  string                      `json:"action_type"`
 	RequestType string                      `json:"request_type"`
-	AccountID   int64                       `json:"account_id" binding:"required"`
+	AccountID   int64                       `json:"account_id"`
+	ProxyID     *int64                      `json:"proxy_id"`
+	ResourceKey string                      `json:"resource_key"`
 	Reason      string                      `json:"reason"`
 	Payload     service.PoolApprovalPayload `json:"payload"`
 }
@@ -189,7 +192,9 @@ func (h *PoolHandler) CreateApproval(c *gin.Context) {
 		action = req.RequestType
 	}
 	item, err := h.poolService.CreateApproval(c.Request.Context(), service.CreatePoolApprovalInput{
-		ActionType: action, AccountID: req.AccountID, Reason: req.Reason, RequesterID: actorID, Payload: req.Payload,
+		ActionType: action, AccountID: req.AccountID, ProxyID: req.ProxyID, ResourceKey: req.ResourceKey,
+		Reason: req.Reason, RequesterID: actorID, Payload: req.Payload,
+		RequirePeerReview: !isAccountApprovalActionForHandler(action),
 	})
 	if err != nil {
 		response.ErrorFrom(c, err)
@@ -212,6 +217,10 @@ func (h *PoolHandler) ListApprovals(c *gin.Context) {
 	if filter.AccountID, ok = optionalPoolQueryID(c, "account_id"); !ok {
 		return
 	}
+	if filter.ProxyID, ok = optionalPoolQueryID(c, "proxy_id"); !ok {
+		return
+	}
+	filter.ObjectType = strings.TrimSpace(c.Query("object_type"))
 	if filter.RequestedByUserID, ok = optionalPoolQueryID(c, "requested_by_user_id"); !ok {
 		return
 	}
@@ -318,6 +327,57 @@ func (h *PoolHandler) RevealCredential(c *gin.Context) {
 		return
 	}
 	response.Success(c, item)
+}
+
+func (h *PoolHandler) RevealProxyCredential(c *gin.Context) {
+	if c.GetString("auth_method") == service.AuditAuthMethodAdminAPIKey {
+		response.Forbidden(c, "A signed-in administrator session is required")
+		return
+	}
+	id, ok := poolPathID(c)
+	if !ok {
+		return
+	}
+	actorID, ok := poolActorID(c)
+	if !ok {
+		return
+	}
+	item, err := h.poolService.RevealProxyCredential(c.Request.Context(), id, actorID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, gin.H{"proxy": dto.ProxyFromServiceAdmin(&item.Proxy), "revealed_at": item.RevealedAt})
+}
+
+func (h *PoolHandler) RevealProxyExport(c *gin.Context) {
+	if c.GetString("auth_method") == service.AuditAuthMethodAdminAPIKey {
+		response.Forbidden(c, "A signed-in administrator session is required")
+		return
+	}
+	id, ok := poolPathID(c)
+	if !ok {
+		return
+	}
+	actorID, ok := poolActorID(c)
+	if !ok {
+		return
+	}
+	item, err := h.poolService.RevealProxyExport(c.Request.Context(), id, actorID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	proxies := make([]dto.AdminProxy, 0, len(item.Proxies))
+	for i := range item.Proxies {
+		proxies = append(proxies, *dto.ProxyFromServiceAdmin(&item.Proxies[i]))
+	}
+	response.Success(c, gin.H{"proxies": proxies, "revealed_at": item.RevealedAt})
+}
+
+func isAccountApprovalActionForHandler(action string) bool {
+	action = strings.ToUpper(strings.TrimSpace(action))
+	return action == service.PoolApprovalUpdateAccount || action == service.PoolApprovalViewCredential || action == service.PoolApprovalDeleteAccount
 }
 
 type createPoolAccountIntakeRequest struct {

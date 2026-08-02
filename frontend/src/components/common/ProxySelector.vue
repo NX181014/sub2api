@@ -114,7 +114,7 @@
                 </template>
               </div>
               <div class="truncate text-xs text-gray-500 dark:text-gray-400">
-                {{ proxy.protocol }}://{{ proxy.host }}:{{ proxy.port }}
+                {{ proxy.protocol.toUpperCase() }} · {{ proxy.connection_configured ? t('admin.proxies.connectionConfigured') : t('admin.proxies.connectionMissing') }}
               </div>
             </div>
 
@@ -220,7 +220,7 @@ const selectedLabel = computed(() => {
     return t('admin.accounts.noProxy')
   }
   const proxy = selectedProxy.value
-  return `${proxy.name} (${proxy.protocol}://${proxy.host}:${proxy.port})`
+  return `${proxy.name} (${proxy.protocol.toUpperCase()})`
 })
 
 const filteredProxies = computed(() => {
@@ -230,8 +230,7 @@ const filteredProxies = computed(() => {
   const query = searchQuery.value.toLowerCase()
   return props.proxies.filter((proxy) => {
     const name = proxy.name.toLowerCase()
-    const host = proxy.host.toLowerCase()
-    return name.includes(query) || host.includes(query)
+    return name.includes(query) || proxy.protocol.toLowerCase().includes(query)
   })
 })
 

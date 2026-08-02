@@ -62,6 +62,7 @@ func RegisterAdminRoutes(
 
 		// 代理管理
 		registerProxyRoutes(admin, h, stepUpAuth)
+		registerMihomoRoutes(admin, h)
 
 		// 卡密管理
 		registerRedeemCodeRoutes(admin, h)
@@ -125,6 +126,16 @@ func RegisterAdminRoutes(
 	}
 }
 
+func registerMihomoRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
+	mihomo := admin.Group("/mihomo")
+	{
+		mihomo.GET("/status", h.Admin.Mihomo.Status)
+		mihomo.POST("/subscription", h.Admin.Mihomo.UpdateSubscription)
+		mihomo.POST("/refresh", h.Admin.Mihomo.Refresh)
+		mihomo.POST("/modes", h.Admin.Mihomo.UpdateMode)
+	}
+}
+
 func registerPoolRoutes(admin *gin.RouterGroup, h *handler.Handlers, stepUpAuth middleware.StepUpAuthMiddleware) {
 	pool := admin.Group("/pool")
 	{
@@ -138,6 +149,8 @@ func registerPoolRoutes(admin *gin.RouterGroup, h *handler.Handlers, stepUpAuth 
 		pool.POST("/approvals/:id/approve", h.Admin.Pool.ApproveApproval)
 		pool.POST("/approvals/:id/reject", h.Admin.Pool.RejectApproval)
 		pool.POST("/approvals/:id/reveal", gin.HandlerFunc(stepUpAuth), h.Admin.Pool.RevealCredential)
+		pool.POST("/approvals/:id/reveal-proxy", gin.HandlerFunc(stepUpAuth), h.Admin.Pool.RevealProxyCredential)
+		pool.POST("/approvals/:id/reveal-proxy-export", gin.HandlerFunc(stepUpAuth), h.Admin.Pool.RevealProxyExport)
 		pool.GET("/sources", h.Admin.Pool.ListSources)
 		pool.POST("/sources", h.Admin.Pool.CreateSource)
 		pool.GET("/costs", h.Admin.Pool.ListCosts)

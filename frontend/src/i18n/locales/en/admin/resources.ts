@@ -236,6 +236,10 @@ export default {
       fallbackProxy: 'Backup proxy',
       fallbackDirect: 'Direct connection',
       backupProxy: 'Backup proxy',
+      connectionConfigured: 'Connection configured',
+      connectionMissing: 'Connection missing',
+      authConfigured: 'Authentication configured',
+      authNotConfigured: 'No authentication',
     },
 
     // Redeem Codes

@@ -147,17 +147,12 @@ func (h *AccountHandler) ExportData(c *gin.Context) {
 		response.BadRequest(c, err.Error())
 		return
 	}
-
-	var proxies []service.Proxy
 	if includeProxies {
-		proxies, err = h.resolveExportProxies(ctx, accounts)
-		if err != nil {
-			response.ErrorFrom(c, err)
-			return
-		}
-	} else {
-		proxies = []service.Proxy{}
+		response.Forbidden(c, "Proxy connection export requires peer approval")
+		return
 	}
+
+	proxies := []service.Proxy{}
 
 	// 构建 id→name 映射，用于导出备用代理 name
 	proxyNameByID := make(map[int64]string, len(proxies))
@@ -306,34 +301,9 @@ func (h *AccountHandler) importData(ctx context.Context, req DataImportRequest) 
 			result.ProxyReused++
 			if normalizedStatus != "" {
 				if proxy, getErr := h.adminService.GetProxy(ctx, existingID); getErr == nil && proxy != nil && proxy.Status != normalizedStatus {
-					// 同步 status 时传入完整字段，避免零值覆盖已存在代理的有效期/fallback 配置。
-					var existingExpiresAt *time.Time
-					if item.ExpiresAt != nil {
-						t := time.Unix(*item.ExpiresAt, 0).UTC()
-						existingExpiresAt = &t
-					}
-					existingFallbackMode := item.FallbackMode
-					if existingFallbackMode == "" {
-						existingFallbackMode = service.FallbackModeNone
-					}
-					var existingBackupProxyID *int64
-					if item.BackupProxyName != "" {
-						if bid, ok := proxyNameToID[item.BackupProxyName]; ok {
-							existingBackupProxyID = &bid
-						}
-					}
-					_, _ = h.adminService.UpdateProxy(ctx, existingID, &service.UpdateProxyInput{
-						Status:         normalizedStatus,
-						ExpiresAt:      existingExpiresAt,
-						FallbackMode:   existingFallbackMode,
-						BackupProxyID:  existingBackupProxyID,
-						ExpiryWarnDays: item.ExpiryWarnDays,
-						Name:           proxy.Name,
-						Protocol:       proxy.Protocol,
-						Host:           proxy.Host,
-						Port:           proxy.Port,
-						Username:       proxy.Username,
-						Password:       proxy.Password,
+					result.Errors = append(result.Errors, DataImportError{
+						Kind: "proxy", Name: item.Name, ProxyKey: key,
+						Message: "existing proxy update requires single-proxy approval",
 					})
 				}
 			}
@@ -626,7 +596,7 @@ func parseAccountIDs(c *gin.Context) ([]int64, error) {
 func parseIncludeProxies(c *gin.Context) (bool, error) {
 	raw := strings.TrimSpace(strings.ToLower(c.Query("include_proxies")))
 	if raw == "" {
-		return true, nil
+		return false, nil
 	}
 	switch raw {
 	case "1", "true", "yes", "on":

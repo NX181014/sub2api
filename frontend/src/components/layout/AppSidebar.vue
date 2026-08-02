@@ -24,8 +24,10 @@
         >
           {{ siteName }}
         </router-link>
-        <!-- Version Badge -->
-        <VersionBadge :version="siteVersion" />
+        <span
+          class="w-fit rounded bg-gray-100 px-2 py-0.5 text-[11px] font-medium text-gray-500 dark:bg-dark-800 dark:text-dark-400"
+          :title="siteVersion ? `v${siteVersion}` : undefined"
+        >摸鱼定制内部版本</span>
       </div>
     </div>
 
@@ -192,7 +194,6 @@ import { computed, h, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'v
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useAdminSettingsStore, useAppStore, useAuthStore, useOnboardingStore } from '@/stores'
-import VersionBadge from '@/components/common/VersionBadge.vue'
 import { sanitizeSvg } from '@/utils/sanitize'
 import { sanitizeUrl } from '@/utils/url'
 import { FeatureFlags, makeSidebarFlag } from '@/utils/featureFlags'

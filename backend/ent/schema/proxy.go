@@ -64,6 +64,12 @@ func (Proxy) Fields() []ent.Field {
 		field.Int("expiry_warn_days").
 			Default(7).
 			Comment("Days before expiry to flag as expiring-soon (per proxy)."),
+		field.String("managed_source").
+			MaxLen(64).
+			Optional().
+			Nillable().
+			Immutable().
+			Comment("System owner for managed proxies, such as mihomo:auto."),
 	}
 }
 
@@ -85,5 +91,6 @@ func (Proxy) Indexes() []ent.Index {
 		index.Fields("deleted_at"),
 		index.Fields("expires_at"),
 		index.Fields("backup_proxy_id"),
+		index.Fields("managed_source").Unique(),
 	}
 }

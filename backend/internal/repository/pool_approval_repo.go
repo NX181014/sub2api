@@ -26,13 +26,16 @@ func (r *poolApprovalRepository) executor(ctx context.Context) *dbent.Client {
 }
 
 const poolApprovalSelect = `
-SELECT r.id, r.action_type, r.account_id, a.name, r.status, r.reason,
+SELECT r.id, r.action_type, COALESCE(r.account_id,0), COALESCE(a.name,''),
+       r.object_type, r.proxy_id, COALESCE(p.name,''), COALESCE(r.resource_key,''),
+       r.status, r.reason,
        r.base_revision, r.requested_by_user_id, requester.email,
        r.decided_by_user_id, decider.email, r.decision_reason,
        r.requested_at, r.expires_at, r.decided_at, r.reveal_expires_at,
        r.revealed_at, r.primary_bypass, r.change_summary, r.payload
 FROM pool_approval_requests r
-JOIN accounts a ON a.id = r.account_id
+LEFT JOIN accounts a ON a.id = r.account_id
+LEFT JOIN proxies p ON p.id = r.proxy_id
 JOIN users requester ON requester.id = r.requested_by_user_id
 LEFT JOIN users decider ON decider.id = r.decided_by_user_id`
 
@@ -40,7 +43,8 @@ func scanPoolApproval(scanner interface{ Scan(...any) error }) (*service.PoolApp
 	item := &service.PoolApproval{}
 	var summaryRaw, payloadRaw []byte
 	if err := scanner.Scan(
-		&item.ID, &item.ActionType, &item.AccountID, &item.AccountName, &item.Status, &item.Reason,
+		&item.ID, &item.ActionType, &item.AccountID, &item.AccountName,
+		&item.ObjectType, &item.ProxyID, &item.ProxyName, &item.ResourceKey, &item.Status, &item.Reason,
 		&item.BaseRevision, &item.RequestedByUserID, &item.RequestedByEmail,
 		&item.DecidedByUserID, &item.DecidedByEmail, &item.DecisionReason,
 		&item.RequestedAt, &item.ExpiresAt, &item.DecidedAt, &item.RevealExpiresAt,
@@ -64,7 +68,7 @@ SET status='expired',
     decision_reason=COALESCE(decision_reason, 'approval window expired'),
     decided_at=COALESCE(decided_at, $1), payload='{}'::jsonb, updated_at=$1
 WHERE (status='pending' AND expires_at <= $1)
-   OR (action_type='VIEW_CREDENTIAL' AND status='approved'
+   OR (action_type IN ('VIEW_CREDENTIAL','VIEW_PROXY_CREDENTIAL','EXPORT_PROXY_CREDENTIALS') AND status='approved'
        AND revealed_at IS NULL AND reveal_expires_at <= $1)`, now.UTC())
 	return err
 }
@@ -79,10 +83,10 @@ func (r *poolApprovalRepository) CreateApproval(ctx context.Context, item *servi
 	}
 	rows, err := r.executor(ctx).QueryContext(ctx, `
 INSERT INTO pool_approval_requests(
-    action_type,account_id,status,payload,change_summary,reason,base_revision,
-    requested_by_user_id,requested_at,expires_at,primary_bypass)
-VALUES($1,$2,$3,$4::jsonb,$5::jsonb,$6,$7,$8,$9,$10,$11)
-RETURNING id`, item.ActionType, item.AccountID, item.Status, []byte(item.Payload), summary,
+	action_type,object_type,account_id,proxy_id,resource_key,status,payload,change_summary,reason,base_revision,
+	requested_by_user_id,requested_at,expires_at,primary_bypass)
+VALUES($1,$2,$3,$4,$5,$6,$7::jsonb,$8::jsonb,$9,$10,$11,$12,$13,$14)
+RETURNING id`, item.ActionType, item.ObjectType, nullablePositiveID(item.AccountID), item.ProxyID, nullableString(item.ResourceKey), item.Status, []byte(item.Payload), summary,
 		item.Reason, item.BaseRevision, item.RequestedByUserID, item.RequestedAt, item.ExpiresAt, item.PrimaryBypass)
 	if err != nil {
 		if isPoolApprovalUniqueViolation(err) {
@@ -113,6 +117,21 @@ func isPoolApprovalUniqueViolation(err error) bool {
 	return errors.As(err, &pqErr) && pqErr.Code == "23505"
 }
 
+func nullablePositiveID(value int64) any {
+	if value <= 0 {
+		return nil
+	}
+	return value
+}
+
+func nullableString(value string) any {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil
+	}
+	return value
+}
+
 func (r *poolApprovalRepository) ListApprovals(ctx context.Context, filter service.PoolApprovalFilter, limit, offset int) ([]service.PoolApproval, int64, error) {
 	clauses := []string{"1=1"}
 	args := make([]any, 0, 6)
@@ -128,6 +147,12 @@ func (r *poolApprovalRepository) ListApprovals(ctx context.Context, filter servi
 	}
 	if filter.AccountID != nil {
 		add("r.account_id=$%d", *filter.AccountID)
+	}
+	if filter.ProxyID != nil {
+		add("r.proxy_id=$%d", *filter.ProxyID)
+	}
+	if filter.ObjectType != "" {
+		add("r.object_type=$%d", filter.ObjectType)
 	}
 	if filter.RequestedByUserID != nil {
 		add("r.requested_by_user_id=$%d", *filter.RequestedByUserID)
@@ -216,6 +241,21 @@ func (r *poolApprovalRepository) LockAccount(ctx context.Context, accountID int6
 			return err
 		}
 		return service.ErrPoolAccountNotFound
+	}
+	return nil
+}
+
+func (r *poolApprovalRepository) LockProxy(ctx context.Context, proxyID int64) error {
+	rows, err := r.executor(ctx).QueryContext(ctx, `SELECT id FROM proxies WHERE id=$1 AND deleted_at IS NULL FOR UPDATE`, proxyID)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = rows.Close() }()
+	if !rows.Next() {
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		return service.ErrProxyNotFound
 	}
 	return nil
 }
@@ -490,11 +530,22 @@ WHERE account_id=$1 AND action_type='VIEW_CREDENTIAL' AND status IN ('pending','
 	return err
 }
 
+func (r *poolApprovalRepository) InvalidateProxyCredentialApprovals(ctx context.Context, proxyID int64, reason string) error {
+	_, err := r.executor(ctx).ExecContext(ctx, `
+UPDATE pool_approval_requests
+SET status='expired', decision_reason=$2, decided_at=COALESCE(decided_at,NOW()),
+    reveal_expires_at=NULL, payload='{}'::jsonb, updated_at=NOW()
+WHERE proxy_id=$1 AND action_type='VIEW_PROXY_CREDENTIAL' AND status IN ('pending','approved')`, proxyID, reason)
+	return err
+}
+
 func (r *poolApprovalRepository) SetDecision(ctx context.Context, id int64, status string, actorID int64, reason *string, revealExpiresAt *time.Time) error {
 	result, err := r.executor(ctx).ExecContext(ctx, `
 UPDATE pool_approval_requests
 SET status=$2,decided_by_user_id=$3,decision_reason=$4,decided_at=NOW(),
-    reveal_expires_at=$5,payload='{}'::jsonb,updated_at=NOW()
+    reveal_expires_at=$5,
+    payload=CASE WHEN action_type='EXPORT_PROXY_CREDENTIALS' THEN payload ELSE '{}'::jsonb END,
+    updated_at=NOW()
 WHERE id=$1 AND status='pending'`, id, status, actorID, reason, revealExpiresAt)
 	if err != nil {
 		return err
@@ -555,8 +606,8 @@ func (r *poolApprovalRepository) LoadCredentials(ctx context.Context, accountID 
 func (r *poolApprovalRepository) ConsumeReveal(ctx context.Context, id int64, revealedAt time.Time) error {
 	result, err := r.executor(ctx).ExecContext(ctx, `
 UPDATE pool_approval_requests
-SET status='consumed',revealed_at=$2,updated_at=$2
-WHERE id=$1 AND action_type='VIEW_CREDENTIAL' AND status='approved'
+SET status='consumed',revealed_at=$2,payload='{}'::jsonb,updated_at=$2
+WHERE id=$1 AND action_type IN ('VIEW_CREDENTIAL','VIEW_PROXY_CREDENTIAL','EXPORT_PROXY_CREDENTIALS') AND status='approved'
   AND revealed_at IS NULL AND reveal_expires_at > $2`, id, revealedAt.UTC())
 	if err != nil {
 		return err

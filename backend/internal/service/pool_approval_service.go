@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net"
 	"reflect"
 	"sort"
 	"strings"
@@ -17,9 +18,13 @@ import (
 )
 
 const (
-	PoolApprovalUpdateAccount  = "UPDATE_ACCOUNT"
-	PoolApprovalViewCredential = "VIEW_CREDENTIAL"
-	PoolApprovalDeleteAccount  = "DELETE_ACCOUNT"
+	PoolApprovalUpdateAccount          = "UPDATE_ACCOUNT"
+	PoolApprovalViewCredential         = "VIEW_CREDENTIAL"
+	PoolApprovalDeleteAccount          = "DELETE_ACCOUNT"
+	PoolApprovalUpdateProxy            = "UPDATE_PROXY"
+	PoolApprovalViewProxyCredential    = "VIEW_PROXY_CREDENTIAL"
+	PoolApprovalExportProxyCredentials = "EXPORT_PROXY_CREDENTIALS"
+	PoolApprovalUpdateMihomo           = "UPDATE_MIHOMO"
 
 	PoolApprovalPending  = "pending"
 	PoolApprovalApproved = "approved"
@@ -44,6 +49,17 @@ type PoolApprovalPayload struct {
 	ExtraMerge    map[string]any          `json:"extra_merge,omitempty"`
 	Reauthorize   bool                    `json:"reauthorize,omitempty"`
 	DeleteOptions *AccountDeleteOptions   `json:"delete_options,omitempty"`
+	ProxyUpdate   *UpdateProxyInput       `json:"proxy_update,omitempty"`
+	ProxyIDs      []int64                 `json:"proxy_ids,omitempty"`
+	MihomoUpdate  *MihomoApprovalUpdate   `json:"mihomo_update,omitempty"`
+}
+
+type MihomoApprovalUpdate struct {
+	Kind             string `json:"kind"`
+	Mode             string `json:"mode,omitempty"`
+	Selection        string `json:"selection,omitempty"`
+	Subscription     string `json:"subscription,omitempty"`
+	SubscriptionHost string `json:"subscription_host,omitempty"`
 }
 
 type PoolCostUpdate struct {
@@ -119,6 +135,10 @@ type PoolApproval struct {
 	ActionType        string                    `json:"action_type"`
 	AccountID         int64                     `json:"account_id"`
 	AccountName       string                    `json:"account_name"`
+	ObjectType        string                    `json:"object_type"`
+	ProxyID           *int64                    `json:"proxy_id,omitempty"`
+	ProxyName         string                    `json:"proxy_name,omitempty"`
+	ResourceKey       string                    `json:"resource_key,omitempty"`
 	Status            string                    `json:"status"`
 	Reason            string                    `json:"reason"`
 	BaseRevision      string                    `json:"base_revision"`
@@ -145,14 +165,19 @@ type PoolApprovalFilter struct {
 	Scope             string
 	ActorID           int64
 	HighRisk          *bool
+	ObjectType        string
+	ProxyID           *int64
 }
 
 type CreatePoolApprovalInput struct {
-	ActionType  string
-	AccountID   int64
-	Reason      string
-	RequesterID int64
-	Payload     PoolApprovalPayload
+	ActionType        string
+	AccountID         int64
+	Reason            string
+	RequesterID       int64
+	Payload           PoolApprovalPayload
+	ProxyID           *int64
+	ResourceKey       string
+	RequirePeerReview bool
 }
 
 type PoolApprovalAccountState struct {
@@ -168,12 +193,23 @@ type CredentialReveal struct {
 	RevealedAt  time.Time      `json:"revealed_at"`
 }
 
+type ProxyCredentialReveal struct {
+	Proxy      Proxy     `json:"proxy"`
+	RevealedAt time.Time `json:"revealed_at"`
+}
+
+type ProxyExportReveal struct {
+	Proxies    []Proxy   `json:"proxies"`
+	RevealedAt time.Time `json:"revealed_at"`
+}
+
 type PoolApprovalRepository interface {
 	ExpireStale(ctx context.Context, now time.Time) error
 	CreateApproval(ctx context.Context, approval *PoolApproval) (*PoolApproval, error)
 	ListApprovals(ctx context.Context, filter PoolApprovalFilter, limit, offset int) ([]PoolApproval, int64, error)
 	GetApproval(ctx context.Context, id int64, forUpdate bool) (*PoolApproval, error)
 	LockAccount(ctx context.Context, accountID int64) error
+	LockProxy(ctx context.Context, proxyID int64) error
 	GetApprovalAccountState(ctx context.Context, accountID int64) (*PoolApprovalAccountState, error)
 	UpdatePoolAccountApproved(ctx context.Context, accountID int64, input UpdatePoolAccountInput) error
 	UpdateCostApproved(ctx context.Context, update PoolCostUpdate) error
@@ -182,6 +218,7 @@ type PoolApprovalRepository interface {
 	MarkExpired(ctx context.Context, id int64, reason string) error
 	LoadCredentials(ctx context.Context, accountID int64) (map[string]any, error)
 	ConsumeReveal(ctx context.Context, id int64, revealedAt time.Time) error
+	InvalidateProxyCredentialApprovals(ctx context.Context, proxyID int64, reason string) error
 }
 
 type poolApprovalDeleteImpactReader interface {
@@ -198,10 +235,11 @@ func (s *PoolService) CreateApproval(ctx context.Context, input CreatePoolApprov
 	}
 	input.ActionType = strings.ToUpper(strings.TrimSpace(input.ActionType))
 	input.Reason = strings.TrimSpace(input.Reason)
-	if input.AccountID <= 0 || input.RequesterID <= 0 {
-		return nil, infraerrors.BadRequest("INVALID_APPROVAL_PARTY", "account and requester are required")
+	if input.RequesterID <= 0 {
+		return nil, infraerrors.BadRequest("INVALID_APPROVAL_PARTY", "requester is required")
 	}
-	primaryBypass := s.IsPrimaryAdmin(ctx, input.RequesterID)
+	peerReview := input.RequirePeerReview || !isAccountApprovalAction(input.ActionType)
+	primaryBypass := !peerReview && s.IsPrimaryAdmin(ctx, input.RequesterID)
 	if input.Reason == "" && primaryBypass && input.ActionType == PoolApprovalViewCredential {
 		input.Reason = "primary administrator direct credential access"
 	}
@@ -214,44 +252,116 @@ func (s *PoolService) CreateApproval(ctx context.Context, input CreatePoolApprov
 	if err := s.approvalRepo.ExpireStale(ctx, time.Now().UTC()); err != nil {
 		return nil, err
 	}
-	account, err := s.adminService.GetAccount(ctx, input.AccountID)
-	if err != nil {
-		return nil, err
-	}
-	poolState, err := s.approvalRepo.GetApprovalAccountState(ctx, input.AccountID)
-	if err != nil {
-		return nil, err
-	}
-	var costBefore *AccountCostEntry
-	if input.Payload.CostUpdate != nil {
-		costBefore, err = s.approvalCostEntry(ctx, input.AccountID, input.Payload.CostUpdate.CostID)
+
+	var revision string
+	var summary PoolApprovalChangeSummary
+	objectType := "account"
+	var accountID int64
+	var proxyID *int64
+	resourceKey := ""
+	var err error
+
+	switch {
+	case isAccountApprovalAction(input.ActionType):
+		if input.AccountID <= 0 {
+			return nil, infraerrors.BadRequest("INVALID_APPROVAL_PARTY", "account is required")
+		}
+		accountID = input.AccountID
+		account, getErr := s.adminService.GetAccount(ctx, accountID)
+		if getErr != nil {
+			return nil, getErr
+		}
+		poolState, stateErr := s.approvalRepo.GetApprovalAccountState(ctx, accountID)
+		if stateErr != nil {
+			return nil, stateErr
+		}
+		var costBefore *AccountCostEntry
+		if input.Payload.CostUpdate != nil {
+			costBefore, err = s.approvalCostEntry(ctx, accountID, input.Payload.CostUpdate.CostID)
+			if err != nil {
+				return nil, err
+			}
+		}
+		revision, err = poolApprovalRevision(account, poolState, input.Payload)
 		if err != nil {
 			return nil, err
 		}
+		summary = buildPoolApprovalSummary(account, poolState, costBefore, input.Payload)
+		var deleteImpact *PoolAccountDeleteImpact
+		if input.Payload.DeleteOptions != nil {
+			deleteImpact = &PoolAccountDeleteImpact{Accounts: 1, CredentialKeys: int64(len(account.Credentials))}
+			if reader, ok := s.approvalRepo.(poolApprovalDeleteImpactReader); ok {
+				deleteImpact, err = reader.GetAccountDeleteImpact(ctx, accountID)
+				if err != nil {
+					return nil, err
+				}
+			}
+		}
+		summary.Business = buildPoolApprovalBusinessSummary(input.ActionType, account, summary, deleteImpact)
+
+	case input.ActionType == PoolApprovalUpdateProxy || input.ActionType == PoolApprovalViewProxyCredential:
+		if input.ProxyID == nil || *input.ProxyID <= 0 {
+			return nil, infraerrors.BadRequest("INVALID_APPROVAL_PARTY", "proxy is required")
+		}
+		objectType, proxyID = "proxy", input.ProxyID
+		proxy, getErr := s.adminService.GetProxy(ctx, *proxyID)
+		if getErr != nil {
+			return nil, getErr
+		}
+		if input.ActionType == PoolApprovalUpdateProxy && proxy.ManagedSource != nil {
+			return nil, infraerrors.Conflict("MANAGED_PROXY_UPDATE_FORBIDDEN", "managed proxies are changed from the Mihomo panel")
+		}
+		accounts, listErr := s.adminService.GetProxyAccounts(ctx, *proxyID)
+		if listErr != nil {
+			return nil, listErr
+		}
+		revision, err = proxyApprovalRevision(proxy, accounts)
+		if err != nil {
+			return nil, err
+		}
+		summary = buildProxyApprovalSummary(input.ActionType, proxy, input.Payload.ProxyUpdate, int64(len(accounts)))
+
+	case input.ActionType == PoolApprovalExportProxyCredentials:
+		objectType, resourceKey = "proxy_export", "proxy-export"
+		proxies, getErr := s.adminService.GetProxiesByIDs(ctx, input.Payload.ProxyIDs)
+		if getErr != nil {
+			return nil, getErr
+		}
+		if len(proxies) == 0 || len(proxies) != len(input.Payload.ProxyIDs) {
+			return nil, infraerrors.BadRequest("INVALID_PROXY_EXPORT", "at least one valid proxy is required")
+		}
+		revision, err = proxyExportApprovalRevision(proxies)
+		if err != nil {
+			return nil, err
+		}
+		summary = buildProxyExportApprovalSummary(proxies)
+
+	case input.ActionType == PoolApprovalUpdateMihomo:
+		objectType, resourceKey = "mihomo", strings.TrimSpace(input.ResourceKey)
+		if resourceKey == "" || input.Payload.MihomoUpdate == nil || s.mihomoApprovalExecutor == nil {
+			return nil, infraerrors.BadRequest("INVALID_MIHOMO_APPROVAL", "mihomo target and update are required")
+		}
+		if err = s.mihomoApprovalExecutor.ValidateApproval(ctx, resourceKey, *input.Payload.MihomoUpdate); err != nil {
+			return nil, err
+		}
+		revision, err = s.mihomoApprovalExecutor.ApprovalRevision(ctx, resourceKey)
+		if err != nil {
+			return nil, err
+		}
+		summary = buildMihomoApprovalSummary(resourceKey, input.Payload.MihomoUpdate)
+
+	default:
+		return nil, infraerrors.BadRequest("INVALID_APPROVAL_ACTION", "unsupported approval action")
 	}
-	revision, err := poolApprovalRevision(account, poolState, input.Payload)
-	if err != nil {
-		return nil, err
-	}
+
 	payload, err := json.Marshal(input.Payload)
 	if err != nil {
 		return nil, infraerrors.BadRequest("INVALID_APPROVAL_PAYLOAD", "approval payload is not serializable")
 	}
 	now := time.Now().UTC()
-	summary := buildPoolApprovalSummary(account, poolState, costBefore, input.Payload)
-	var deleteImpact *PoolAccountDeleteImpact
-	if input.Payload.DeleteOptions != nil {
-		deleteImpact = &PoolAccountDeleteImpact{Accounts: 1, CredentialKeys: int64(len(account.Credentials))}
-		if reader, ok := s.approvalRepo.(poolApprovalDeleteImpactReader); ok {
-			deleteImpact, err = reader.GetAccountDeleteImpact(ctx, input.AccountID)
-			if err != nil {
-				return nil, err
-			}
-		}
-	}
-	summary.Business = buildPoolApprovalBusinessSummary(input.ActionType, account, summary, deleteImpact)
 	created, err := s.approvalRepo.CreateApproval(ctx, &PoolApproval{
-		ActionType: input.ActionType, AccountID: input.AccountID, Status: PoolApprovalPending,
+		ActionType: input.ActionType, AccountID: accountID, ObjectType: objectType,
+		ProxyID: proxyID, ResourceKey: resourceKey, Status: PoolApprovalPending,
 		Reason: input.Reason, BaseRevision: revision, RequestedByUserID: input.RequesterID,
 		RequestedAt: now, ExpiresAt: now.Add(poolApprovalPendingTTL),
 		PrimaryBypass: primaryBypass,
@@ -318,10 +428,64 @@ func validateApprovalPayload(action string, payload PoolApprovalPayload) error {
 		if payload.DeleteOptions == nil || payload.AccountUpdate != nil || payload.PoolUpdate != nil || payload.CostUpdate != nil || len(payload.ExtraMerge) > 0 || payload.Reauthorize {
 			return infraerrors.BadRequest("INVALID_DELETE_APPROVAL_PAYLOAD", "delete approval requires delete_options only")
 		}
+	case PoolApprovalUpdateProxy:
+		if hasNonProxyApprovalPayload(payload) || len(payload.ProxyIDs) > 0 || payload.MihomoUpdate != nil {
+			return infraerrors.BadRequest("INVALID_PROXY_APPROVAL_PAYLOAD", "proxy update accepts proxy_update only")
+		}
+		if err := validateProxyApprovalUpdate(payload.ProxyUpdate); err != nil {
+			return err
+		}
+	case PoolApprovalViewProxyCredential:
+		if hasNonProxyApprovalPayload(payload) || payload.ProxyUpdate != nil || len(payload.ProxyIDs) > 0 || payload.MihomoUpdate != nil {
+			return infraerrors.BadRequest("INVALID_PROXY_VIEW_PAYLOAD", "proxy credential view does not accept updates")
+		}
+	case PoolApprovalExportProxyCredentials:
+		if hasNonProxyApprovalPayload(payload) || len(payload.ProxyIDs) == 0 || payload.ProxyUpdate != nil || payload.MihomoUpdate != nil {
+			return infraerrors.BadRequest("INVALID_PROXY_EXPORT_PAYLOAD", "proxy_ids are required")
+		}
+	case PoolApprovalUpdateMihomo:
+		if hasNonProxyApprovalPayload(payload) || payload.MihomoUpdate == nil || payload.ProxyUpdate != nil || len(payload.ProxyIDs) > 0 {
+			return infraerrors.BadRequest("INVALID_MIHOMO_APPROVAL_PAYLOAD", "mihomo_update is required")
+		}
 	default:
-		return infraerrors.BadRequest("INVALID_APPROVAL_ACTION", "action_type must be UPDATE_ACCOUNT, VIEW_CREDENTIAL, or DELETE_ACCOUNT")
+		return infraerrors.BadRequest("INVALID_APPROVAL_ACTION", "unsupported approval action")
 	}
 	return nil
+}
+
+func hasNonProxyApprovalPayload(payload PoolApprovalPayload) bool {
+	return payload.AccountUpdate != nil || payload.PoolUpdate != nil || payload.CostUpdate != nil || len(payload.ExtraMerge) > 0 || payload.Reauthorize || payload.DeleteOptions != nil
+}
+
+func validateProxyApprovalUpdate(update *UpdateProxyInput) error {
+	if update == nil {
+		return infraerrors.BadRequest("EMPTY_PROXY_APPROVAL_UPDATE", "proxy_update is required")
+	}
+	if strings.TrimSpace(update.Name) == "" || strings.TrimSpace(update.Host) == "" || update.Port < 1 || update.Port > 65535 {
+		return infraerrors.BadRequest("INVALID_PROXY_APPROVAL_UPDATE", "proxy name, host, and port are required")
+	}
+	switch update.Protocol {
+	case "http", "https", "socks5", "socks5h":
+	default:
+		return infraerrors.BadRequest("INVALID_PROXY_APPROVAL_UPDATE", "unsupported proxy protocol")
+	}
+	if update.Status != StatusActive && update.Status != StatusDisabled {
+		return infraerrors.BadRequest("INVALID_PROXY_APPROVAL_UPDATE", "proxy status must be active or inactive")
+	}
+	if update.FallbackMode != FallbackModeNone && update.FallbackMode != FallbackModeProxy && update.FallbackMode != FallbackModeDirect {
+		return infraerrors.BadRequest("INVALID_PROXY_APPROVAL_UPDATE", "invalid proxy fallback mode")
+	}
+	if (update.FallbackMode == FallbackModeProxy) != (update.BackupProxyID != nil) {
+		return infraerrors.BadRequest("INVALID_PROXY_APPROVAL_UPDATE", "backup proxy is required only for proxy fallback mode")
+	}
+	if update.ExpiryWarnDays < 0 {
+		return infraerrors.BadRequest("INVALID_PROXY_APPROVAL_UPDATE", "expiry warning days must not be negative")
+	}
+	return nil
+}
+
+func isAccountApprovalAction(action string) bool {
+	return action == PoolApprovalUpdateAccount || action == PoolApprovalViewCredential || action == PoolApprovalDeleteAccount
 }
 
 func hasAccountApprovalUpdate(v *UpdateAccountInput) bool {
@@ -421,30 +585,73 @@ func (s *PoolService) decideApproval(ctx context.Context, id, actorID int64, rea
 		if err := tx.Commit(); err != nil {
 			return nil, err
 		}
-		return nil, ErrPoolApprovalStale
+		return s.approvalRepo.GetApproval(ctx, id, false)
 	}
 
-	if err := s.approvalRepo.LockAccount(txCtx, item.AccountID); err != nil {
-		return nil, err
-	}
-	account, err := s.adminService.GetAccount(txCtx, item.AccountID)
-	if err != nil {
-		return nil, err
-	}
-	poolState, err := s.approvalRepo.GetApprovalAccountState(txCtx, item.AccountID)
-	if err != nil {
-		return nil, err
-	}
 	var payload PoolApprovalPayload
 	if err := json.Unmarshal(item.Payload, &payload); err != nil {
 		return nil, fmt.Errorf("decode approval payload: %w", err)
 	}
-	revision, err := poolApprovalRevision(account, poolState, payload)
+	var account *Account
+	var poolState *PoolApprovalAccountState
+	var revision string
+	switch {
+	case isAccountApprovalAction(item.ActionType):
+		if err := s.approvalRepo.LockAccount(txCtx, item.AccountID); err != nil {
+			return nil, err
+		}
+		account, err = s.adminService.GetAccount(txCtx, item.AccountID)
+		if err != nil {
+			return nil, err
+		}
+		poolState, err = s.approvalRepo.GetApprovalAccountState(txCtx, item.AccountID)
+		if err != nil {
+			return nil, err
+		}
+		revision, err = poolApprovalRevision(account, poolState, payload)
+	case item.ActionType == PoolApprovalUpdateProxy || item.ActionType == PoolApprovalViewProxyCredential:
+		if item.ProxyID == nil {
+			return nil, infraerrors.BadRequest("INVALID_PROXY_APPROVAL", "proxy target is missing")
+		}
+		if err = s.approvalRepo.LockProxy(txCtx, *item.ProxyID); err != nil {
+			return nil, err
+		}
+		var proxy *Proxy
+		proxy, err = s.adminService.GetProxy(txCtx, *item.ProxyID)
+		if err == nil {
+			if item.ActionType == PoolApprovalUpdateProxy && proxy.ManagedSource != nil {
+				return nil, infraerrors.Conflict("MANAGED_PROXY_UPDATE_FORBIDDEN", "managed proxies are changed from the Mihomo panel")
+			}
+			var accounts []ProxyAccountSummary
+			accounts, err = s.adminService.GetProxyAccounts(txCtx, *item.ProxyID)
+			if err == nil {
+				revision, err = proxyApprovalRevision(proxy, accounts)
+			}
+		}
+	case item.ActionType == PoolApprovalExportProxyCredentials:
+		for _, proxyID := range payload.ProxyIDs {
+			if err = s.approvalRepo.LockProxy(txCtx, proxyID); err != nil {
+				return nil, err
+			}
+		}
+		var proxies []Proxy
+		proxies, err = s.adminService.GetProxiesByIDs(txCtx, payload.ProxyIDs)
+		if err == nil {
+			revision, err = proxyExportApprovalRevision(proxies)
+		}
+	case item.ActionType == PoolApprovalUpdateMihomo:
+		if s.mihomoApprovalExecutor == nil {
+			return nil, fmt.Errorf("mihomo approval executor is not configured")
+		}
+		revision, err = s.mihomoApprovalExecutor.ApprovalRevision(txCtx, item.ResourceKey)
+	default:
+		return nil, infraerrors.BadRequest("INVALID_APPROVAL_ACTION", "invalid stored approval action")
+	}
 	if err != nil {
 		return nil, err
 	}
 	if revision != item.BaseRevision {
-		if err := s.approvalRepo.MarkExpired(txCtx, item.ID, "account changed after request creation"); err != nil {
+		if err := s.approvalRepo.MarkExpired(txCtx, item.ID, "target changed after request creation"); err != nil {
 			return nil, err
 		}
 		if err := tx.Commit(); err != nil {
@@ -455,6 +662,15 @@ func (s *PoolService) decideApproval(ctx context.Context, id, actorID int64, rea
 
 	var revealExpiresAt *time.Time
 	var approvedAccount *Account
+	var finalizeExternal func(bool) error
+	externalCommitted := false
+	defer func() {
+		if finalizeExternal != nil {
+			if finalizeErr := finalizeExternal(externalCommitted); finalizeErr != nil {
+				slog.Error("mihomo approval compensation failed", "approval_id", id, "error", finalizeErr)
+			}
+		}
+	}()
 	switch item.ActionType {
 	case PoolApprovalUpdateAccount:
 		if payload.AccountUpdate != nil {
@@ -486,6 +702,27 @@ func (s *PoolService) decideApproval(ctx context.Context, id, actorID int64, rea
 	case PoolApprovalViewCredential:
 		expires := time.Now().UTC().Add(poolRevealGrantTTL)
 		revealExpiresAt = &expires
+	case PoolApprovalUpdateProxy:
+		if item.ProxyID == nil || payload.ProxyUpdate == nil {
+			return nil, infraerrors.BadRequest("INVALID_PROXY_APPROVAL", "proxy update is missing")
+		}
+		if _, err = s.adminService.UpdateProxy(txCtx, *item.ProxyID, payload.ProxyUpdate); err != nil {
+			return nil, err
+		}
+		if err = s.approvalRepo.InvalidateProxyCredentialApprovals(txCtx, *item.ProxyID, "proxy connection changed"); err != nil {
+			return nil, err
+		}
+	case PoolApprovalViewProxyCredential, PoolApprovalExportProxyCredentials:
+		expires := time.Now().UTC().Add(poolRevealGrantTTL)
+		revealExpiresAt = &expires
+	case PoolApprovalUpdateMihomo:
+		if payload.MihomoUpdate == nil {
+			return nil, infraerrors.BadRequest("INVALID_MIHOMO_APPROVAL", "mihomo update is missing")
+		}
+		finalizeExternal, err = s.mihomoApprovalExecutor.ApplyApproved(txCtx, *payload.MihomoUpdate)
+		if err != nil {
+			return nil, err
+		}
 	case PoolApprovalDeleteAccount:
 		deleter, ok := s.adminService.(interface {
 			DeleteAccountWithOptions(context.Context, int64, AccountDeleteOptions) (*AccountDeleteResult, error)
@@ -515,6 +752,7 @@ func (s *PoolService) decideApproval(ctx context.Context, id, actorID int64, rea
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
+	externalCommitted = true
 	if payload.Reauthorize {
 		if cleared, clearErr := s.adminService.ClearAccountError(ctx, item.AccountID); clearErr != nil {
 			slog.Warn("pool approval reauthorization clear error failed", "account_id", item.AccountID, "error", clearErr)
@@ -568,6 +806,100 @@ func (s *PoolService) RevealCredential(ctx context.Context, id, actorID int64) (
 		return nil, err
 	}
 	return &CredentialReveal{AccountID: item.AccountID, Credentials: credentials, RevealedAt: revealedAt}, nil
+}
+
+func (s *PoolService) RevealProxyCredential(ctx context.Context, id, actorID int64) (*ProxyCredentialReveal, error) {
+	item, tx, txCtx, err := s.lockRevealApproval(ctx, id, actorID, PoolApprovalViewProxyCredential)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if item.ProxyID == nil {
+		return nil, infraerrors.BadRequest("INVALID_PROXY_APPROVAL", "proxy target is missing")
+	}
+	if err = s.approvalRepo.LockProxy(txCtx, *item.ProxyID); err != nil {
+		return nil, err
+	}
+	proxy, err := s.adminService.GetProxy(txCtx, *item.ProxyID)
+	if err != nil {
+		return nil, err
+	}
+	revealedAt := time.Now().UTC()
+	if err = s.approvalRepo.ConsumeReveal(txCtx, item.ID, revealedAt); err != nil {
+		return nil, err
+	}
+	if err = tx.Commit(); err != nil {
+		return nil, err
+	}
+	return &ProxyCredentialReveal{Proxy: *proxy, RevealedAt: revealedAt}, nil
+}
+
+func (s *PoolService) RevealProxyExport(ctx context.Context, id, actorID int64) (*ProxyExportReveal, error) {
+	item, tx, txCtx, err := s.lockRevealApproval(ctx, id, actorID, PoolApprovalExportProxyCredentials)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	var payload PoolApprovalPayload
+	if err = json.Unmarshal(item.Payload, &payload); err != nil {
+		return nil, fmt.Errorf("decode approval payload: %w", err)
+	}
+	for _, proxyID := range payload.ProxyIDs {
+		if err = s.approvalRepo.LockProxy(txCtx, proxyID); err != nil {
+			return nil, err
+		}
+	}
+	proxies, err := s.adminService.GetProxiesByIDs(txCtx, payload.ProxyIDs)
+	if err != nil {
+		return nil, err
+	}
+	revision, err := proxyExportApprovalRevision(proxies)
+	if err != nil {
+		return nil, err
+	}
+	if len(proxies) != len(payload.ProxyIDs) || revision != item.BaseRevision {
+		return nil, ErrPoolApprovalStale
+	}
+	revealedAt := time.Now().UTC()
+	if err = s.approvalRepo.ConsumeReveal(txCtx, item.ID, revealedAt); err != nil {
+		return nil, err
+	}
+	if err = tx.Commit(); err != nil {
+		return nil, err
+	}
+	return &ProxyExportReveal{Proxies: proxies, RevealedAt: revealedAt}, nil
+}
+
+func (s *PoolService) lockRevealApproval(ctx context.Context, id, actorID int64, action string) (*PoolApproval, *dbent.Tx, context.Context, error) {
+	if id <= 0 || actorID <= 0 {
+		return nil, nil, nil, infraerrors.BadRequest("INVALID_CREDENTIAL_REVEAL", "approval and actor are required")
+	}
+	if err := s.approvalRepo.ExpireStale(ctx, time.Now().UTC()); err != nil {
+		return nil, nil, nil, err
+	}
+	tx, err := s.entClient.Tx(ctx)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	txCtx := dbent.NewTxContext(ctx, tx)
+	item, err := s.approvalRepo.GetApproval(txCtx, id, true)
+	if err != nil {
+		_ = tx.Rollback()
+		return nil, nil, nil, err
+	}
+	if item.ActionType != action {
+		_ = tx.Rollback()
+		return nil, nil, nil, infraerrors.BadRequest("APPROVAL_NOT_CREDENTIAL_VIEW", "approval does not grant this access")
+	}
+	if item.RequestedByUserID != actorID {
+		_ = tx.Rollback()
+		return nil, nil, nil, infraerrors.Forbidden("CREDENTIAL_GRANT_OWNER_MISMATCH", "credential grant belongs to another administrator")
+	}
+	if item.Status != PoolApprovalApproved || item.RevealExpiresAt == nil || !time.Now().UTC().Before(*item.RevealExpiresAt) {
+		_ = tx.Rollback()
+		return nil, nil, nil, infraerrors.Conflict("CREDENTIAL_GRANT_UNAVAILABLE", "credential grant is expired, consumed, or not approved")
+	}
+	return item, tx, txCtx, nil
 }
 
 func poolApprovalRevision(account *Account, pool *PoolApprovalAccountState, payload PoolApprovalPayload) (string, error) {
@@ -858,6 +1190,109 @@ func buildPoolApprovalBusinessSummary(action string, account *Account, changes P
 		result.Groups = append(result.Groups, PoolApprovalBusinessGroup{Key: group, Items: items})
 	}
 	return result
+}
+
+func proxyApprovalRevision(proxy *Proxy, accounts []ProxyAccountSummary) (string, error) {
+	if proxy == nil {
+		return "", ErrProxyNotFound
+	}
+	ids := make([]int64, 0, len(accounts))
+	for i := range accounts {
+		ids = append(ids, accounts[i].ID)
+	}
+	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+	return approvalDigest(proxy, ids), nil
+}
+
+func proxyExportApprovalRevision(proxies []Proxy) (string, error) {
+	sort.Slice(proxies, func(i, j int) bool { return proxies[i].ID < proxies[j].ID })
+	return approvalDigest(proxies), nil
+}
+
+func approvalDigest(values ...any) string {
+	raw, _ := json.Marshal(values)
+	digest := sha256.Sum256(raw)
+	return hex.EncodeToString(digest[:])
+}
+
+func buildProxyApprovalSummary(action string, proxy *Proxy, update *UpdateProxyInput, accountCount int64) PoolApprovalChangeSummary {
+	business := PoolApprovalBusinessSummary{
+		Action:   action,
+		Object:   PoolApprovalBusinessObject{Type: "proxy", ID: proxy.ID, Name: proxy.Name},
+		HighRisk: true,
+		Impacts:  []PoolApprovalBusinessImpact{{Key: "bound_accounts", Count: accountCount}},
+	}
+	if action == PoolApprovalViewProxyCredential {
+		business.Scope = []string{"connection", "credentials"}
+		business.Groups = []PoolApprovalBusinessGroup{
+			{Key: "connection", Items: []PoolApprovalBusinessChange{{Key: "proxy_endpoint", Sensitive: true, Impact: "connection_access"}}},
+			{Key: "credentials", Items: []PoolApprovalBusinessChange{{Key: "proxy_credentials", Sensitive: true, Impact: "credential_access"}}},
+		}
+		return PoolApprovalChangeSummary{Business: business}
+	}
+
+	groups := []PoolApprovalBusinessGroup{}
+	connection := []PoolApprovalBusinessChange{}
+	runtime := []PoolApprovalBusinessChange{}
+	credentials := []PoolApprovalBusinessChange{}
+	add := func(items *[]PoolApprovalBusinessChange, key string, before, after any, impact string) {
+		if !reflect.DeepEqual(before, after) {
+			*items = append(*items, PoolApprovalBusinessChange{Key: key, Before: before, After: after, Impact: impact})
+		}
+	}
+	add(&connection, "name", proxy.Name, update.Name, "identity_changed")
+	add(&connection, "protocol", proxy.Protocol, update.Protocol, "connection_changed")
+	beforeEndpoint := net.JoinHostPort(proxy.Host, fmt.Sprint(proxy.Port))
+	afterEndpoint := net.JoinHostPort(update.Host, fmt.Sprint(update.Port))
+	if beforeEndpoint != afterEndpoint {
+		connection = append(connection, PoolApprovalBusinessChange{Key: "proxy_endpoint", Before: "configured", After: afterEndpoint, Impact: "connection_changed"})
+	}
+	add(&credentials, "username", proxy.Username != "", update.Username != "", "credential_replacement")
+	if proxy.Password != update.Password {
+		credentials = append(credentials, PoolApprovalBusinessChange{Key: "password", Before: proxy.Password != "", After: update.Password != "", Sensitive: true, Impact: "credential_replacement"})
+	}
+	add(&runtime, "status", proxy.Status, update.Status, "scheduling_changed")
+	add(&runtime, "expires_at", proxy.ExpiresAt, update.ExpiresAt, "scheduling_changed")
+	add(&runtime, "fallback_mode", proxy.FallbackMode, update.FallbackMode, "scheduling_changed")
+	add(&runtime, "backup_proxy_id", proxy.BackupProxyID, update.BackupProxyID, "scheduling_changed")
+	add(&runtime, "expiry_warn_days", proxy.ExpiryWarnDays, update.ExpiryWarnDays, "scheduling_changed")
+	for _, group := range []struct {
+		key   string
+		items []PoolApprovalBusinessChange
+	}{{"connection", connection}, {"credentials", credentials}, {"runtime", runtime}} {
+		if len(group.items) > 0 {
+			business.Scope = append(business.Scope, group.key)
+			groups = append(groups, PoolApprovalBusinessGroup{Key: group.key, Items: group.items})
+		}
+	}
+	business.Groups = groups
+	return PoolApprovalChangeSummary{Business: business}
+}
+
+func buildProxyExportApprovalSummary(proxies []Proxy) PoolApprovalChangeSummary {
+	return PoolApprovalChangeSummary{Business: PoolApprovalBusinessSummary{
+		Action: PoolApprovalExportProxyCredentials,
+		Object: PoolApprovalBusinessObject{Type: "proxy_export", Name: "代理连接信息导出"},
+		Scope:  []string{"connection", "credentials"}, HighRisk: true,
+		Groups:  []PoolApprovalBusinessGroup{{Key: "credentials", Items: []PoolApprovalBusinessChange{{Key: "proxy_export", After: len(proxies), Sensitive: true, Impact: "credential_export"}}}},
+		Impacts: []PoolApprovalBusinessImpact{{Key: "proxies", Count: int64(len(proxies))}},
+	}}
+}
+
+func buildMihomoApprovalSummary(resourceKey string, update *MihomoApprovalUpdate) PoolApprovalChangeSummary {
+	item := PoolApprovalBusinessChange{Key: update.Kind, After: update.Selection, Impact: "mihomo_configuration_changed"}
+	if update.Kind == "subscription" {
+		item.After = update.SubscriptionHost
+		item.Sensitive = true
+	} else if update.Kind == "refresh" {
+		item.After = "provider_nodes_refreshed"
+	}
+	return PoolApprovalChangeSummary{Business: PoolApprovalBusinessSummary{
+		Action: PoolApprovalUpdateMihomo,
+		Object: PoolApprovalBusinessObject{Type: "mihomo", Name: "Mihomo 节点池"},
+		Scope:  []string{"mihomo"}, HighRisk: true,
+		Groups: []PoolApprovalBusinessGroup{{Key: "mihomo", Items: []PoolApprovalBusinessChange{item}}},
+	}}
 }
 
 func poolApprovalBusinessGroup(field string) (string, string) {

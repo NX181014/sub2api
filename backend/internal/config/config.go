@@ -99,6 +99,18 @@ type Config struct {
 	Idempotency             IdempotencyConfig             `mapstructure:"idempotency"`
 	BatchImage              BatchImageConfig              `mapstructure:"batch_image"`
 	ImageStorage            ImageStorageConfig            `mapstructure:"image_storage"`
+	Mihomo                  MihomoConfig                  `mapstructure:"mihomo"`
+}
+
+type MihomoConfig struct {
+	Enabled         bool   `mapstructure:"enabled"`
+	ControllerURL   string `mapstructure:"controller_url"`
+	ConfigPath      string `mapstructure:"config_path"`
+	ProviderName    string `mapstructure:"provider_name"`
+	ProxyHost       string `mapstructure:"proxy_host"`
+	AutomaticPort   int    `mapstructure:"automatic_port"`
+	DirectionalPort int    `mapstructure:"directional_port"`
+	DynamicPort     int    `mapstructure:"dynamic_port"`
 }
 
 type LogConfig struct {
@@ -1845,6 +1857,14 @@ func configureConfigSource(setConfigFile, addConfigPath func(string)) {
 }
 
 func setDefaults() {
+	viper.SetDefault("mihomo.enabled", false)
+	viper.SetDefault("mihomo.controller_url", "http://mihomo:26790")
+	viper.SetDefault("mihomo.config_path", "/app/data/mihomo/config.yaml")
+	viper.SetDefault("mihomo.provider_name", "subscription")
+	viper.SetDefault("mihomo.proxy_host", "mihomo")
+	viper.SetDefault("mihomo.automatic_port", 26781)
+	viper.SetDefault("mihomo.directional_port", 26782)
+	viper.SetDefault("mihomo.dynamic_port", 26783)
 	viper.SetDefault("run_mode", RunModeStandard)
 
 	// Server

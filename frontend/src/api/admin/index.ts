@@ -35,6 +35,7 @@ import riskControlAPI from './riskControl'
 import adminComplianceAPI from './compliance'
 import auditAPI from './audit'
 import sharedPoolAPI from './sharedPool'
+import mihomoAPI from './mihomo'
 
 /**
  * Unified admin API object for convenient access
@@ -71,7 +72,8 @@ export const adminAPI = {
   riskControl: riskControlAPI,
   compliance: adminComplianceAPI,
   audit: auditAPI,
-  sharedPool: sharedPoolAPI
+  sharedPool: sharedPoolAPI,
+  mihomo: mihomoAPI
 }
 
 export {
@@ -106,8 +108,11 @@ export {
   riskControlAPI,
   adminComplianceAPI,
   auditAPI,
-  sharedPoolAPI
+  sharedPoolAPI,
+  mihomoAPI
 }
+
+export type { MihomoNode, MihomoStatus, MihomoApprovalResponse } from './mihomo'
 
 export default adminAPI
 
@@ -132,5 +137,7 @@ export type {
   SharedPoolSourceStat,
   PoolApproval,
   PoolApprovalList,
-  PoolCredentialReveal
+  PoolCredentialReveal,
+  PoolProxyCredentialReveal,
+  PoolProxyExportReveal
 } from './sharedPool'

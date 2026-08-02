@@ -234,6 +234,10 @@ export default {
       fallbackProxy: '指定备用代理',
       fallbackDirect: '回退直连',
       backupProxy: '备用代理',
+      connectionConfigured: '连接已配置',
+      connectionMissing: '连接未配置',
+      authConfigured: '认证已配置',
+      authNotConfigured: '无需认证',
     },
 
     // Redeem Codes Management
