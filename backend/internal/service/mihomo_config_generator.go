@@ -81,7 +81,7 @@ func generateManagedMihomoConfig(base map[string]any, subscriptions []mihomoConf
 			return nil, fmt.Errorf("invalid Mihomo route %d", route.ID)
 		}
 		if otherID, exists := ports[route.ListenerPort]; exists {
-			return nil, fmt.Errorf("Mihomo routes %d and %d share listener port %d", otherID, route.ID, route.ListenerPort)
+			return nil, fmt.Errorf("mihomo routes %d and %d share listener port %d", otherID, route.ID, route.ListenerPort)
 		}
 		ports[route.ListenerPort] = route.ID
 
@@ -99,12 +99,12 @@ func generateManagedMihomoConfig(base map[string]any, subscriptions []mihomoConf
 			proxyNames = append(proxyNames, name)
 		}
 		if len(proxyNames) == 0 {
-			return nil, fmt.Errorf("Mihomo route %d has no usable nodes", route.ID)
+			return nil, fmt.Errorf("mihomo route %d has no usable nodes", route.ID)
 		}
 		groupName := fmt.Sprintf("SUB2API-ROUTE-%d", route.ID)
 		group, err := buildMihomoRouteGroup(groupName, route.Kind, proxyNames, route.Selector)
 		if err != nil {
-			return nil, fmt.Errorf("Mihomo route %d: %w", route.ID, err)
+			return nil, fmt.Errorf("mihomo route %d: %w", route.ID, err)
 		}
 		groups = append(groups, group)
 		listeners = append(listeners, map[string]any{

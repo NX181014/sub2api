@@ -3,6 +3,8 @@ package service
 import (
 	"encoding/json"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestGenerateManagedMihomoConfigBuildsMultipleProvidersAndRoutes(t *testing.T) {
@@ -25,24 +27,36 @@ func TestGenerateManagedMihomoConfigBuildsMultipleProvidersAndRoutes(t *testing.
 			{ID: 22, Kind: "url-test", ListenerPort: 26784, NodeIDs: []int64{11, 12}},
 			{ID: 23, Kind: "load-balance", ListenerPort: 26785, NodeIDs: []int64{11, 12}, Selector: json.RawMessage(`{"strategy":"consistent-hashing"}`)},
 		})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(generated["proxy-providers"].(map[string]any)) != 2 {
+	require.NoError(t, err)
+	providers, ok := generated["proxy-providers"].(map[string]any)
+	require.True(t, ok)
+	if len(providers) != 2 {
 		t.Fatalf("providers = %#v", generated["proxy-providers"])
 	}
-	groups := generated["proxy-groups"].([]any)
-	if len(groups) != 3 || groups[1].(map[string]any)["type"] != "url-test" || groups[2].(map[string]any)["strategy"] != "consistent-hashing" {
+	groups, ok := generated["proxy-groups"].([]any)
+	require.True(t, ok)
+	require.Len(t, groups, 3)
+	urlTestGroup, ok := groups[1].(map[string]any)
+	require.True(t, ok)
+	loadBalanceGroup, ok := groups[2].(map[string]any)
+	require.True(t, ok)
+	if urlTestGroup["type"] != "url-test" || loadBalanceGroup["strategy"] != "consistent-hashing" {
 		t.Fatalf("groups = %#v", groups)
 	}
-	listeners := generated["listeners"].([]any)
-	if len(listeners) != 3 || listeners[1].(map[string]any)["port"] != 26784 {
+	listeners, ok := generated["listeners"].([]any)
+	require.True(t, ok)
+	require.Len(t, listeners, 3)
+	urlTestListener, ok := listeners[1].(map[string]any)
+	require.True(t, ok)
+	if urlTestListener["port"] != 26784 {
 		t.Fatalf("listeners = %#v", listeners)
 	}
 	if _, exists := generated["socks-port"]; exists {
 		t.Fatal("legacy socks-port was not removed")
 	}
-	if rules := generated["rules"].([]string); len(rules) != 1 || rules[0] != "MATCH,DIRECT" {
+	rules, ok := generated["rules"].([]string)
+	require.True(t, ok)
+	if len(rules) != 1 || rules[0] != "MATCH,DIRECT" {
 		t.Fatalf("rules = %#v", rules)
 	}
 	if generated["secret"] != "controller-secret" || generated["external-controller"] != "0.0.0.0:26790" {
