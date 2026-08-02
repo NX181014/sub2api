@@ -95,10 +95,10 @@ export async function create(proxyData: CreateProxyRequest): Promise<Proxy> {
  * @returns Updated proxy
  */
 export async function update(id: number, updates: UpdateProxyRequest): Promise<{
-  approval_required: true
+  approval_required: boolean
   approval: PoolApproval
 }> {
-  const { data } = await apiClient.put<{ approval_required: true; approval: PoolApproval }>(`/admin/proxies/${id}`, updates)
+  const { data } = await apiClient.put<{ approval_required: boolean; approval: PoolApproval }>(`/admin/proxies/${id}`, updates)
   return data
 }
 

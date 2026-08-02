@@ -94,6 +94,44 @@ func TestAccountDeleteUsesApprovalExceptForPrimaryAdmin(t *testing.T) {
 	}
 }
 
+func TestProxyDeleteAllowsOnlyPrimaryAdmin(t *testing.T) {
+	for _, tt := range []struct {
+		name     string
+		actorID  int64
+		method   string
+		path     string
+		body     string
+		wantCode int
+	}{
+		{name: "primary single", actorID: 1, method: http.MethodDelete, path: "/proxies/7", wantCode: http.StatusOK},
+		{name: "non-primary single", actorID: 2, method: http.MethodDelete, path: "/proxies/7", wantCode: http.StatusForbidden},
+		{name: "primary batch", actorID: 1, method: http.MethodPost, path: "/proxies/batch-delete", body: `{"ids":[7,8]}`, wantCode: http.StatusOK},
+		{name: "non-primary batch", actorID: 2, method: http.MethodPost, path: "/proxies/batch-delete", body: `{"ids":[7,8]}`, wantCode: http.StatusForbidden},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			adminSvc := newStubAdminService()
+			settings := service.NewSettingService(approvalGateSettingRepo{primaryID: "1"}, nil)
+			h := NewProxyHandler(adminSvc)
+			h.SetPoolService(service.NewPoolService(nil, nil, adminSvc, nil, settings))
+			router := gin.New()
+			router.Use(func(c *gin.Context) {
+				c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: tt.actorID})
+				c.Next()
+			})
+			router.DELETE("/proxies/:id", h.Delete)
+			router.POST("/proxies/batch-delete", h.BatchDelete)
+
+			w := httptest.NewRecorder()
+			req := httptest.NewRequest(tt.method, tt.path, strings.NewReader(tt.body))
+			req.Header.Set("Content-Type", "application/json")
+			router.ServeHTTP(w, req)
+			if w.Code != tt.wantCode {
+				t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+			}
+		})
+	}
+}
+
 func TestAccountBulkDeleteReportsDeletedAndApprovalResults(t *testing.T) {
 	for _, tt := range []struct {
 		name            string

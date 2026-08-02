@@ -3074,7 +3074,7 @@ const approvalStatusBadge = (status: string) => {
 
 const canReviewApproval = (approval: PoolApproval) => (
   normalizeApprovalStatus(approval.status) === 'pending' &&
-  approval.requested_by_user_id !== authStore.user?.id
+  (authStore.user?.is_primary_admin || approval.requested_by_user_id !== authStore.user?.id)
 )
 
 const canRevealApproval = (approval: PoolApproval) => (

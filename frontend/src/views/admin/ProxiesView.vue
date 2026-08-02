@@ -1,14 +1,49 @@
 <template>
   <AppLayout>
-    <TablePageLayout>
+    <div class="mb-4 min-w-0 overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm dark:border-dark-700 dark:bg-dark-800/70">
+      <div class="scrollbar-hide flex min-h-12 overflow-x-auto border-b border-gray-200 px-1 dark:border-dark-700 sm:px-3" role="tablist" aria-label="代理管理视图">
+        <button
+          id="proxy-list-tab"
+          type="button"
+          role="tab"
+          class="-mb-px inline-flex min-h-12 shrink-0 items-center gap-1.5 border-b-2 px-3 text-sm font-medium transition-colors sm:px-4"
+          :class="activeTab === 'proxies'
+            ? 'border-primary-500 text-primary-600 dark:text-primary-400'
+            : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700 dark:text-gray-400 dark:hover:border-dark-500 dark:hover:text-gray-200'"
+          :aria-selected="activeTab === 'proxies'"
+          aria-controls="proxy-list-panel"
+          @click="activeTab = 'proxies'"
+        >
+          <Icon name="server" size="sm" />
+          代理列表
+        </button>
+        <button
+          id="mihomo-routes-tab"
+          type="button"
+          role="tab"
+          class="-mb-px inline-flex min-h-12 shrink-0 items-center gap-1.5 border-b-2 px-3 text-sm font-medium transition-colors sm:px-4"
+          :class="activeTab === 'mihomo'
+            ? 'border-primary-500 text-primary-600 dark:text-primary-400'
+            : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700 dark:text-gray-400 dark:hover:border-dark-500 dark:hover:text-gray-200'"
+          :aria-selected="activeTab === 'mihomo'"
+          aria-controls="mihomo-routes-panel"
+          @click="activeTab = 'mihomo'"
+        >
+          <Icon name="link" size="sm" />
+          Mihomo 线路
+        </button>
+      </div>
+    </div>
+
+    <TablePageLayout
+      v-show="activeTab === 'proxies'"
+      id="proxy-list-panel"
+      role="tabpanel"
+      aria-labelledby="proxy-list-tab"
+      class="min-[1024px]:!h-[calc(100vh-64px-8rem)]"
+    >
       <template #filters>
-        <div class="space-y-4">
-          <MihomoPanel
-            ref="mihomoPanelRef"
-            @approval-submitted="handleApprovalSubmitted"
-            @routes-loaded="handleMihomoRoutesLoaded"
-          />
-          <div class="flex flex-wrap items-center gap-3">
+        <div class="flex flex-wrap items-center gap-3">
           <!-- Left: Search + Filters -->
           <div class="relative w-full sm:w-64">
             <Icon
@@ -103,7 +138,6 @@
               {{ t('admin.proxies.createProxy') }}
             </button>
           </div>
-        </div>
         </div>
       </template>
 
@@ -339,6 +373,14 @@
                 <Icon name="edit" size="sm" />
                 <span class="text-xs">{{ t('common.edit') }}</span>
               </button>
+              <button
+                v-if="isPrimaryAdmin && !row.managed_source"
+                @click="handleDelete(row)"
+                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20 dark:hover:text-red-400"
+              >
+                <Icon name="trash" size="sm" />
+                <span class="text-xs">{{ t('common.delete') }}</span>
+              </button>
             </div>
           </template>
 
@@ -394,6 +436,7 @@
               <button type="button" class="btn btn-secondary min-h-11 px-2" @click="handleTestConnection(proxy)">{{ t('admin.proxies.testConnection') }}</button>
               <button type="button" class="btn btn-secondary min-h-11 px-2" @click="proxy.managed_source ? openManagedProxy(proxy) : openProxyCredentialRequest(proxy)">{{ proxy.managed_source ? '管理线路' : t('common.view') }}</button>
               <button v-if="!proxy.managed_source" type="button" class="btn btn-secondary min-h-11 px-2" @click="openProxyCredentialRequest(proxy)">{{ t('common.edit') }}</button>
+              <button v-if="isPrimaryAdmin && !proxy.managed_source" type="button" class="btn btn-danger min-h-11 px-2" @click="handleDelete(proxy)">{{ t('common.delete') }}</button>
             </div>
           </article>
           <EmptyState v-if="!loading && displayedProxies.length === 0" :title="t('admin.proxies.noProxiesYet')" :description="t('admin.proxies.createFirstProxy')" :action-text="t('admin.proxies.createProxy')" @action="showCreateModal = true" />
@@ -412,6 +455,20 @@
       </template>
     </TablePageLayout>
 
+    <div
+      v-show="activeTab === 'mihomo'"
+      id="mihomo-routes-panel"
+      role="tabpanel"
+      aria-labelledby="mihomo-routes-tab"
+      class="min-w-0"
+    >
+      <MihomoPanel
+        ref="mihomoPanelRef"
+        @approval-submitted="handleApprovalSubmitted"
+        @routes-loaded="handleMihomoRoutesLoaded"
+      />
+    </div>
+
     <ProxyApprovalCenter
       :show="showProxyApprovalCenter"
       @close="showProxyApprovalCenter = false"
@@ -419,8 +476,19 @@
       @export-revealed="handleExportRevealed"
     />
 
+    <ConfirmDialog
+      :show="showDeleteDialog"
+      :title="t('admin.proxies.deleteProxy')"
+      :message="t('admin.proxies.deleteConfirm', { name: deletingProxy?.name })"
+      :confirm-text="t('common.delete')"
+      :cancel-text="t('common.cancel')"
+      :danger="true"
+      @confirm="confirmDelete"
+      @cancel="showDeleteDialog = false"
+    />
+
     <BaseDialog :show="showApprovalRequestDialog" :title="approvalRequestTitle" width="normal" @close="closeApprovalRequest">
-      <form id="proxy-approval-request-form" class="space-y-4" @submit.prevent="submitApprovalRequest">
+      <form id="proxy-approval-request-form" class="space-y-4" @submit.prevent="submitApprovalRequest()">
         <div class="rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm dark:border-dark-700 dark:bg-dark-900/40">
           {{ approvalRequestAction === 'export' ? `导出 ${approvalRequestIDs.length || '全部'} 个代理的连接信息` : `查看并编辑 ${approvalRequestProxy?.name || ''} 的连接信息` }}
         </div>
@@ -450,7 +518,7 @@
       <template #footer>
         <div class="flex flex-wrap justify-end gap-2">
           <button type="button" class="btn btn-secondary min-h-11" @click="copyRevealedProxy">复制连接</button>
-          <button v-if="revealedProxy && !revealedProxy.managed_source" type="button" class="btn btn-primary min-h-11" @click="editRevealedProxy">编辑并提交审核</button>
+          <button v-if="revealedProxy && !revealedProxy.managed_source" type="button" class="btn btn-primary min-h-11" @click="editRevealedProxy">{{ isPrimaryAdmin ? '直接编辑' : '编辑并提交审核' }}</button>
         </div>
       </template>
     </BaseDialog>
@@ -849,7 +917,7 @@
           <label class="input-label">{{ t('admin.proxies.backupProxy') }}</label>
           <Select v-model="editForm.backup_proxy_id" :options="backupProxyOptions(editingProxy?.id)" />
         </div>
-        <div>
+        <div v-if="!isPrimaryAdmin">
           <label class="input-label" for="proxy-update-reason">变更原因</label>
           <textarea id="proxy-update-reason" v-model.trim="editForm.approval_reason" required rows="3" class="input" placeholder="说明变更内容和影响范围，供另一位管理员审核"></textarea>
         </div>
@@ -1027,6 +1095,7 @@
 import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
+import { useAuthStore } from '@/stores/auth'
 import { adminAPI } from '@/api/admin'
 import type { MihomoRoute } from '@/api/admin/mihomo'
 import type { Proxy, ProxyAccountSummary, ProxyProtocol, ProxyQualityCheckResult, RevealedProxy } from '@/types'
@@ -1036,6 +1105,7 @@ import TablePageLayout from '@/components/layout/TablePageLayout.vue'
 import DataTable from '@/components/common/DataTable.vue'
 import Pagination from '@/components/common/Pagination.vue'
 import BaseDialog from '@/components/common/BaseDialog.vue'
+import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
 import ImportDataModal from '@/components/admin/proxy/ImportDataModal.vue'
 import Select from '@/components/common/Select.vue'
@@ -1053,6 +1123,8 @@ import { proxyExpiryBadgeClass, proxyExpiryLabelKey } from '@/utils/proxyExpiry'
 
 const { t } = useI18n()
 const appStore = useAppStore()
+const authStore = useAuthStore()
+const isPrimaryAdmin = computed(() => authStore.user?.is_primary_admin === true)
 const { copyToClipboard } = useClipboard()
 
 const columns = computed<Column[]>(() => [
@@ -1101,6 +1173,7 @@ const editStatusOptions = computed(() => [
 
 const proxies = ref<Proxy[]>([])
 const mihomoRoutes = ref<MihomoRoute[]>([])
+const activeTab = ref<'proxies' | 'mihomo'>('proxies')
 const mihomoPanelRef = ref<{ openManagedProxy: (proxyID: number) => void } | null>(null)
 const proxySourceFilter = ref('')
 const mihomoSubscriptionFilter = ref('')
@@ -1148,11 +1221,13 @@ const editPasswordDirty = ref(false)
 const showImportData = ref(false)
 const showProxyApprovalCenter = ref(false)
 const showApprovalRequestDialog = ref(false)
+const showDeleteDialog = ref(false)
 const approvalRequestAction = ref<'view' | 'export'>('view')
 const approvalRequestProxy = ref<Proxy | null>(null)
 const approvalRequestIDs = ref<number[]>([])
 const approvalRequestReason = ref('')
 const revealedProxy = ref<RevealedProxy | null>(null)
+const deletingProxy = ref<Proxy | null>(null)
 const showAccountsModal = ref(false)
 const submitting = ref(false)
 const testingProxyIds = ref<Set<number>>(new Set())
@@ -1167,6 +1242,7 @@ const {
   isSelected,
   select,
   deselect,
+  removeMany: removeSelectedProxies,
   toggleVisible,
   batchUpdate
 } = useTableSelection<Proxy>({
@@ -1531,7 +1607,7 @@ const handleUpdateProxy = async () => {
     appStore.showError(t('admin.proxies.portInvalid'))
     return
   }
-  if (!editForm.approval_reason.trim()) {
+  if (!isPrimaryAdmin.value && !editForm.approval_reason.trim()) {
     appStore.showError('请填写变更原因')
     return
   }
@@ -1557,15 +1633,43 @@ const handleUpdateProxy = async () => {
       updateData.password = editForm.password.trim() || null
     }
 
-    await adminAPI.proxies.update(editingProxy.value.id, updateData)
-    appStore.showSuccess('代理变更已提交给其他管理员审核')
+    const result = await adminAPI.proxies.update(editingProxy.value.id, updateData)
     closeEditModal()
-    showProxyApprovalCenter.value = true
+    if (result.approval_required) {
+      appStore.showSuccess('代理变更已提交给其他管理员审核')
+      showProxyApprovalCenter.value = true
+    } else {
+      appStore.showSuccess('代理变更已直接应用')
+      await loadProxies()
+    }
   } catch (error: any) {
     appStore.showError(error.response?.data?.detail || t('admin.proxies.failedToUpdate'))
     console.error('Error updating proxy:', error)
   } finally {
     submitting.value = false
+  }
+}
+
+const handleDelete = (proxy: Proxy) => {
+  if ((proxy.account_count || 0) > 0) {
+    appStore.showError(t('admin.proxies.deleteBlockedInUse'))
+    return
+  }
+  deletingProxy.value = proxy
+  showDeleteDialog.value = true
+}
+
+const confirmDelete = async () => {
+  if (!deletingProxy.value) return
+  try {
+    await adminAPI.proxies.delete(deletingProxy.value.id)
+    removeSelectedProxies([deletingProxy.value.id])
+    appStore.showSuccess(t('admin.proxies.proxyDeleted'))
+    showDeleteDialog.value = false
+    deletingProxy.value = null
+    await loadProxies()
+  } catch (error: any) {
+    appStore.showError(error.response?.data?.detail || t('admin.proxies.failedToDelete'))
   }
 }
 
@@ -1627,7 +1731,10 @@ const mihomoRouteKindLabel = (kind: MihomoRoute['kind']) => ({ dedicated: '专�
 const mihomoHealthLabel = (health: MihomoRoute['health']) => ({ healthy: '健康', degraded: '降级', failed: '异常', unknown: '未检测' })[health] || health
 const mihomoHealthClass = (health: MihomoRoute['health']) => health === 'healthy' ? 'badge-success' : health === 'degraded' ? 'badge-warning' : health === 'failed' ? 'badge-danger' : 'badge-gray'
 const handleMihomoRoutesLoaded = (routes: MihomoRoute[]) => { mihomoRoutes.value = routes }
-const openManagedProxy = (proxy: Proxy) => { mihomoPanelRef.value?.openManagedProxy(proxy.id) }
+const openManagedProxy = (proxy: Proxy) => {
+  activeTab.value = 'mihomo'
+  mihomoPanelRef.value?.openManagedProxy(proxy.id)
+}
 
 const formatLocation = (proxy: Proxy) => {
   const route = managedRoute(proxy)
@@ -2005,6 +2112,10 @@ const openProxyCredentialRequest = (proxy: Proxy) => {
   approvalRequestProxy.value = proxy
   approvalRequestIDs.value = []
   approvalRequestReason.value = ''
+  if (isPrimaryAdmin.value) {
+    void submitApprovalRequest(true)
+    return
+  }
   showApprovalRequestDialog.value = true
 }
 
@@ -2013,6 +2124,10 @@ const openExportApproval = () => {
   approvalRequestProxy.value = null
   approvalRequestIDs.value = Array.from(selectedProxyIds.value)
   approvalRequestReason.value = ''
+  if (isPrimaryAdmin.value) {
+    void submitApprovalRequest(true)
+    return
+  }
   showApprovalRequestDialog.value = true
 }
 
@@ -2023,16 +2138,21 @@ const closeApprovalRequest = () => {
   approvalRequestReason.value = ''
 }
 
-const submitApprovalRequest = async () => {
-  if (!approvalRequestReason.value.trim()) return
+const submitApprovalRequest = async (direct = false) => {
+  if (submitting.value) return
+  if (!direct && !approvalRequestReason.value.trim()) return
   submitting.value = true
   try {
     if (approvalRequestAction.value === 'view' && approvalRequestProxy.value) {
-      await adminAPI.sharedPool.createApproval({
+      const approval = await adminAPI.sharedPool.createApproval({
         action_type: 'VIEW_PROXY_CREDENTIAL',
         proxy_id: approvalRequestProxy.value.id,
-        reason: approvalRequestReason.value
+        reason: direct ? '' : approvalRequestReason.value
       })
+      if (direct) {
+        const result = await adminAPI.sharedPool.revealProxyApproval(approval.id)
+        handleProxyRevealed(result.proxy)
+      }
     } else {
       const proxyIDs = approvalRequestIDs.value.length > 0
         ? approvalRequestIDs.value
@@ -2041,11 +2161,19 @@ const submitApprovalRequest = async () => {
         appStore.showInfo(t('admin.proxies.noProxiesYet'))
         return
       }
-      await adminAPI.sharedPool.createApproval({
+      const approval = await adminAPI.sharedPool.createApproval({
         action_type: 'EXPORT_PROXY_CREDENTIALS',
-        reason: approvalRequestReason.value,
+        reason: direct ? '' : approvalRequestReason.value,
         payload: { proxy_ids: proxyIDs }
       })
+      if (direct) {
+        const result = await adminAPI.sharedPool.revealProxyExportApproval(approval.id)
+        handleExportRevealed(result.proxies)
+      }
+    }
+    if (direct) {
+      closeApprovalRequest()
+      return
     }
     appStore.showSuccess('已提交给其他管理员审核')
     closeApprovalRequest()

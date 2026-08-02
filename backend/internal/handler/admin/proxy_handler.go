@@ -58,7 +58,7 @@ type UpdateProxyRequest struct {
 	FallbackMode   string `json:"fallback_mode" binding:"omitempty,oneof=none proxy direct"`
 	BackupProxyID  *int64 `json:"backup_proxy_id"`
 	ExpiryWarnDays int    `json:"expiry_warn_days" binding:"omitempty,min=0"`
-	ApprovalReason string `json:"approval_reason" binding:"required,max=1000"`
+	ApprovalReason string `json:"approval_reason" binding:"max=1000"`
 }
 
 // List handles listing all proxies with pagination
@@ -230,26 +230,68 @@ func (h *ProxyHandler) Update(c *gin.Context) {
 	approval, err := h.poolService.CreateApproval(c.Request.Context(), service.CreatePoolApprovalInput{
 		ActionType: service.PoolApprovalUpdateProxy, ProxyID: &proxyID,
 		RequesterID: actorID, Reason: strings.TrimSpace(req.ApprovalReason),
-		RequirePeerReview: true, Payload: service.PoolApprovalPayload{ProxyUpdate: update},
+		Payload: service.PoolApprovalPayload{ProxyUpdate: update},
 	})
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
 	}
 
-	response.Accepted(c, gin.H{"approval_required": true, "approval": approval})
+	result := gin.H{"approval_required": !approval.PrimaryBypass, "approval": approval}
+	if approval.PrimaryBypass {
+		response.Success(c, result)
+		return
+	}
+	response.Accepted(c, result)
 }
 
 // Delete handles deleting a proxy
 // DELETE /api/v1/admin/proxies/:id
 func (h *ProxyHandler) Delete(c *gin.Context) {
-	response.Forbidden(c, "Proxy deletion requires peer approval")
+	actorID, ok := poolActorID(c)
+	if !ok {
+		return
+	}
+	if h.poolService == nil || !h.poolService.IsPrimaryAdmin(c.Request.Context(), actorID) {
+		response.Forbidden(c, "Proxy deletion requires primary administrator access")
+		return
+	}
+	proxyID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "Invalid proxy ID")
+		return
+	}
+	if err := h.adminService.DeleteProxy(c.Request.Context(), proxyID); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, gin.H{"message": "Proxy deleted successfully"})
 }
 
 // BatchDelete handles batch deleting proxies
 // POST /api/v1/admin/proxies/batch-delete
 func (h *ProxyHandler) BatchDelete(c *gin.Context) {
-	response.Forbidden(c, "Batch proxy deletion requires peer approval")
+	actorID, ok := poolActorID(c)
+	if !ok {
+		return
+	}
+	if h.poolService == nil || !h.poolService.IsPrimaryAdmin(c.Request.Context(), actorID) {
+		response.Forbidden(c, "Batch proxy deletion requires primary administrator access")
+		return
+	}
+	var req struct {
+		IDs []int64 `json:"ids" binding:"required,min=1"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+	result, err := h.adminService.BatchDeleteProxies(c.Request.Context(), req.IDs)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, result)
 }
 
 // Test handles testing proxy connectivity

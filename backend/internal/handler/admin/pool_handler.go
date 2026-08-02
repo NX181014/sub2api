@@ -194,7 +194,6 @@ func (h *PoolHandler) CreateApproval(c *gin.Context) {
 	item, err := h.poolService.CreateApproval(c.Request.Context(), service.CreatePoolApprovalInput{
 		ActionType: action, AccountID: req.AccountID, ProxyID: req.ProxyID, ResourceKey: req.ResourceKey,
 		Reason: req.Reason, RequesterID: actorID, Payload: req.Payload,
-		RequirePeerReview: !isAccountApprovalActionForHandler(action),
 	})
 	if err != nil {
 		response.ErrorFrom(c, err)
@@ -373,11 +372,6 @@ func (h *PoolHandler) RevealProxyExport(c *gin.Context) {
 		proxies = append(proxies, *dto.ProxyFromServiceAdmin(&item.Proxies[i]))
 	}
 	response.Success(c, gin.H{"proxies": proxies, "revealed_at": item.RevealedAt})
-}
-
-func isAccountApprovalActionForHandler(action string) bool {
-	action = strings.ToUpper(strings.TrimSpace(action))
-	return action == service.PoolApprovalUpdateAccount || action == service.PoolApprovalViewCredential || action == service.PoolApprovalDeleteAccount
 }
 
 type createPoolAccountIntakeRequest struct {

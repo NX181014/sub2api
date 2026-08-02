@@ -24,7 +24,7 @@
             <div class="flex flex-wrap gap-2">
               <button v-if="scope === 'reviewable' && approval.status === 'pending'" type="button" class="btn btn-danger min-h-11 px-3" :disabled="busy === approval.id" @click="reject(approval)">驳回</button>
               <button v-if="scope === 'reviewable' && approval.status === 'pending'" type="button" class="btn btn-primary min-h-11 px-3" :disabled="busy === approval.id" @click="approve(approval)">通过</button>
-              <button v-if="scope === 'mine' && isPrimaryAdmin && approval.action_type === 'UPDATE_MIHOMO' && approval.status === 'pending'" type="button" class="btn btn-primary min-h-11 px-3" title="仅系统当前只有一位管理员时可直接应用" :disabled="busy === approval.id" @click="approve(approval, true)">立即应用</button>
+              <button v-if="scope === 'mine' && isPrimaryAdmin && approval.status === 'pending'" type="button" class="btn btn-primary min-h-11 px-3" title="首位管理员可直接执行" :disabled="busy === approval.id" @click="approve(approval, true)">立即应用</button>
               <button v-if="scope === 'mine' && approval.status === 'approved' && revealable(approval)" type="button" class="btn btn-primary min-h-11 px-3" :disabled="busy === approval.id" @click="reveal(approval)">一次性领取</button>
             </div>
           </div>

@@ -319,10 +319,13 @@ func TestApprovalPrimaryBypassUsesFixedPrimaryAdmin(t *testing.T) {
 		input CreatePoolApprovalInput
 		want  bool
 	}{
-		{name: "primary mihomo", input: CreatePoolApprovalInput{ActionType: PoolApprovalUpdateMihomo, RequesterID: 42, RequirePeerReview: true}, want: true},
-		{name: "non-primary mihomo", input: CreatePoolApprovalInput{ActionType: PoolApprovalUpdateMihomo, RequesterID: 41, RequirePeerReview: true}},
+		{name: "primary mihomo", input: CreatePoolApprovalInput{ActionType: PoolApprovalUpdateMihomo, RequesterID: 42}, want: true},
+		{name: "non-primary mihomo", input: CreatePoolApprovalInput{ActionType: PoolApprovalUpdateMihomo, RequesterID: 41}},
 		{name: "primary account", input: CreatePoolApprovalInput{ActionType: PoolApprovalUpdateAccount, RequesterID: 42}, want: true},
-		{name: "forced account peer review", input: CreatePoolApprovalInput{ActionType: PoolApprovalUpdateAccount, RequesterID: 42, RequirePeerReview: true}},
+		{name: "primary proxy update", input: CreatePoolApprovalInput{ActionType: PoolApprovalUpdateProxy, RequesterID: 42}, want: true},
+		{name: "primary proxy credential view", input: CreatePoolApprovalInput{ActionType: PoolApprovalViewProxyCredential, RequesterID: 42}, want: true},
+		{name: "primary proxy export", input: CreatePoolApprovalInput{ActionType: PoolApprovalExportProxyCredentials, RequesterID: 42}, want: true},
+		{name: "non-primary proxy update", input: CreatePoolApprovalInput{ActionType: PoolApprovalUpdateProxy, RequesterID: 41}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

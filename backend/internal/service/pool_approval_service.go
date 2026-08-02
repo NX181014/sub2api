@@ -208,14 +208,13 @@ type PoolApprovalFilter struct {
 }
 
 type CreatePoolApprovalInput struct {
-	ActionType        string
-	AccountID         int64
-	Reason            string
-	RequesterID       int64
-	Payload           PoolApprovalPayload
-	ProxyID           *int64
-	ResourceKey       string
-	RequirePeerReview bool
+	ActionType  string
+	AccountID   int64
+	Reason      string
+	RequesterID int64
+	Payload     PoolApprovalPayload
+	ProxyID     *int64
+	ResourceKey string
 }
 
 type PoolApprovalAccountState struct {
@@ -277,8 +276,11 @@ func (s *PoolService) CreateApproval(ctx context.Context, input CreatePoolApprov
 		return nil, infraerrors.BadRequest("INVALID_APPROVAL_PARTY", "requester is required")
 	}
 	primaryBypass := s.approvalPrimaryBypass(ctx, input)
-	if input.Reason == "" && primaryBypass && input.ActionType == PoolApprovalViewCredential {
-		input.Reason = "primary administrator direct credential access"
+	if input.Reason == "" && primaryBypass {
+		input.Reason = "primary administrator direct action"
+		if input.ActionType == PoolApprovalViewCredential {
+			input.Reason = "primary administrator direct credential access"
+		}
 	}
 	if input.Reason == "" || len(input.Reason) > 1000 {
 		return nil, infraerrors.BadRequest("INVALID_APPROVAL_REASON", "reason is required and must not exceed 1000 characters")
@@ -415,11 +417,7 @@ func (s *PoolService) CreateApproval(ctx context.Context, input CreatePoolApprov
 }
 
 func (s *PoolService) approvalPrimaryBypass(ctx context.Context, input CreatePoolApprovalInput) bool {
-	if !s.IsPrimaryAdmin(ctx, input.RequesterID) {
-		return false
-	}
-	return input.ActionType == PoolApprovalUpdateMihomo ||
-		(!input.RequirePeerReview && isAccountApprovalAction(input.ActionType))
+	return s.IsPrimaryAdmin(ctx, input.RequesterID)
 }
 
 func (s *PoolService) RequestCostUpdate(ctx context.Context, costID, accountID, actorID int64, reason string, cost CreateAccountCostInput, poolUpdate *UpdatePoolAccountInput) (*PoolApproval, error) {
@@ -618,12 +616,7 @@ func (s *PoolService) decideApproval(ctx context.Context, id, actorID int64, rea
 	if item.Status != PoolApprovalPending {
 		return nil, infraerrors.Conflict("APPROVAL_ALREADY_DECIDED", "approval request is no longer pending")
 	}
-	canSelfDecide := item.PrimaryBypass && s.IsPrimaryAdmin(txCtx, actorID)
-	if item.ActionType == PoolApprovalUpdateMihomo {
-		canSelfDecide = s.approvalPrimaryBypass(txCtx, CreatePoolApprovalInput{
-			ActionType: PoolApprovalUpdateMihomo, RequesterID: actorID, RequirePeerReview: true,
-		})
-	}
+	canSelfDecide := s.IsPrimaryAdmin(txCtx, actorID)
 	if err := validatePoolApprovalDecisionActor(item, actorID, canSelfDecide); err != nil {
 		return nil, err
 	}

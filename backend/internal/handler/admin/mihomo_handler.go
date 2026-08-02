@@ -68,7 +68,7 @@ type mihomoManagedSubscriptionRequest struct {
 	SubscriptionURL        string `json:"subscription_url" binding:"max=4096"`
 	Enabled                bool   `json:"enabled"`
 	RefreshIntervalMinutes int    `json:"refresh_interval_minutes"`
-	Reason                 string `json:"reason" binding:"required,max=1000"`
+	Reason                 string `json:"reason" binding:"max=1000"`
 }
 
 func (h *MihomoHandler) CreateManagedSubscription(c *gin.Context) {
@@ -157,7 +157,7 @@ type mihomoManagedRouteRequest struct {
 	SubscriptionIDs []int64 `json:"subscription_ids"`
 	NodeIDs         []int64 `json:"node_ids"`
 	Enabled         bool    `json:"enabled"`
-	Reason          string  `json:"reason" binding:"required,max=1000"`
+	Reason          string  `json:"reason" binding:"max=1000"`
 }
 
 func (h *MihomoHandler) CreateManagedRoute(c *gin.Context) {
@@ -248,11 +248,6 @@ func (h *MihomoHandler) ManagedNodeAction(c *gin.Context) {
 		response.Success(c, gin.H{"message": "Nodes tested"})
 		return
 	}
-	reason := strings.TrimSpace(req.Reason)
-	if reason == "" {
-		response.BadRequest(c, "Reason is required")
-		return
-	}
 	actorID, ok := poolActorID(c)
 	if !ok {
 		return
@@ -262,7 +257,7 @@ func (h *MihomoHandler) ManagedNodeAction(c *gin.Context) {
 		response.ErrorFrom(c, err)
 		return
 	}
-	h.createApproval(c, actorID, resourceKey, reason, update)
+	h.createApproval(c, actorID, resourceKey, strings.TrimSpace(req.Reason), update)
 }
 
 func mihomoManagedResourceKey(update *service.MihomoApprovalUpdate) string {
@@ -288,7 +283,7 @@ func mihomoManagedResourceKey(update *service.MihomoApprovalUpdate) string {
 
 type mihomoSubscriptionRequest struct {
 	SubscriptionURL string `json:"subscription_url" binding:"required,max=4096"`
-	Reason          string `json:"reason" binding:"required,max=1000"`
+	Reason          string `json:"reason" binding:"max=1000"`
 }
 
 func (h *MihomoHandler) UpdateSubscription(c *gin.Context) {
@@ -310,7 +305,7 @@ func (h *MihomoHandler) UpdateSubscription(c *gin.Context) {
 }
 
 type mihomoReasonRequest struct {
-	Reason string `json:"reason" binding:"required,max=1000"`
+	Reason string `json:"reason" binding:"max=1000"`
 }
 
 func (h *MihomoHandler) Refresh(c *gin.Context) {
@@ -334,7 +329,7 @@ func (h *MihomoHandler) Refresh(c *gin.Context) {
 type mihomoModeRequest struct {
 	Mode      string `json:"mode" binding:"required"`
 	Selection string `json:"selection" binding:"required"`
-	Reason    string `json:"reason" binding:"required,max=1000"`
+	Reason    string `json:"reason" binding:"max=1000"`
 }
 
 func (h *MihomoHandler) UpdateMode(c *gin.Context) {
@@ -358,7 +353,7 @@ func (h *MihomoHandler) UpdateMode(c *gin.Context) {
 func (h *MihomoHandler) createApproval(c *gin.Context, actorID int64, resourceKey, reason string, update *service.MihomoApprovalUpdate) {
 	item, err := h.pool.CreateApproval(c.Request.Context(), service.CreatePoolApprovalInput{
 		ActionType: service.PoolApprovalUpdateMihomo, ResourceKey: resourceKey,
-		RequesterID: actorID, Reason: reason, RequirePeerReview: true,
+		RequesterID: actorID, Reason: reason,
 		Payload: service.PoolApprovalPayload{MihomoUpdate: update},
 	})
 	if err != nil {

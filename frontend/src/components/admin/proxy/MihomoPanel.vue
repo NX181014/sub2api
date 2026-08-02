@@ -247,17 +247,17 @@
         <fieldset><legend class="input-label">节点范围</legend><div class="mt-1 max-h-48 overflow-y-auto rounded-lg border border-gray-200 p-2 dark:border-dark-700"><label v-for="node in routeFormNodes" :key="String(nodeIdentity(node))" class="flex min-h-11 items-center gap-3 px-2"><input type="checkbox" class="h-4 w-4 rounded border-gray-300 text-primary-600" :checked="routeNodeSelected(node)" @change="toggleRouteNode(node)" /><span class="min-w-0 flex-1 truncate text-sm text-gray-700 dark:text-gray-200">{{ node.display_name || node.name }}</span><span :class="['badge shrink-0', node.alive ? 'badge-success' : 'badge-danger']">{{ delayLabel(node.delay) }}</span></label></div></fieldset>
         <label class="flex min-h-11 items-center gap-3"><input v-model="routeForm.enabled" type="checkbox" class="h-4 w-4 rounded border-gray-300 text-primary-600" /><span class="text-sm text-gray-700 dark:text-gray-200">启用线路</span></label>
       </template>
-      <div><label for="mihomo-entity-reason" class="input-label">变更原因</label><textarea id="mihomo-entity-reason" v-model.trim="entityReason" required rows="3" class="input" placeholder="说明用途、影响线路和账号范围"></textarea><p class="input-hint mt-1">{{ dialogPolicyHint }}</p></div>
+      <div><label for="mihomo-entity-reason" class="input-label">{{ isPrimaryAdmin ? '变更原因（可选）' : '变更原因' }}</label><textarea id="mihomo-entity-reason" v-model.trim="entityReason" :required="!isPrimaryAdmin" rows="3" class="input" placeholder="说明用途、影响线路和账号范围"></textarea><p class="input-hint mt-1">{{ dialogPolicyHint }}</p></div>
     </form>
-    <template #footer><div class="flex justify-end gap-2"><button type="button" class="btn btn-secondary min-h-11" @click="closeEntityDialog">取消</button><button type="submit" form="mihomo-entity-form" class="btn btn-primary min-h-11" :disabled="submitting || !entityReason">{{ submitting ? '处理中…' : changeActionLabel }}</button></div></template>
+    <template #footer><div class="flex justify-end gap-2"><button type="button" class="btn btn-secondary min-h-11" @click="closeEntityDialog">取消</button><button type="submit" form="mihomo-entity-form" class="btn btn-primary min-h-11" :disabled="submitting || (!isPrimaryAdmin && !entityReason)">{{ submitting ? '处理中…' : changeActionLabel }}</button></div></template>
   </BaseDialog>
 
   <BaseDialog :show="confirmAction !== null" :title="confirmTitle" width="normal" @close="closeConfirmDialog">
     <form id="mihomo-confirm-form" class="space-y-4" @submit.prevent="submitConfirmedAction">
       <div class="rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm text-gray-700 dark:border-dark-700 dark:bg-dark-900/40 dark:text-gray-200">{{ confirmDescription }}</div>
-      <div><label for="mihomo-confirm-reason" class="input-label">变更原因</label><textarea id="mihomo-confirm-reason" v-model.trim="confirmReason" required rows="3" class="input" placeholder="说明本次变更用途和影响范围"></textarea><p class="input-hint mt-1">{{ dialogPolicyHint }}</p></div>
+      <div><label for="mihomo-confirm-reason" class="input-label">{{ isPrimaryAdmin ? '变更原因（可选）' : '变更原因' }}</label><textarea id="mihomo-confirm-reason" v-model.trim="confirmReason" :required="!isPrimaryAdmin" rows="3" class="input" placeholder="说明本次变更用途和影响范围"></textarea><p class="input-hint mt-1">{{ dialogPolicyHint }}</p></div>
     </form>
-    <template #footer><div class="flex justify-end gap-2"><button type="button" class="btn btn-secondary min-h-11" @click="closeConfirmDialog">取消</button><button type="submit" form="mihomo-confirm-form" class="btn btn-primary min-h-11" :disabled="submitting || !confirmReason">{{ submitting ? '处理中…' : changeActionLabel }}</button></div></template>
+    <template #footer><div class="flex justify-end gap-2"><button type="button" class="btn btn-secondary min-h-11" @click="closeConfirmDialog">取消</button><button type="submit" form="mihomo-confirm-form" class="btn btn-primary min-h-11" :disabled="submitting || (!isPrimaryAdmin && !confirmReason)">{{ submitting ? '处理中…' : changeActionLabel }}</button></div></template>
   </BaseDialog>
 </template>
 
@@ -336,7 +336,7 @@ const runtimeHealthy = computed(() => Boolean(workbench.value?.status.enabled &&
 const isPrimaryAdmin = computed(() => authStore.user?.is_primary_admin === true)
 const changeActionLabel = computed(() => isPrimaryAdmin.value ? '直接应用' : '提交审核')
 const changePolicyHint = computed(() => isPrimaryAdmin.value ? '首位管理员的结构变更直接应用并记录审计。' : '结构变更由另一位管理员审核。')
-const dialogPolicyHint = computed(() => isPrimaryAdmin.value ? '提交后直接应用，原因写入审计记录。' : '提交后由另一位管理员审核，审批详情会展示业务影响。')
+const dialogPolicyHint = computed(() => isPrimaryAdmin.value ? '提交后直接应用并写入审计记录。' : '提交后由另一位管理员审核，审批详情会展示业务影响。')
 const healthyRouteCount = computed(() => routes.value.filter(route => route.health === 'healthy').length)
 const aliveNodeCount = computed(() => nodes.value.filter(node => node.alive && !node.excluded).length)
 const totalAccountCount = computed(() => routes.value.reduce((total, route) => total + (route.account_count || 0), 0))
@@ -463,7 +463,7 @@ const handleApprovalResult = async (result: MihomoApprovalResponse, directMessag
   await load()
 }
 const submitEntity = async () => {
-  if (!entityDialog.value || !entityReason.value) return
+  if (!entityDialog.value || (!isPrimaryAdmin.value && !entityReason.value)) return
   submitting.value = true
   try {
     let result: MihomoApprovalResponse
@@ -493,7 +493,7 @@ const confirmNodeAction = (action: MihomoNodeActionInput['action']) => { confirm
 const closeConfirmDialog = () => { confirmAction.value = null; confirmReason.value = '' }
 const submitConfirmedAction = async () => {
   const action = confirmAction.value
-  if (!action || !confirmReason.value) return
+  if (!action || (!isPrimaryAdmin.value && !confirmReason.value)) return
   submitting.value = true
   try {
     let result: MihomoApprovalResponse
