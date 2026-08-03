@@ -907,7 +907,13 @@
       </div>
     </BaseDialog>
     <SyncFromCrsModal :show="showSync" @close="showSync = false" @synced="reload" />
-    <ImportDataModal :show="showImportData" @close="showImportData = false" @imported="handleDataImported" />
+    <ImportDataModal
+      :show="showImportData"
+      :proxies="proxies"
+      :groups="groups"
+      @close="showImportData = false"
+      @imported="handleDataImported"
+    />
     <BulkEditAccountModal
       :show="showBulkEdit"
       :account-ids="selIds"

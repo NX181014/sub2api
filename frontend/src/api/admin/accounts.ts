@@ -746,10 +746,14 @@ export async function listImportBatch(
 export async function importData(payload: {
   data: AdminDataPayload
   skip_default_group_bind?: boolean
+  default_proxy_id?: number | null
+  group_ids?: number[]
 }): Promise<AdminDataImportResult> {
   const { data } = await apiClient.post<AdminDataImportResult>('/admin/accounts/data', {
     data: payload.data,
-    skip_default_group_bind: payload.skip_default_group_bind
+    skip_default_group_bind: payload.skip_default_group_bind,
+    default_proxy_id: payload.default_proxy_id,
+    group_ids: payload.group_ids
   })
   return data
 }

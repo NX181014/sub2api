@@ -28,12 +28,22 @@ vi.mock('vue-i18n', () => ({
   })
 }))
 
-const mountModal = () =>
+const mountModal = (props: Record<string, unknown> = {}) =>
   mount(ImportDataModal, {
-    props: { show: true },
+    props: { show: true, ...props },
     global: {
       stubs: {
-        BaseDialog: { template: '<div><slot /><slot name="footer" /></div>' }
+        BaseDialog: { template: '<div><slot /><slot name="footer" /></div>' },
+        ProxySelector: {
+          props: ['modelValue'],
+          emits: ['update:modelValue'],
+          template: '<select data-test="import-default-proxy" :value="modelValue ?? \'\'" @change="$emit(\'update:modelValue\', $event.target.value ? Number($event.target.value) : null)"><option value="">none</option><option value="7">Proxy 7</option></select>'
+        },
+        GroupSelector: {
+          props: ['modelValue', 'groups'],
+          emits: ['update:modelValue'],
+          template: '<button type="button" data-test="import-groups" :data-group-ids="groups.map(group => group.id).join(\',\')" @click="$emit(\'update:modelValue\', [3, 4])">groups</button>'
+        }
       }
     }
   })
@@ -173,6 +183,99 @@ describe('ImportDataModal', () => {
       skip_default_group_bind: true
     })
     expect(showSuccess).toHaveBeenCalledWith('admin.accounts.dataImportSuccess')
+  })
+
+  it('sends the selected default proxy and groups with the import request', async () => {
+    const { adminAPI } = await import('@/api/admin')
+    vi.mocked(adminAPI.accounts.importData).mockResolvedValue({
+      proxy_created: 0,
+      proxy_reused: 0,
+      proxy_failed: 0,
+      account_created: 1,
+      account_failed: 0
+    })
+
+    const wrapper = mountModal({ proxies: [{ id: 7, name: 'Proxy 7' }], groups: [{ id: 3 }, { id: 4 }] })
+    const input = wrapper.find('input[type="file"]')
+    setInputFiles(input.element, [makeJsonFile(
+      'bindings.json',
+      JSON.stringify({ exported_at: '2026-07-05T00:00:00Z', proxies: [], accounts: [{ name: 'a' }] })
+    )])
+
+    await input.trigger('change')
+    await wrapper.get('[data-test="import-default-proxy"]').setValue('7')
+    await wrapper.get('[data-test="import-groups"]').trigger('click')
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+
+    expect(adminAPI.accounts.importData).toHaveBeenCalledWith(expect.objectContaining({
+      default_proxy_id: 7,
+      group_ids: [3, 4]
+    }))
+  })
+
+  it('shows only groups compatible with every imported account platform', async () => {
+    const wrapper = mountModal({
+      groups: [
+        { id: 3, platform: 'openai' },
+        { id: 4, platform: 'gemini' },
+        { id: 5, platform: 'composite' }
+      ]
+    })
+    const input = wrapper.find('input[type="file"]')
+    setInputFiles(input.element, [makeJsonFile(
+      'mixed-platforms.json',
+      JSON.stringify({
+        proxies: [],
+        accounts: [{ platform: 'openai' }, { platform: 'gemini' }]
+      })
+    )])
+
+    await input.trigger('change')
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="import-groups"]').attributes('data-group-ids')).toBe('5')
+  })
+
+  it('waits for platform detection before importing selected groups', async () => {
+    const { adminAPI } = await import('@/api/admin')
+    vi.mocked(adminAPI.accounts.importData).mockResolvedValue({
+      proxy_created: 0,
+      proxy_reused: 0,
+      proxy_failed: 0,
+      account_created: 1,
+      account_failed: 0
+    })
+    let resolveText!: (value: string) => void
+    const content = JSON.stringify({
+      proxies: [],
+      accounts: [{ name: 'a', platform: 'openai' }]
+    })
+    const file = new File([content], 'delayed.json', { type: 'application/json' })
+    Object.defineProperty(file, 'text', {
+      value: vi.fn()
+        .mockImplementationOnce(() => new Promise<string>((resolve) => { resolveText = resolve }))
+        .mockResolvedValue(content)
+    })
+    const wrapper = mountModal({ groups: [{ id: 3, platform: 'gemini' }] })
+    const input = wrapper.find('input[type="file"]')
+    setInputFiles(input.element, [file])
+
+    await input.trigger('change')
+    expect(wrapper.get('[data-test="import-groups"]').attributes('data-group-ids')).toBe('')
+    await wrapper.get('[data-test="import-groups"]').trigger('click')
+    const submit = wrapper.find('form').trigger('submit')
+    await flushPromises()
+    expect(adminAPI.accounts.importData).not.toHaveBeenCalled()
+
+    resolveText(content)
+    await submit
+    await flushPromises()
+
+    expect(adminAPI.accounts.importData).toHaveBeenCalledWith({
+      data: expect.objectContaining({ accounts: [{ name: 'a', platform: 'openai' }] }),
+      skip_default_group_bind: true
+    })
   })
 
   it('部分成功时关闭弹窗仍通知父组件刷新', async () => {

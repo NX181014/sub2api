@@ -11,6 +11,7 @@ import (
 
 	"log/slog"
 
+	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -76,6 +77,8 @@ type DataAccount struct {
 type DataImportRequest struct {
 	Data                 DataPayload `json:"data"`
 	SkipDefaultGroupBind *bool       `json:"skip_default_group_bind"`
+	DefaultProxyID       *int64      `json:"default_proxy_id"`
+	GroupIDs             []int64     `json:"group_ids"`
 	uploaderUserID       int64
 	importBatchID        string
 }
@@ -268,15 +271,65 @@ func (h *AccountHandler) importData(ctx context.Context, req DataImportRequest) 
 	}
 
 	proxyKeyToID := make(map[string]int64, len(existingProxies))
+	proxyIDs := make(map[int64]struct{}, len(existingProxies))
 	// proxyNameToID 用于 backup_proxy_name 反查：DB 已有 + 本批次新建均会写入
 	proxyNameToID := make(map[string]int64, len(existingProxies))
 	for i := range existingProxies {
 		p := existingProxies[i]
+		proxyIDs[p.ID] = struct{}{}
 		key := buildProxyKey(p.Protocol, p.Host, p.Port, p.Username, p.Password)
 		proxyKeyToID[key] = p.ID
 		if p.Name != "" {
 			proxyNameToID[p.Name] = p.ID
 		}
+	}
+	if req.DefaultProxyID != nil {
+		if _, ok := proxyIDs[*req.DefaultProxyID]; !ok {
+			return result, infraerrors.BadRequest(
+				"ACCOUNT_DATA_DEFAULT_PROXY_NOT_FOUND",
+				fmt.Sprintf("default_proxy_id %d not found", *req.DefaultProxyID),
+			)
+		}
+	}
+
+	if len(req.GroupIDs) > 0 {
+		groups, groupErr := h.adminService.GetAllGroups(ctx)
+		if groupErr != nil {
+			return result, groupErr
+		}
+		groupsByID := make(map[int64]service.Group, len(groups))
+		for i := range groups {
+			groupsByID[groups[i].ID] = groups[i]
+		}
+		seenGroupIDs := make(map[int64]struct{}, len(req.GroupIDs))
+		normalizedGroupIDs := make([]int64, 0, len(req.GroupIDs))
+		for _, groupID := range req.GroupIDs {
+			group, ok := groupsByID[groupID]
+			if !ok {
+				return result, infraerrors.BadRequest(
+					"ACCOUNT_DATA_GROUP_NOT_FOUND",
+					fmt.Sprintf("group_id %d not found", groupID),
+				)
+			}
+			if _, seen := seenGroupIDs[groupID]; seen {
+				continue
+			}
+			for i := range dataPayload.Accounts {
+				account := dataPayload.Accounts[i]
+				if validateDataAccount(account) != nil {
+					continue
+				}
+				if group.Platform != service.PlatformComposite && group.Platform != account.Platform {
+					return result, infraerrors.BadRequest(
+						"ACCOUNT_DATA_GROUP_PLATFORM_MISMATCH",
+						fmt.Sprintf("group_id %d is not compatible with account platform %s", groupID, account.Platform),
+					)
+				}
+			}
+			seenGroupIDs[groupID] = struct{}{}
+			normalizedGroupIDs = append(normalizedGroupIDs, groupID)
+		}
+		req.GroupIDs = normalizedGroupIDs
 	}
 
 	for i := range dataPayload.Proxies {
@@ -411,6 +464,9 @@ func (h *AccountHandler) importData(ctx context.Context, req DataImportRequest) 
 				})
 				continue
 			}
+		} else if req.DefaultProxyID != nil {
+			id := *req.DefaultProxyID
+			proxyID = &id
 		}
 
 		enrichCredentialsFromIDToken(&item)
@@ -431,7 +487,7 @@ func (h *AccountHandler) importData(ctx context.Context, req DataImportRequest) 
 			Concurrency:          item.Concurrency,
 			Priority:             item.Priority,
 			RateMultiplier:       item.RateMultiplier,
-			GroupIDs:             nil,
+			GroupIDs:             append([]int64(nil), req.GroupIDs...),
 			ExpiresAt:            item.ExpiresAt,
 			AutoPauseOnExpired:   item.AutoPauseOnExpired,
 			SkipDefaultGroupBind: skipDefaultGroupBind,

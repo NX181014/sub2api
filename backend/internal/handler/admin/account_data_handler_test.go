@@ -338,3 +338,201 @@ func TestImportDataReusesProxyAndSkipsDefaultGroup(t *testing.T) {
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &imported))
 	require.Equal(t, []DataImportedAccount{{ID: 300, Name: "acc"}}, imported.Data.Accounts)
 }
+
+func TestImportDataUsesDefaultProxyAndPassesGroups(t *testing.T) {
+	router, adminSvc := setupAccountDataRouter()
+	adminSvc.proxies = []service.Proxy{{
+		ID:       7,
+		Name:     "default-proxy",
+		Protocol: "socks5",
+		Host:     "127.0.0.1",
+		Port:     1080,
+		Status:   service.StatusActive,
+	}}
+	adminSvc.groups = []service.Group{
+		{ID: 41, Platform: service.PlatformOpenAI, Status: service.StatusActive},
+		{ID: 42, Platform: service.PlatformComposite, Status: service.StatusActive},
+	}
+
+	payload := map[string]any{
+		"data": map[string]any{
+			"type":    dataType,
+			"version": dataVersion,
+			"proxies": []map[string]any{},
+			"accounts": []map[string]any{{
+				"name":        "default-proxy-account",
+				"platform":    service.PlatformOpenAI,
+				"type":        service.AccountTypeOAuth,
+				"credentials": map[string]any{"token": "x"},
+			}},
+		},
+		"default_proxy_id":        7,
+		"group_ids":               []int64{41, 41, 42},
+		"skip_default_group_bind": true,
+	}
+	body, err := json.Marshal(payload)
+	require.NoError(t, err)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/accounts/data", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Len(t, adminSvc.createdAccounts, 1)
+	created := adminSvc.createdAccounts[0]
+	require.NotNil(t, created.ProxyID)
+	require.Equal(t, int64(7), *created.ProxyID)
+	require.Equal(t, []int64{41, 42}, created.GroupIDs)
+	require.True(t, created.SkipDefaultGroupBind)
+}
+
+func TestImportDataPrefersFileProxyKeyOverDefaultProxy(t *testing.T) {
+	router, adminSvc := setupAccountDataRouter()
+	adminSvc.proxies = []service.Proxy{
+		{
+			ID:       7,
+			Name:     "default-proxy",
+			Protocol: "socks5",
+			Host:     "127.0.0.1",
+			Port:     1080,
+			Status:   service.StatusActive,
+		},
+		{
+			ID:       8,
+			Name:     "file-proxy",
+			Protocol: "http",
+			Host:     "127.0.0.2",
+			Port:     8080,
+			Status:   service.StatusActive,
+		},
+	}
+	fileProxyKey := buildProxyKey("http", "127.0.0.2", 8080, "", "")
+	payload := map[string]any{
+		"data": map[string]any{
+			"type":    dataType,
+			"version": dataVersion,
+			"proxies": []map[string]any{},
+			"accounts": []map[string]any{{
+				"name":        "file-proxy-account",
+				"platform":    service.PlatformOpenAI,
+				"type":        service.AccountTypeOAuth,
+				"credentials": map[string]any{"token": "x"},
+				"proxy_key":   fileProxyKey,
+			}},
+		},
+		"default_proxy_id":        7,
+		"skip_default_group_bind": true,
+	}
+	body, err := json.Marshal(payload)
+	require.NoError(t, err)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/accounts/data", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Len(t, adminSvc.createdAccounts, 1)
+	created := adminSvc.createdAccounts[0]
+	require.NotNil(t, created.ProxyID)
+	require.Equal(t, int64(8), *created.ProxyID)
+}
+
+func TestImportDataRejectsUnknownDefaultProxyBeforeCreating(t *testing.T) {
+	router, adminSvc := setupAccountDataRouter()
+	adminSvc.proxies = []service.Proxy{{
+		ID:       7,
+		Protocol: "socks5",
+		Host:     "127.0.0.1",
+		Port:     1080,
+		Status:   service.StatusActive,
+	}}
+	payload := map[string]any{
+		"data": map[string]any{
+			"type":    dataType,
+			"version": dataVersion,
+			"proxies": []map[string]any{},
+			"accounts": []map[string]any{{
+				"name":        "rejected-account",
+				"platform":    service.PlatformOpenAI,
+				"type":        service.AccountTypeOAuth,
+				"credentials": map[string]any{"token": "x"},
+			}},
+		},
+		"default_proxy_id": 999,
+	}
+	body, err := json.Marshal(payload)
+	require.NoError(t, err)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/accounts/data", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	require.Empty(t, adminSvc.createdProxies)
+	require.Empty(t, adminSvc.createdAccounts)
+}
+
+func TestImportDataRejectsUnknownGroupBeforeCreating(t *testing.T) {
+	router, adminSvc := setupAccountDataRouter()
+	payload := map[string]any{
+		"data": map[string]any{
+			"type":    dataType,
+			"version": dataVersion,
+			"proxies": []map[string]any{{
+				"protocol": "socks5",
+				"host":     "127.0.0.1",
+				"port":     1080,
+			}},
+			"accounts": []map[string]any{{
+				"name":        "rejected-account",
+				"platform":    service.PlatformOpenAI,
+				"type":        service.AccountTypeOAuth,
+				"credentials": map[string]any{"token": "x"},
+			}},
+		},
+		"group_ids": []int64{999},
+	}
+	body, err := json.Marshal(payload)
+	require.NoError(t, err)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/accounts/data", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	require.Empty(t, adminSvc.createdProxies)
+	require.Empty(t, adminSvc.createdAccounts)
+}
+
+func TestImportDataRejectsIncompatibleGroupBeforeCreating(t *testing.T) {
+	router, adminSvc := setupAccountDataRouter()
+	adminSvc.groups = []service.Group{{
+		ID:       41,
+		Platform: service.PlatformAnthropic,
+		Status:   service.StatusActive,
+	}}
+	payload := map[string]any{
+		"data": map[string]any{
+			"type":    dataType,
+			"version": dataVersion,
+			"proxies": []map[string]any{},
+			"accounts": []map[string]any{{
+				"name":        "openai-account",
+				"platform":    service.PlatformOpenAI,
+				"type":        service.AccountTypeOAuth,
+				"credentials": map[string]any{"token": "x"},
+			}},
+		},
+		"group_ids": []int64{41},
+	}
+	body, err := json.Marshal(payload)
+	require.NoError(t, err)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/accounts/data", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	require.Empty(t, adminSvc.createdProxies)
+	require.Empty(t, adminSvc.createdAccounts)
+}

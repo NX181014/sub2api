@@ -51,6 +51,22 @@
         />
       </div>
 
+      <section class="space-y-3 rounded-lg border border-gray-200 p-3 dark:border-dark-700">
+        <div>
+          <h3 class="text-sm font-medium text-gray-900 dark:text-white">{{ t('admin.accounts.dataImportBindingTitle') }}</h3>
+          <p class="mt-1 text-xs text-gray-500 dark:text-dark-400">{{ t('admin.accounts.dataImportBindingHint') }}</p>
+        </div>
+        <div>
+          <label class="input-label">{{ t('admin.accounts.dataImportProxy') }}</label>
+          <ProxySelector v-model="defaultProxyId" :proxies="props.proxies" />
+          <p class="mt-1 text-xs text-gray-500 dark:text-dark-400">{{ t('admin.accounts.dataImportProxyHint') }}</p>
+        </div>
+        <div>
+          <GroupSelector v-model="groupIds" :groups="compatibleGroups" searchable="auto" />
+          <p class="mt-1 text-xs text-gray-500 dark:text-dark-400">{{ t('admin.accounts.dataImportGroupsHint') }}</p>
+        </div>
+      </section>
+
       <div
         v-if="result"
         class="space-y-2 rounded-xl border border-gray-200 p-4 dark:border-dark-700"
@@ -99,12 +115,16 @@
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import BaseDialog from '@/components/common/BaseDialog.vue'
+import GroupSelector from '@/components/common/GroupSelector.vue'
+import ProxySelector from '@/components/common/ProxySelector.vue'
 import { adminAPI } from '@/api/admin'
 import { useAppStore } from '@/stores/app'
-import type { AdminDataImportResult, AdminDataPayload } from '@/types'
+import type { AccountPlatform, AdminDataImportResult, AdminDataPayload, AdminGroup, Proxy as ProxyConfig } from '@/types'
 
 interface Props {
   show: boolean
+  proxies?: ProxyConfig[]
+  groups?: AdminGroup[]
 }
 
 interface Emits {
@@ -112,7 +132,10 @@ interface Emits {
   (e: 'imported', accounts: Array<{ id: number; name: string }>): void
 }
 
-const props = defineProps<Props>()
+const props = withDefaults(defineProps<Props>(), {
+  proxies: () => [],
+  groups: () => []
+})
 const emit = defineEmits<Emits>()
 
 const { t } = useI18n()
@@ -125,6 +148,20 @@ const dragActive = computed(() => dragDepth.value > 0)
 const hasCreatedData = ref(false)
 const createdAccounts = ref<Array<{ id: number; name: string }>>([])
 const result = ref<AdminDataImportResult | null>(null)
+const defaultProxyId = ref<number | null>(null)
+const groupIds = ref<number[]>([])
+const detectedPlatforms = ref<AccountPlatform[]>([])
+const detectingPlatforms = ref(false)
+let fileSelectionRevision = 0
+let platformDetection = Promise.resolve()
+
+const compatibleGroups = computed(() => {
+  if (detectingPlatforms.value) return []
+  if (detectedPlatforms.value.length === 0) return props.groups
+  return props.groups.filter((group) =>
+    group.platform === 'composite' || detectedPlatforms.value.every((platform) => group.platform === platform)
+  )
+})
 
 const fileInput = ref<HTMLInputElement | null>(null)
 const selectedFilesLabel = computed(() => {
@@ -145,6 +182,11 @@ watch(
       hasCreatedData.value = false
       createdAccounts.value = []
       result.value = null
+      defaultProxyId.value = null
+      groupIds.value = []
+      detectedPlatforms.value = []
+      detectingPlatforms.value = false
+      fileSelectionRevision += 1
       if (fileInput.value) {
         fileInput.value.value = ''
       }
@@ -191,6 +233,19 @@ const setSelectedFiles = (sourceFiles: FileList | File[] | null | undefined) => 
   }
   files.value = picked
   result.value = null
+  const revision = ++fileSelectionRevision
+  detectingPlatforms.value = true
+  platformDetection = detectImportPlatforms(picked)
+    .then((platforms) => {
+      if (revision !== fileSelectionRevision) return
+      detectedPlatforms.value = platforms
+      detectingPlatforms.value = false
+      const compatibleIDs = new Set(compatibleGroups.value.map((group) => group.id))
+      groupIds.value = groupIds.value.filter((groupID) => compatibleIDs.has(groupID))
+    })
+    .finally(() => {
+      if (revision === fileSelectionRevision) detectingPlatforms.value = false
+    })
 }
 
 const handleDragEnter = () => {
@@ -224,6 +279,23 @@ const readFileAsText = async (sourceFile: File): Promise<string> => {
     reader.onerror = () => reject(reader.error || new Error('Failed to read file'))
     reader.readAsText(sourceFile)
   })
+}
+
+const detectImportPlatforms = async (sourceFiles: File[]): Promise<AccountPlatform[]> => {
+  const platforms = new Set<AccountPlatform>()
+  for (const sourceFile of sourceFiles) {
+    try {
+      const payload = JSON.parse(await readFileAsText(sourceFile)) as Partial<AdminDataPayload>
+      for (const account of payload.accounts || []) {
+        if (typeof account.platform === 'string' && account.platform) {
+          platforms.add(account.platform)
+        }
+      }
+    } catch {
+      return []
+    }
+  }
+  return [...platforms]
 }
 
 const SUPPORTED_DATA_TYPES = ['sub2api-data', 'sub2api-bundle']
@@ -276,6 +348,7 @@ const handleImport = async () => {
 
   importing.value = true
   try {
+    await platformDetection
     const dataPayloads: AdminDataPayload[] = []
     for (const sourceFile of files.value) {
       let parsed: unknown
@@ -295,9 +368,14 @@ const handleImport = async () => {
     }
     const dataPayload = mergeDataPayloads(dataPayloads)
 
+    const importOptions = {
+      ...(defaultProxyId.value !== null ? { default_proxy_id: defaultProxyId.value } : {}),
+      ...(groupIds.value.length ? { group_ids: [...groupIds.value] } : {})
+    }
     const res = await adminAPI.accounts.importData({
       data: dataPayload,
-      skip_default_group_bind: true
+      skip_default_group_bind: true,
+      ...importOptions
     })
 
     result.value = res
