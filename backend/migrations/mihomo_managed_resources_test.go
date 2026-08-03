@@ -26,3 +26,13 @@ func TestMihomoManagedResourcesMigration(t *testing.T) {
 	require.Contains(t, sql, "WHERE deleted_at IS NULL")
 	require.Contains(t, sql, "CHECK (kind IN ('dedicated', 'automatic', 'latency', 'fallback', 'dynamic', 'directional'))")
 }
+
+func TestCleanupDeletedMihomoRouteProxiesMigration(t *testing.T) {
+	content, err := FS.ReadFile("204_cleanup_deleted_mihomo_route_proxies.sql")
+	require.NoError(t, err)
+
+	sql := strings.Join(strings.Fields(string(content)), " ")
+	require.Contains(t, sql, "r.deleted_at IS NOT NULL")
+	require.Contains(t, sql, "p.managed_source LIKE 'mihomo:%'")
+	require.Contains(t, sql, "NOT EXISTS ( SELECT 1 FROM accounts AS a WHERE a.proxy_id = p.id AND a.deleted_at IS NULL )")
+}

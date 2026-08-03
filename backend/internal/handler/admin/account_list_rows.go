@@ -27,16 +27,18 @@ type accountBatchStatusSummary struct {
 }
 
 type accountImportBatchSummary struct {
-	ID               string                    `json:"id"`
-	UploaderUserID   *int64                    `json:"uploader_user_id,omitempty"`
-	UploaderEmail    *string                   `json:"uploader_email,omitempty"`
-	UploaderUsername *string                   `json:"uploader_username,omitempty"`
-	CreatedAt        time.Time                 `json:"created_at"`
-	MatchedCount     int                       `json:"matched_count"`
-	TotalCount       int                       `json:"total_count"`
-	SchedulableCount int                       `json:"schedulable_count"`
-	Names            []string                  `json:"names"`
-	Status           accountBatchStatusSummary `json:"status"`
+	ID                string                    `json:"id"`
+	UploaderUserID    *int64                    `json:"uploader_user_id,omitempty"`
+	UploaderEmail     *string                   `json:"uploader_email,omitempty"`
+	UploaderUsername  *string                   `json:"uploader_username,omitempty"`
+	UploaderAvatarURL *string                   `json:"uploader_avatar_url,omitempty"`
+	UploaderStatus    *string                   `json:"uploader_status,omitempty"`
+	CreatedAt         time.Time                 `json:"created_at"`
+	MatchedCount      int                       `json:"matched_count"`
+	TotalCount        int                       `json:"total_count"`
+	SchedulableCount  int                       `json:"schedulable_count"`
+	Names             []string                  `json:"names"`
+	Status            accountBatchStatusSummary `json:"status"`
 }
 
 type accountLogicalRow struct {
@@ -114,11 +116,13 @@ func buildAccountLogicalRows(accounts []service.Account, now time.Time) []accoun
 		batch := batches[batchID]
 		if batch == nil {
 			batch = &accountImportBatchSummary{
-				ID:               batchID,
-				UploaderUserID:   account.CreatedByUserID,
-				UploaderEmail:    account.UploaderEmail,
-				UploaderUsername: account.UploaderUsername,
-				CreatedAt:        account.CreatedAt,
+				ID:                batchID,
+				UploaderUserID:    account.CreatedByUserID,
+				UploaderEmail:     account.UploaderEmail,
+				UploaderUsername:  account.UploaderUsername,
+				UploaderAvatarURL: account.UploaderAvatarURL,
+				UploaderStatus:    account.UploaderStatus,
+				CreatedAt:         account.CreatedAt,
 			}
 			batches[batchID] = batch
 			rows = append(rows, accountLogicalRow{Kind: "import_batch", Batch: batch})
@@ -365,6 +369,11 @@ func (h *AccountHandler) enrichLogicalRowRuntime(ctx context.Context, accounts [
 func (h *AccountHandler) ListRows(c *gin.Context) {
 	page, pageSize := response.ParsePagination(c)
 	filters, err := parseAccountFilterQuery(c)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	filters, err = h.resolveAccountUsageRuntime(c.Request.Context(), filters, false)
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return

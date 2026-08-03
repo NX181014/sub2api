@@ -679,6 +679,7 @@ import StatusBadge from '@/components/common/StatusBadge.vue'
 import Toggle from '@/components/common/Toggle.vue'
 import Icon from '@/components/icons/Icon.vue'
 import { adminAPI } from '@/api/admin'
+import type { AccountListFilters } from '@/api/admin/accounts'
 import type {
   CreateSharedPoolCostRequest,
   CreateSharedPoolIntakeRequest,
@@ -737,10 +738,12 @@ type AccountsViewExpose = {
   reload: (resetPage?: boolean) => Promise<void>
 }
 type WorkbenchScope = 'all' | 'standalone' | 'uploader' | 'batch'
+type WorkbenchUsageStatus = NonNullable<AccountListFilters['usage_status']>
 type WorkbenchContext = {
   scope: WorkbenchScope
   import_batch_id?: string
   uploader_user_id?: number | string
+  usage_status?: WorkbenchUsageStatus
   page: number
   page_size: number
   search: string
@@ -774,6 +777,12 @@ const queryPage = (key: string, fallback: number) => Math.max(1, Number(queryStr
 const routeTab = (): TabKey => ['overview', 'accounts', 'ledger', 'settlement', 'sources'].includes(queryString('tab'))
   ? queryString('tab') as TabKey
   : 'accounts'
+const routeUsageStatus = (): WorkbenchUsageStatus => {
+  const value = queryString('account_usage_status')
+  return ['in_use', 'ready', 'unused', 'attention', 'error', 'restricted', 'disabled'].includes(value)
+    ? value as WorkbenchUsageStatus
+    : 'all'
+}
 const initialWorkbenchContext = computed<Partial<WorkbenchContext>>(() => {
   const requestedScope = queryString('account_scope')
   return {
@@ -786,6 +795,7 @@ const initialWorkbenchContext = computed<Partial<WorkbenchContext>>(() => {
     platform: queryString('account_platform'),
     type: queryString('account_type'),
     status: queryString('account_status'),
+    usage_status: routeUsageStatus(),
     group: queryString('account_group'),
     privacy_mode: queryString('account_privacy_mode'),
     sort_by: queryString('account_sort_by'),
@@ -1244,6 +1254,7 @@ async function syncWorkbenchContext(context: WorkbenchContext) {
     account_platform: context.platform,
     account_type: context.type,
     account_status: context.status,
+    account_usage_status: context.usage_status === 'all' ? '' : context.usage_status,
     account_group: context.group,
     account_privacy_mode: context.privacy_mode
   })) {

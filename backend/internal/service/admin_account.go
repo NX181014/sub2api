@@ -71,6 +71,7 @@ type AccountSelectionFilters struct {
 	Platform           string
 	Type               string
 	Status             string
+	UsageStatus        string
 	Search             string
 	GroupID            int64
 	PrivacyMode        string
@@ -78,13 +79,26 @@ type AccountSelectionFilters struct {
 	UploaderUnassigned bool
 	ImportBatchID      string
 	ImportBatchScope   string
+	InUseAccountIDs    []int64
 }
 
 type AccountSelectionSummary struct {
-	Total     int64    `json:"total"`
-	Platforms []string `json:"platforms"`
-	Types     []string `json:"types"`
+	Total             int64            `json:"total"`
+	Platforms         []string         `json:"platforms"`
+	Types             []string         `json:"types"`
+	TypeCounts        map[string]int64 `json:"type_counts"`
+	UsageStatusCounts map[string]int64 `json:"usage_status_counts"`
 }
+
+const (
+	AccountUsageStatusInUse      = "in_use"
+	AccountUsageStatusReady      = "ready"
+	AccountUsageStatusUnused     = "unused"
+	AccountUsageStatusAttention  = "attention"
+	AccountUsageStatusError      = "error"
+	AccountUsageStatusRestricted = "restricted"
+	AccountUsageStatusDisabled   = "disabled"
+)
 
 func (s *adminServiceImpl) ListAccountsBySelection(ctx context.Context, page, pageSize int, filters AccountSelectionFilters, includePoolMetrics bool, sortBy, sortOrder string) ([]Account, int64, error) {
 	repo, ok := s.accountRepo.(interface {
@@ -1231,12 +1245,13 @@ func (s *adminServiceImpl) resolveBulkUpdateTargetIDs(ctx context.Context, filte
 			total    int64
 			err      error
 		)
-		if filters.ImportBatchID != "" || filters.ImportBatchScope != "" || filters.UploaderUnassigned {
+		if filters.ImportBatchID != "" || filters.ImportBatchScope != "" || filters.UploaderUnassigned || filters.UsageStatus != "" {
 			accounts, total, err = s.ListAccountsBySelection(ctx, page, pageSize, AccountSelectionFilters{
 				Platform: filters.Platform, Type: filters.Type, Status: filters.Status, Search: filters.Search,
-				GroupID: groupID, PrivacyMode: filters.PrivacyMode, UploaderUserID: filters.UploaderUserID,
+				UsageStatus: filters.UsageStatus,
+				GroupID:     groupID, PrivacyMode: filters.PrivacyMode, UploaderUserID: filters.UploaderUserID,
 				UploaderUnassigned: filters.UploaderUnassigned, ImportBatchID: filters.ImportBatchID,
-				ImportBatchScope: filters.ImportBatchScope,
+				ImportBatchScope: filters.ImportBatchScope, InUseAccountIDs: filters.InUseAccountIDs,
 			}, false, "", "")
 		} else if filters.UploaderUserID > 0 {
 			accounts, total, err = s.ListAccountsByUploader(ctx, page, pageSize, filters.Platform, filters.Type, filters.Status, filters.Search, groupID, filters.PrivacyMode, filters.UploaderUserID, false, "", "")

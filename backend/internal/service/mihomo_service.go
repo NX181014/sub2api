@@ -1082,6 +1082,22 @@ func (s *MihomoService) reconcileRouteProxies(ctx context.Context) (map[string]i
 	result := make(map[string]int64, len(routes))
 	for i := range routes {
 		route := &routes[i]
+		if route.DeletedAt != nil {
+			if route.ProxyID == nil {
+				continue
+			}
+			count, countErr := s.proxyRepo.CountAccountsByProxyID(ctx, *route.ProxyID)
+			if countErr != nil {
+				return nil, countErr
+			}
+			if count > 0 {
+				return nil, infraerrors.Conflict("MIHOMO_ROUTE_IN_USE", "move bound accounts before deleting this route")
+			}
+			if deleteErr := s.proxyRepo.Delete(ctx, *route.ProxyID); deleteErr != nil {
+				return nil, deleteErr
+			}
+			continue
+		}
 		active := route.Status == StatusActive && route.DeletedAt == nil
 		if !active {
 			if route.ProxyID == nil {

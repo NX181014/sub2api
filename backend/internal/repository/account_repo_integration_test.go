@@ -746,6 +746,58 @@ func (s *AccountRepoSuite) TestSelectionContractsFilterUnassignedUploader() {
 	s.Require().Equal([]string{service.PlatformOpenAI}, summary.Platforms)
 }
 
+func (s *AccountRepoSuite) TestSelectionContractsUsageStatusAndTypeCountsAreMutuallyExclusive() {
+	now := time.Now().UTC()
+	lastUsed := now.Add(-time.Hour)
+	rateLimitReset := now.Add(time.Hour)
+	inUse := mustCreateAccount(s.T(), s.client, &service.Account{Name: "usage-in-use", Type: service.AccountTypeOAuth, LastUsedAt: &lastUsed})
+	mustCreateAccount(s.T(), s.client, &service.Account{Name: "usage-ready", Type: service.AccountTypeOAuth, LastUsedAt: &lastUsed})
+	mustCreateAccount(s.T(), s.client, &service.Account{Name: "usage-unused", Type: service.AccountTypeAPIKey})
+	mustCreateAccount(s.T(), s.client, &service.Account{Name: "usage-error", Type: service.AccountTypeAPIKey, Status: service.StatusError})
+	mustCreateAccount(s.T(), s.client, &service.Account{Name: "usage-restricted", Type: service.AccountTypeOAuth, RateLimitResetAt: &rateLimitReset})
+	mustCreateAccount(s.T(), s.client, &service.Account{Name: "usage-disabled", Type: service.AccountTypeAPIKey, Status: service.StatusDisabled})
+
+	base := service.AccountSelectionFilters{Search: "usage-", InUseAccountIDs: []int64{inUse.ID}}
+	wantNames := map[string][]string{
+		service.AccountUsageStatusInUse:      {"usage-in-use"},
+		service.AccountUsageStatusReady:      {"usage-ready"},
+		service.AccountUsageStatusUnused:     {"usage-unused"},
+		service.AccountUsageStatusAttention:  {"usage-error", "usage-restricted", "usage-disabled"},
+		service.AccountUsageStatusError:      {"usage-error"},
+		service.AccountUsageStatusRestricted: {"usage-restricted"},
+		service.AccountUsageStatusDisabled:   {"usage-disabled"},
+	}
+	for usageStatus, expected := range wantNames {
+		filters := base
+		filters.UsageStatus = usageStatus
+		accounts, page, err := s.repo.ListWithSelectionFilters(s.ctx, pagination.PaginationParams{Page: 1, PageSize: 20}, filters, false)
+		s.Require().NoError(err)
+		s.Require().Equal(int64(len(expected)), page.Total, usageStatus)
+		names := make([]string, len(accounts))
+		for i := range accounts {
+			names[i] = accounts[i].Name
+		}
+		s.Require().ElementsMatch(expected, names, usageStatus)
+	}
+
+	summary, err := s.repo.GetSelectionSummary(s.ctx, base)
+	s.Require().NoError(err)
+	s.Require().Equal(int64(6), summary.Total)
+	s.Require().Equal(map[string]int64{service.AccountTypeAPIKey: 3, service.AccountTypeOAuth: 3}, summary.TypeCounts)
+	s.Require().Equal(int64(6), summary.UsageStatusCounts["all"])
+	s.Require().Equal(int64(1), summary.UsageStatusCounts[service.AccountUsageStatusInUse])
+	s.Require().Equal(int64(1), summary.UsageStatusCounts[service.AccountUsageStatusReady])
+	s.Require().Equal(int64(1), summary.UsageStatusCounts[service.AccountUsageStatusUnused])
+	s.Require().Equal(int64(3), summary.UsageStatusCounts[service.AccountUsageStatusAttention])
+	s.Require().Equal(
+		summary.UsageStatusCounts["all"],
+		summary.UsageStatusCounts[service.AccountUsageStatusInUse]+
+			summary.UsageStatusCounts[service.AccountUsageStatusReady]+
+			summary.UsageStatusCounts[service.AccountUsageStatusUnused]+
+			summary.UsageStatusCounts[service.AccountUsageStatusAttention],
+	)
+}
+
 func (s *AccountRepoSuite) TestListByGroup() {
 	group := mustCreateGroup(s.T(), s.client, &service.Group{Name: "g-list"})
 	acc1 := mustCreateAccount(s.T(), s.client, &service.Account{Name: "a1", Status: service.StatusActive})

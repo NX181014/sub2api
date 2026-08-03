@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -12,6 +13,19 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
+
+type accountUsageConcurrencyCache struct {
+	service.ConcurrencyCache
+	counts map[int64]int
+}
+
+func (c accountUsageConcurrencyCache) GetAccountConcurrencyBatch(_ context.Context, accountIDs []int64) (map[int64]int, error) {
+	result := make(map[int64]int, len(accountIDs))
+	for _, accountID := range accountIDs {
+		result[accountID] = c.counts[accountID]
+	}
+	return result, nil
+}
 
 func setupAccountListRouter() (*gin.Engine, *stubAdminService) {
 	gin.SetMode(gin.TestMode)
@@ -110,7 +124,10 @@ func TestAccountHandlerListFiltersUnassignedUploader(t *testing.T) {
 func TestAccountHandlerSelectionSummaryUsesListFilters(t *testing.T) {
 	router, adminSvc := setupAccountListRouter()
 	batchID := "668f52b3-14af-4a5a-bde0-e923ed69299a"
-	adminSvc.selectionSummary = &service.AccountSelectionSummary{Total: 3, Platforms: []string{"anthropic", "openai"}, Types: []string{"oauth"}}
+	adminSvc.selectionSummary = &service.AccountSelectionSummary{
+		Total: 3, Platforms: []string{"anthropic", "openai"}, Types: []string{"oauth"},
+		TypeCounts: map[string]int64{"oauth": 3}, UsageStatusCounts: map[string]int64{"all": 3},
+	}
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/accounts/selection-summary?platform=openai&type=oauth&status=active&group=12&privacy_mode=blocked&search=%20key%20&uploader_user_id=77&import_batch_id="+batchID, nil)
@@ -122,7 +139,37 @@ func TestAccountHandlerSelectionSummaryUsesListFilters(t *testing.T) {
 		Platform: "openai", Type: "oauth", Status: "active", Search: "key", GroupID: 12,
 		PrivacyMode: "blocked", UploaderUserID: 77, ImportBatchID: batchID,
 	}, adminSvc.selectionSummaryFilters)
-	require.JSONEq(t, `{"code":0,"message":"success","data":{"total":3,"platforms":["anthropic","openai"],"types":["oauth"]}}`, rec.Body.String())
+	require.JSONEq(t, `{"code":0,"message":"success","data":{"total":3,"platforms":["anthropic","openai"],"types":["oauth"],"type_counts":{"oauth":3},"usage_status_counts":{"all":3}}}`, rec.Body.String())
+}
+
+func TestAccountHandlerUsageStatusUsesConcurrencyAcrossFullResult(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	adminSvc := newStubAdminService()
+	lastUsed := time.Now().Add(-time.Hour)
+	adminSvc.accounts = []service.Account{
+		{ID: 1, Name: "ready", Status: service.StatusActive, Schedulable: true, LastUsedAt: &lastUsed},
+		{ID: 2, Name: "in-use", Status: service.StatusActive, Schedulable: true, LastUsedAt: &lastUsed},
+	}
+	concurrency := service.NewConcurrencyService(accountUsageConcurrencyCache{counts: map[int64]int{2: 1}})
+	handler := NewAccountHandler(adminSvc, nil, nil, nil, nil, nil, nil, nil, nil, concurrency, nil, nil, nil, nil)
+	router.GET("/api/v1/admin/accounts", handler.List)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/accounts?page=1&page_size=1&usage_status=in_use", nil)
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, service.AccountUsageStatusInUse, adminSvc.lastSelectionFilters.UsageStatus)
+	require.Equal(t, []int64{2}, adminSvc.lastSelectionFilters.InUseAccountIDs)
+}
+
+func TestAccountHandlerRejectsInvalidUsageStatus(t *testing.T) {
+	router, _ := setupAccountListRouter()
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/accounts?usage_status=busy", nil)
+	router.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
 func TestAccountHandlerSelectionSummaryFiltersUnassignedUploader(t *testing.T) {
@@ -138,9 +185,10 @@ func TestAccountHandlerSelectionSummaryFiltersUnassignedUploader(t *testing.T) {
 }
 
 func TestBulkUpdateFilterMapsUnassignedUploader(t *testing.T) {
-	filters := toServiceBulkUpdateAccountFilters(&BulkUpdateAccountFilters{UploaderUnassigned: true})
+	filters := toServiceBulkUpdateAccountFilters(&BulkUpdateAccountFilters{UploaderUnassigned: true, UsageStatus: service.AccountUsageStatusAttention})
 	require.NotNil(t, filters)
 	require.True(t, filters.UploaderUnassigned)
+	require.Equal(t, service.AccountUsageStatusAttention, filters.UsageStatus)
 }
 
 func TestAccountHandlerListIncludesCreatedAt(t *testing.T) {

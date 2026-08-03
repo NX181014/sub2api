@@ -340,3 +340,25 @@ func TestAdminServiceBulkUpdateAccounts_ResolvesImportBatchID(t *testing.T) {
 	require.Equal(t, "batch-20260731", repo.selectionFilters.ImportBatchID)
 	require.Equal(t, []int64{11}, repo.bulkUpdateIDs)
 }
+
+func TestAdminServiceBulkUpdateAccounts_ResolvesUsageStatusAcrossPages(t *testing.T) {
+	repo := &accountRepoStubForBulkUpdate{
+		listData:   []Account{{ID: 7}, {ID: 11}},
+		listResult: &pagination.PaginationResult{Total: 2},
+	}
+	svc := &adminServiceImpl{accountRepo: repo}
+	schedulable := true
+
+	_, err := svc.BulkUpdateAccounts(context.Background(), &BulkUpdateAccountsInput{
+		Filters: &BulkUpdateAccountFilters{
+			UsageStatus:     AccountUsageStatusInUse,
+			InUseAccountIDs: []int64{7, 11},
+		},
+		Schedulable: &schedulable,
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, AccountUsageStatusInUse, repo.selectionFilters.UsageStatus)
+	require.Equal(t, []int64{7, 11}, repo.selectionFilters.InUseAccountIDs)
+	require.Equal(t, []int64{7, 11}, repo.bulkUpdateIDs)
+}

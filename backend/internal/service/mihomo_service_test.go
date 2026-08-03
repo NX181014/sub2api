@@ -22,7 +22,9 @@ import (
 
 type mihomoProxyRepoStub struct {
 	ProxyRepository
-	items []Proxy
+	items         []Proxy
+	accountCounts map[int64]int64
+	deleted       []int64
 }
 
 func (s *mihomoProxyRepoStub) ListActive(context.Context) ([]Proxy, error) {
@@ -53,6 +55,21 @@ func (s *mihomoProxyRepoStub) Update(_ context.Context, proxy *Proxy) error {
 		}
 	}
 	return ErrProxyNotFound
+}
+
+func (s *mihomoProxyRepoStub) CountAccountsByProxyID(_ context.Context, id int64) (int64, error) {
+	return s.accountCounts[id], nil
+}
+
+func (s *mihomoProxyRepoStub) Delete(_ context.Context, id int64) error {
+	s.deleted = append(s.deleted, id)
+	for i := range s.items {
+		if s.items[i].ID == id {
+			s.items = append(s.items[:i], s.items[i+1:]...)
+			break
+		}
+	}
+	return nil
 }
 
 type mihomoResourceRepoStub struct {
@@ -164,6 +181,32 @@ func TestPrepareManagedSubscriptionDeleteUsesApprovalKind(t *testing.T) {
 	}
 	if update.Kind != MihomoApprovalSubscriptionDelete || update.SubscriptionID != 17 {
 		t.Fatalf("unexpected update: %+v", update)
+	}
+}
+
+func TestReconcileRouteProxiesDeletesOnlyDeletedRouteProxy(t *testing.T) {
+	deletedAt := time.Now().UTC()
+	deletedProxyID, disabledProxyID := int64(41), int64(42)
+	deletedSource, disabledSource := "mihomo:route:11", "mihomo:route:12"
+	proxyRepo := &mihomoProxyRepoStub{items: []Proxy{
+		{ID: deletedProxyID, Status: StatusDisabled, ManagedSource: &deletedSource},
+		{ID: disabledProxyID, Status: StatusActive, ManagedSource: &disabledSource},
+	}}
+	resources := &mihomoResourceRepoStub{routes: []MihomoRoute{
+		{ID: 11, ProxyID: &deletedProxyID, Status: StatusDisabled, DeletedAt: &deletedAt},
+		{ID: 12, ProxyID: &disabledProxyID, Status: StatusDisabled},
+	}}
+	svc := NewMihomoService(&config.Config{Mihomo: config.MihomoConfig{Enabled: true}}, proxyRepo, nil).SetResourceRepository(resources)
+
+	if _, err := svc.reconcileRouteProxies(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(proxyRepo.deleted, []int64{deletedProxyID}) {
+		t.Fatalf("deleted proxies = %v", proxyRepo.deleted)
+	}
+	disabled, err := proxyRepo.GetByID(context.Background(), disabledProxyID)
+	if err != nil || disabled.Status != StatusDisabled {
+		t.Fatalf("disabled route proxy = %+v, err = %v", disabled, err)
 	}
 }
 

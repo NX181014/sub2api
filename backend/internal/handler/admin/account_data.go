@@ -598,6 +598,10 @@ func (h *AccountHandler) resolveExportAccounts(ctx context.Context, ids []int64,
 	if err != nil {
 		return nil, err
 	}
+	filters, err = h.resolveAccountUsageRuntime(ctx, filters, false)
+	if err != nil {
+		return nil, err
+	}
 	return h.listAccountsFiltered(ctx, filters)
 }
 

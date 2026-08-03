@@ -49,6 +49,8 @@ type Account struct {
 	// Pool list metrics are populated for paginated admin account listings only.
 	UploaderEmail          *string
 	UploaderUsername       *string
+	UploaderAvatarURL      *string
+	UploaderStatus         *string
 	ExpectedTokenCount     *int64
 	PoolTotalUsageTokens   int64
 	PoolNetCostMinor       int64

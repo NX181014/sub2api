@@ -147,7 +147,7 @@
 
           <template #cell-name="{ row, value }">
             <button
-              v-if="row.managed_source"
+              v-if="managedRoute(row)"
               type="button"
               class="block min-w-0 max-w-full text-left"
               title="打开 Mihomo 线路工作台"
@@ -175,9 +175,10 @@
           </template>
 
           <template #cell-source="{ row }">
-            <div v-if="managedRoute(row)" class="min-w-0">
+            <div v-if="row.managed_source" class="min-w-0">
               <span class="badge badge-primary">Mihomo</span>
-              <span class="mt-1 block max-w-36 truncate text-xs text-gray-500" :title="routeSubscriptionLabel(managedRoute(row))">{{ routeSubscriptionLabel(managedRoute(row)) }}</span>
+              <span v-if="isRemovedManagedRoute(row)" class="mt-1 block text-xs font-medium text-red-600 dark:text-red-400">线路已移除</span>
+              <span v-else class="mt-1 block max-w-36 truncate text-xs text-gray-500" :title="routeSubscriptionLabel(managedRoute(row))">{{ routeSubscriptionLabel(managedRoute(row)) }}</span>
             </div>
             <div v-else class="flex flex-col gap-1"><span class="badge badge-gray">手动</span><span :class="['badge', row.connection_configured ? 'badge-success' : 'badge-danger']">{{ t(row.connection_configured ? 'admin.proxies.connectionConfigured' : 'admin.proxies.connectionMissing') }}</span></div>
           </template>
@@ -186,6 +187,10 @@
             <div v-if="managedRoute(row)" class="min-w-0">
               <span class="badge badge-gray">{{ mihomoRouteKindLabel(managedRoute(row)!.kind) }}</span>
               <span class="mt-1 block max-w-40 truncate text-xs text-gray-600 dark:text-gray-300" :title="managedRoute(row)?.current_node || '-'">{{ managedRoute(row)?.current_node || '-' }}</span>
+            </div>
+            <div v-else-if="isRemovedManagedRoute(row)" class="min-w-0">
+              <span class="badge badge-danger">线路已移除</span>
+              <span class="mt-1 block text-xs text-gray-500">可查看或清理</span>
             </div>
             <span v-else :class="['badge', row.auth_configured ? 'badge-primary' : 'badge-gray']">{{ t(row.auth_configured ? 'admin.proxies.authConfigured' : 'admin.proxies.authNotConfigured') }}</span>
           </template>
@@ -271,10 +276,10 @@
             <span
               :class="[
                 'badge',
-                managedRoute(row) ? mihomoHealthClass(managedRoute(row)!.health) : value === 'active' ? 'badge-success' : value === 'expired' ? 'badge-danger' : 'badge-danger'
+                isRemovedManagedRoute(row) ? 'badge-danger' : managedRoute(row) ? mihomoHealthClass(managedRoute(row)!.health) : value === 'active' ? 'badge-success' : 'badge-danger'
               ]"
             >
-              {{ managedRoute(row) ? mihomoHealthLabel(managedRoute(row)!.health) : t('admin.accounts.status.' + value) }}
+              {{ isRemovedManagedRoute(row) ? '线路已移除' : managedRoute(row) ? mihomoHealthLabel(managedRoute(row)!.health) : t('admin.accounts.status.' + value) }}
             </span>
           </template>
 
@@ -339,15 +344,15 @@
                 <Icon v-else name="shield" size="sm" />
               </button>
               <button
-                @click="row.managed_source ? openManagedProxy(row) : openProxyCredentialRequest(row)"
+                @click="openProxyAction(row)"
                 class="inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg text-gray-500 transition-colors hover:bg-gray-100 hover:text-primary-600 dark:hover:bg-dark-700 dark:hover:text-primary-400"
-                :aria-label="`${row.managed_source ? '管理' : '查看'} ${proxyDisplayName(row)}`"
-                :title="row.managed_source ? '管理线路' : t('common.view')"
+                :aria-label="`${proxyActionLabel(row)} ${proxyDisplayName(row)}`"
+                :title="proxyActionLabel(row)"
               >
-                <Icon :name="row.managed_source ? 'cog' : 'eye'" size="sm" />
+                <Icon :name="row.managed_source && !isRemovedManagedRoute(row) ? 'cog' : 'eye'" size="sm" />
               </button>
               <button
-                v-if="isPrimaryAdmin && !row.managed_source"
+                v-if="isPrimaryAdmin && (!row.managed_source || isRemovedManagedRoute(row))"
                 @click="handleDelete(row)"
                 class="inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg text-gray-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20 dark:hover:text-red-400"
                 :aria-label="`删除 ${proxyDisplayName(row)}`"
@@ -383,8 +388,8 @@
                 </div>
               </div>
               <div class="flex shrink-0 items-center gap-2">
-                <span :class="['badge whitespace-nowrap', managedRoute(proxy) ? mihomoHealthClass(managedRoute(proxy)!.health) : proxy.status === 'active' ? 'badge-success' : 'badge-danger']">
-                  {{ managedRoute(proxy) ? mihomoHealthLabel(managedRoute(proxy)!.health) : t('admin.accounts.status.' + proxy.status) }}
+                <span :class="['badge whitespace-nowrap', isRemovedManagedRoute(proxy) ? 'badge-danger' : managedRoute(proxy) ? mihomoHealthClass(managedRoute(proxy)!.health) : proxy.status === 'active' ? 'badge-success' : 'badge-danger']">
+                  {{ isRemovedManagedRoute(proxy) ? '线路已移除' : managedRoute(proxy) ? mihomoHealthLabel(managedRoute(proxy)!.health) : t('admin.accounts.status.' + proxy.status) }}
                 </span>
                 <input type="checkbox" class="h-4 w-4 cursor-pointer rounded border-gray-300 text-primary-600 focus:ring-primary-500" :checked="selectedProxyIds.has(proxy.id)" :aria-label="`选择代理 ${proxyDisplayName(proxy)}`" @change="toggleSelectRow(proxy.id, $event)" />
               </div>
@@ -397,6 +402,7 @@
             <div class="mt-3 min-w-0 text-sm">
               <p class="text-xs text-gray-500 dark:text-gray-400">线路 / 节点</p>
               <p v-if="managedRoute(proxy)" class="mt-1 truncate font-medium text-gray-800 dark:text-gray-100" :title="managedRoute(proxy)?.current_node || undefined">{{ routeSubscriptionLabel(managedRoute(proxy)) }} · {{ mihomoRouteKindLabel(managedRoute(proxy)!.kind) }} · {{ managedRoute(proxy)?.current_node || '未选择节点' }}</p>
+              <p v-else-if="isRemovedManagedRoute(proxy)" class="mt-1 font-medium text-red-600 dark:text-red-400">线路已移除 · 可查看或清理残留代理</p>
               <p v-else class="mt-1 font-medium text-gray-800 dark:text-gray-100">{{ t(proxy.connection_configured ? 'admin.proxies.connectionConfigured' : 'admin.proxies.connectionMissing') }} · {{ t(proxy.auth_configured ? 'admin.proxies.authConfigured' : 'admin.proxies.authNotConfigured') }}</p>
             </div>
             <dl class="mt-3 grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
@@ -412,8 +418,8 @@
             <div class="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
               <button type="button" class="btn btn-secondary min-h-11 px-2" @click="handleTestConnection(proxy)">{{ t('admin.proxies.testConnection') }}</button>
               <button type="button" class="btn btn-secondary min-h-11 px-2" @click="handleQualityCheck(proxy)">{{ t('admin.proxies.qualityCheck') }}</button>
-              <button type="button" class="btn btn-secondary min-h-11 px-2" @click="proxy.managed_source ? openManagedProxy(proxy) : openProxyCredentialRequest(proxy)">{{ proxy.managed_source ? '管理线路' : t('common.view') }}</button>
-              <button v-if="isPrimaryAdmin && !proxy.managed_source" type="button" class="btn btn-danger min-h-11 px-2" @click="handleDelete(proxy)">{{ t('common.delete') }}</button>
+              <button type="button" class="btn btn-secondary min-h-11 px-2" @click="openProxyAction(proxy)">{{ proxyActionLabel(proxy) }}</button>
+              <button v-if="isPrimaryAdmin && (!proxy.managed_source || isRemovedManagedRoute(proxy))" type="button" class="btn btn-danger min-h-11 px-2" @click="handleDelete(proxy)">{{ t('common.delete') }}</button>
             </div>
           </article>
           <EmptyState v-if="!loading && displayedProxies.length === 0" :title="t('admin.proxies.noProxiesYet')" :description="t('admin.proxies.createFirstProxy')" :action-text="t('admin.proxies.createProxy')" @action="showCreateModal = true" />
@@ -449,6 +455,7 @@
     <ProxyApprovalCenter
       :show="showProxyApprovalCenter"
       @close="showProxyApprovalCenter = false"
+      @applied="handleApprovalApplied"
       @proxy-revealed="handleProxyRevealed"
       @export-revealed="handleExportRevealed"
     />
@@ -1075,6 +1082,7 @@ import { useAppStore } from '@/stores/app'
 import { useAuthStore } from '@/stores/auth'
 import { adminAPI } from '@/api/admin'
 import type { MihomoRoute } from '@/api/admin/mihomo'
+import type { PoolApproval } from '@/api/admin/sharedPool'
 import type { Proxy, ProxyAccountSummary, ProxyProtocol, ProxyQualityCheckResult, RevealedProxy } from '@/types'
 import type { Column } from '@/components/common/types'
 import AppLayout from '@/components/layout/AppLayout.vue'
@@ -1149,8 +1157,9 @@ const editStatusOptions = computed(() => [
 
 const proxies = ref<Proxy[]>([])
 const mihomoRoutes = ref<MihomoRoute[]>([])
+const mihomoRoutesLoaded = ref(false)
 const activeTab = ref<'proxies' | 'mihomo'>('proxies')
-const mihomoPanelRef = ref<{ openManagedProxy: (proxyID: number) => void } | null>(null)
+const mihomoPanelRef = ref<{ openManagedProxy: (proxyID: number) => void; reload: () => Promise<void> } | null>(null)
 const proxySourceFilter = ref('')
 const mihomoSubscriptionFilter = ref('')
 const mihomoKindFilter = ref('')
@@ -1735,18 +1744,23 @@ const applyQualityResult = (proxyId: number, result: ProxyQualityCheckResult) =>
 }
 
 const managedRoute = (proxy: Proxy) => mihomoRoutesByProxyID.value.get(proxy.id)
+const isRemovedManagedRoute = (proxy: Proxy) => Boolean(proxy.managed_source && mihomoRoutesLoaded.value && !managedRoute(proxy))
 const routeSubscriptionLabel = (route?: MihomoRoute) => route?.subscription_names?.join('、') || route?.subscription_ids.map(id => `订阅 #${id}`).join('、') || '-'
 const mihomoRouteKindLabel = (kind: MihomoRoute['kind']) => ({ dedicated: '专线', automatic: '最低延迟', latency: '最低延迟', fallback: '故障转移', dynamic: '动态轮换', directional: '定向' })[kind] || kind
 const mihomoHealthLabel = (health: MihomoRoute['health']) => ({ healthy: '健康', degraded: '降级', failed: '异常', unknown: '未检测' })[health] || health
 const mihomoHealthClass = (health: MihomoRoute['health']) => health === 'healthy' ? 'badge-success' : health === 'degraded' ? 'badge-warning' : health === 'failed' ? 'badge-danger' : 'badge-gray'
 const handleMihomoRoutesLoaded = (routes: MihomoRoute[]) => {
+  const shouldRefreshProxies = mihomoRoutesLoaded.value
   mihomoRoutes.value = routes
-  if (hasLocalProxyFilters.value) loadProxies()
+  mihomoRoutesLoaded.value = true
+  if (shouldRefreshProxies) void loadProxies()
 }
 const openManagedProxy = (proxy: Proxy) => {
   activeTab.value = 'mihomo'
   mihomoPanelRef.value?.openManagedProxy(proxy.id)
 }
+const proxyActionLabel = (proxy: Proxy) => proxy.managed_source && !isRemovedManagedRoute(proxy) ? '管理线路' : t('common.view')
+const openProxyAction = (proxy: Proxy) => proxy.managed_source && !isRemovedManagedRoute(proxy) ? openManagedProxy(proxy) : openProxyCredentialRequest(proxy)
 
 const proxyDisplayName = (proxy: Proxy) => proxy.managed_source
   ? proxy.name.replace(/^Mihomo\s*·\s*/i, '')
@@ -2194,6 +2208,13 @@ const submitApprovalRequest = async (direct = false) => {
 }
 
 const handleApprovalSubmitted = () => { showProxyApprovalCenter.value = true }
+const handleApprovalApplied = async (approval: PoolApproval) => {
+  if (approval.action_type === 'UPDATE_MIHOMO') {
+    await mihomoPanelRef.value?.reload()
+    return
+  }
+  if (approval.action_type === 'UPDATE_PROXY') await loadProxies()
+}
 const handleProxyRevealed = (proxy: RevealedProxy) => { revealedProxy.value = proxy }
 const closeRevealedProxy = () => { revealedProxy.value = null }
 const copyRevealedProxy = () => {

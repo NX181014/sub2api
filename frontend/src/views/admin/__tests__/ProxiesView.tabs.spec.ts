@@ -48,4 +48,15 @@ describe('ProxiesView tabs', () => {
     expect(source).toContain('min-[1180px]:flex')
     expect(source).toContain('table-layout: fixed')
   })
+
+  it('refreshes proxies after Mihomo changes and keeps removed routes operable', () => {
+    const routesLoaded = source.slice(source.indexOf('const handleMihomoRoutesLoaded'), source.indexOf('const openManagedProxy'))
+
+    expect(routesLoaded).toContain('const shouldRefreshProxies = mihomoRoutesLoaded.value')
+    expect(routesLoaded).toContain('if (shouldRefreshProxies) void loadProxies()')
+    expect(source).toContain('@applied="handleApprovalApplied"')
+    expect(source).toContain("approval.action_type === 'UPDATE_MIHOMO'")
+    expect(source).toContain('线路已移除')
+    expect(source).toContain('(!row.managed_source || isRemovedManagedRoute(row))')
+  })
 })

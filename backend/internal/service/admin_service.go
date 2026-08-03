@@ -405,6 +405,7 @@ type BulkUpdateAccountFilters struct {
 	Platform           string
 	Type               string
 	Status             string
+	UsageStatus        string
 	Group              string
 	Search             string
 	PrivacyMode        string
@@ -412,6 +413,7 @@ type BulkUpdateAccountFilters struct {
 	UploaderUnassigned bool
 	ImportBatchID      string
 	ImportBatchScope   string
+	InUseAccountIDs    []int64
 }
 
 // BulkUpdateAccountResult captures the result for a single account update.

@@ -7,9 +7,9 @@
       <template #filters>
         <div class="account-operation-band">
           <AccountTableFilters
-            class="account-operation-filters"
+            :class="['account-operation-filters', { 'workbench-primary-filters': embedded }]"
             :search-query="params.search"
-            :filters="params"
+            :filters="accountTableFilterParams"
             :groups="groups"
             :uploaders="uploaderOptions"
             :result-account-count="visibleResultAccountCount"
@@ -158,10 +158,10 @@
                     data-test="workbench-mobile-toggle"
                     class="workbench-mobile-toggle inline-flex min-h-11 min-w-11 items-center justify-center rounded-md text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-dark-700"
                     :aria-expanded="mobileWorkbenchNavigatorExpanded"
-                    :aria-label="t('admin.accounts.workbenchNavigatorTitle')"
+                    :aria-label="mobileWorkbenchNavigatorExpanded ? t('common.close') : t('admin.accounts.workbenchNavigatorTitle')"
                     @click="mobileWorkbenchNavigatorExpanded ? closeMobileWorkbenchNavigator() : openMobileWorkbenchNavigator()"
                   >
-                    <Icon :name="mobileWorkbenchNavigatorExpanded ? 'chevronDown' : 'chevronRight'" size="sm" />
+                    <Icon :name="mobileWorkbenchNavigatorExpanded ? 'x' : 'chevronRight'" size="sm" />
                   </button>
                 </span>
               </div>
@@ -177,75 +177,153 @@
                 />
               </label>
             </div>
-            <div class="workbench-scope-list">
-              <button type="button" data-test="workbench-all" :aria-current="workbenchScope === 'all' ? 'page' : undefined" :class="['workbench-nav-item', workbenchScope === 'all' ? 'workbench-nav-item-active' : '']" @click="selectWorkbenchScope('all')">
-                <span class="truncate font-medium">{{ t('admin.sharedPool.ledger.allAccounts') }}</span>
-                <span class="workbench-nav-count">{{ workbenchAccountTotal }}</span>
-              </button>
-              <button type="button" data-test="workbench-standalone" :aria-current="workbenchScope === 'standalone' ? 'page' : undefined" :class="['workbench-nav-item', workbenchScope === 'standalone' ? 'workbench-nav-item-active' : '']" @click="selectWorkbenchScope('standalone')">
-                <span class="truncate font-medium">{{ t('admin.accounts.standaloneImport') }}</span>
-                <span class="workbench-nav-count">{{ workbenchStandaloneCount }}</span>
-              </button>
-            </div>
-            <div class="workbench-navigator-modes" :aria-label="t('admin.accounts.workbenchNavigatorTitle')">
-              <button type="button" data-test="workbench-mode-uploader" :aria-pressed="workbenchNavigatorMode === 'uploader'" :class="['workbench-navigator-mode', workbenchNavigatorMode === 'uploader' ? 'workbench-navigator-mode-active' : '']" @click="setWorkbenchNavigatorMode('uploader')">
-                {{ t('admin.accounts.workbenchBrowseByUploader') }}
-              </button>
-              <button type="button" data-test="workbench-mode-batch" :aria-pressed="workbenchNavigatorMode === 'batch'" :class="['workbench-navigator-mode', workbenchNavigatorMode === 'batch' ? 'workbench-navigator-mode-active' : '']" @click="setWorkbenchNavigatorMode('batch')">
-                {{ t('admin.accounts.workbenchBrowseByBatch') }}
-              </button>
-            </div>
             <div class="workbench-navigator-list">
-              <template v-if="workbenchNavigatorMode === 'uploader'">
-                <button
-                  v-for="group in filteredWorkbenchUploaderGroups"
-                  :key="String(group.id)"
-                  type="button"
-                  data-test="workbench-uploader"
-                  :aria-current="workbenchScope === 'uploader' && String(selectedWorkbenchUploaderID) === String(group.id) ? 'page' : undefined"
-                  :class="['workbench-nav-item', workbenchScope === 'uploader' && String(selectedWorkbenchUploaderID) === String(group.id) ? 'workbench-nav-item-active' : '']"
-                  @click="selectWorkbenchUploader(group)"
-                >
-                  <Icon name="user" size="sm" class="shrink-0 text-gray-400" />
-                  <span class="min-w-0 flex-1 truncate font-medium" :title="group.label">{{ group.label }}</span>
-                  <span class="workbench-nav-count">{{ group.count }}</span>
+              <section class="workbench-axis" aria-labelledby="workbench-source-axis">
+                <h3 id="workbench-source-axis" class="workbench-axis-title">{{ t('admin.accounts.workbenchSourceAxis') }}</h3>
+                <button type="button" data-test="workbench-all" :aria-current="workbenchScope === 'all' ? 'page' : undefined" :class="['workbench-nav-item', workbenchScope === 'all' ? 'workbench-nav-item-active' : '']" @click="selectWorkbenchScope('all')">
+                  <Icon name="grid" size="sm" class="shrink-0 text-gray-400" />
+                  <span class="truncate font-medium">{{ t('admin.sharedPool.ledger.allAccounts') }}</span>
+                  <span class="workbench-nav-count">{{ workbenchAccountTotal }}</span>
                 </button>
-              </template>
-              <template v-else>
-                <div v-if="selectedWorkbenchUploader" class="workbench-batch-context">
-                  <span class="min-w-0 truncate" :title="selectedWorkbenchUploader.label">
-                    {{ selectedWorkbenchUploader.label }}
-                  </span>
-                  <button type="button" class="workbench-context-clear" @click="clearWorkbenchUploaderBatchFilter">
-                    {{ t('admin.accounts.workbenchViewAllBatches') }}
-                  </button>
-                </div>
-                <div v-for="batch in filteredWorkbenchBatches" :key="batch.id" :class="['workbench-batch-item', selectedWorkbenchBatchID === batch.id ? 'workbench-batch-item-active' : '']">
-                  <button type="button" data-test="workbench-batch" class="workbench-batch-main" :aria-current="selectedWorkbenchBatchID === batch.id ? 'page' : undefined" @click="selectWorkbenchBatch(batch)">
-                    <span class="min-w-0 flex-1">
-                      <span class="block truncate font-medium text-gray-800 dark:text-gray-100" :title="batch.names.join('、')">{{ batch.names.join('、') || t('admin.accounts.importBatchGroup') }}</span>
-                      <span class="workbench-batch-meta" :title="`${batch.uploader_username || batch.uploader_email || t('admin.sharedPool.ledger.unassignedUploader')} · ${formatDateTime(batch.created_at)}`">
-                        {{ batch.uploader_username || batch.uploader_email || t('admin.sharedPool.ledger.unassignedUploader') }} · {{ formatDateTime(batch.created_at) }}
+                <button type="button" data-test="workbench-standalone" :aria-current="workbenchScope === 'standalone' ? 'page' : undefined" :class="['workbench-nav-item', workbenchScope === 'standalone' ? 'workbench-nav-item-active' : '']" @click="selectWorkbenchScope('standalone')">
+                  <Icon name="user" size="sm" class="shrink-0 text-gray-400" />
+                  <span class="truncate font-medium">{{ t('admin.accounts.standaloneImport') }}</span>
+                  <span class="workbench-nav-count">{{ workbenchStandaloneCount }}</span>
+                </button>
+
+                <div v-for="group in filteredWorkbenchUploaderGroups" :key="String(group.id)" class="workbench-uploader-group">
+                  <div :class="['workbench-uploader-row', workbenchScope === 'uploader' && String(selectedWorkbenchUploaderID) === String(group.id) ? 'workbench-nav-item-active' : '']">
+                    <button
+                      type="button"
+                      data-test="workbench-uploader"
+                      class="workbench-uploader-main"
+                      :aria-current="workbenchScope === 'uploader' && String(selectedWorkbenchUploaderID) === String(group.id) ? 'page' : undefined"
+                      @click="selectWorkbenchUploader(group)"
+                    >
+                      <span class="workbench-uploader-avatar" aria-hidden="true">
+                        <img v-if="group.avatarUrl" :src="group.avatarUrl" alt="" />
+                        <span v-else>{{ workbenchUploaderInitial(group.label) }}</span>
                       </span>
-                    </span>
-                    <span class="workbench-nav-count">{{ batch.matched_count }}</span>
-                  </button>
+                      <span class="min-w-0 flex-1">
+                        <span class="flex min-w-0 items-center gap-1.5">
+                          <span class="truncate font-medium" :title="group.label">{{ group.label }}</span>
+                          <span v-if="group.uploaderStatus && group.uploaderStatus !== 'active'" class="workbench-uploader-disabled">{{ t('admin.accounts.workbenchUploaderDisabled') }}</span>
+                        </span>
+                        <span class="workbench-uploader-stats">
+                          {{ t('admin.accounts.workbenchSchedulableCount', { current: group.schedulableCount, total: group.count }) }}
+                          <span v-if="workbenchUploaderAttentionCount(group)"> · {{ t('admin.accounts.workbenchAttentionCount', { count: workbenchUploaderAttentionCount(group) }) }}</span>
+                        </span>
+                      </span>
+                    </button>
+                    <span class="workbench-nav-count">{{ group.count }}</span>
+                    <button
+                      type="button"
+                      data-test="workbench-uploader-toggle"
+                      class="workbench-tree-toggle"
+                      :aria-expanded="isWorkbenchUploaderExpanded(group)"
+                      :aria-label="isWorkbenchUploaderExpanded(group) ? t('admin.accounts.collapseImportBatch') : t('admin.accounts.expandImportBatch')"
+                      @click="toggleWorkbenchUploader(group.id)"
+                    >
+                      <Icon :name="isWorkbenchUploaderExpanded(group) ? 'chevronDown' : 'chevronRight'" size="sm" />
+                    </button>
+                  </div>
+                  <div v-if="isWorkbenchUploaderExpanded(group) || workbenchNavigatorSearch" class="workbench-uploader-batches">
+                    <button
+                      v-for="batch in group.batches"
+                      :key="batch.id"
+                      type="button"
+                      data-test="workbench-batch"
+                      :aria-current="selectedWorkbenchBatchID === batch.id ? 'page' : undefined"
+                      :class="['workbench-batch-main', selectedWorkbenchBatchID === batch.id ? 'workbench-batch-item-active' : '']"
+                      :title="workbenchBatchTitle(batch)"
+                      @click="selectWorkbenchBatch(batch)"
+                    >
+                      <span class="min-w-0 flex-1">
+                        <span class="block truncate font-medium text-gray-800 dark:text-gray-100">{{ batch.names.join('、') || t('admin.accounts.importBatchGroup') }}</span>
+                        <span class="workbench-batch-meta">
+                          {{ formatWorkbenchDate(batch.created_at) }} · {{ t('admin.accounts.importBatchCount', { count: batch.matched_count }) }}
+                        </span>
+                        <span v-if="batchStatusItems(batch.status).length" class="workbench-batch-statuses">
+                          <span v-for="item in batchStatusItems(batch.status).slice(0, 2)" :key="item.key" :class="['workbench-status-pill', item.className]">
+                            {{ item.label }} {{ item.count }}
+                          </span>
+                        </span>
+                      </span>
+                    </button>
+                  </div>
                 </div>
-              </template>
-              <p v-if="!workbenchNavigatorLoading && workbenchNavigatorResultCount === 0" class="workbench-navigator-empty">
-                {{ t('admin.accounts.workbenchNavigatorEmpty') }}
-              </p>
-              <button
-                v-if="workbenchBatchPage < workbenchBatchPages"
-                type="button"
-                data-test="workbench-load-more"
-                class="workbench-view-all"
-                :disabled="workbenchNavigatorLoadingMore"
-                @click="loadMoreWorkbenchBatches"
-              >
-                <LoadingSpinner v-if="workbenchNavigatorLoadingMore" size="sm" />
-                <template v-else>{{ t('admin.accounts.workbenchLoadMore') }}</template>
-              </button>
+                <p v-if="!workbenchNavigatorLoading && workbenchNavigatorResultCount === 0" class="workbench-navigator-empty">
+                  {{ t('admin.accounts.workbenchNavigatorEmpty') }}
+                </p>
+                <button
+                  v-if="workbenchBatchPage < workbenchBatchPages"
+                  type="button"
+                  data-test="workbench-load-more"
+                  class="workbench-view-all"
+                  :disabled="workbenchNavigatorLoadingMore"
+                  @click="loadMoreWorkbenchBatches"
+                >
+                  <LoadingSpinner v-if="workbenchNavigatorLoadingMore" size="sm" />
+                  <template v-else>{{ t('admin.accounts.workbenchLoadMore') }}</template>
+                </button>
+              </section>
+
+              <section class="workbench-axis" aria-labelledby="workbench-usage-axis">
+                <h3 id="workbench-usage-axis" class="workbench-axis-title">{{ t('admin.accounts.workbenchUsageAxis') }}</h3>
+                <button
+                  v-for="status in workbenchPrimaryUsageStatuses"
+                  :key="status"
+                  type="button"
+                  :data-test="`workbench-usage-${status}`"
+                  :aria-current="selectedWorkbenchUsageStatus === status ? 'page' : undefined"
+                  :class="['workbench-nav-item', selectedWorkbenchUsageStatus === status ? 'workbench-nav-item-active' : '']"
+                  @click="selectWorkbenchUsageStatus(status)"
+                >
+                  <span class="truncate font-medium">{{ workbenchUsageStatusLabel(status) }}</span>
+                  <span class="workbench-nav-count">{{ workbenchUsageStatusCount(status) }}</span>
+                </button>
+                <div class="workbench-attention-group">
+                  <div :class="['workbench-attention-row', selectedWorkbenchUsageStatus === 'attention' ? 'workbench-nav-item-active' : '']">
+                    <button type="button" data-test="workbench-usage-attention" class="workbench-attention-main" :aria-current="selectedWorkbenchUsageStatus === 'attention' ? 'page' : undefined" @click="selectWorkbenchUsageStatus('attention')">
+                      <span class="truncate font-medium">{{ workbenchUsageStatusLabel('attention') }}</span>
+                    </button>
+                    <span class="workbench-nav-count">{{ workbenchUsageStatusCount('attention') }}</span>
+                    <button type="button" data-test="workbench-attention-toggle" class="workbench-tree-toggle" :aria-expanded="workbenchAttentionExpanded" :aria-label="workbenchAttentionExpanded ? t('admin.accounts.collapseImportBatch') : t('admin.accounts.expandImportBatch')" @click="workbenchAttentionExpanded = !workbenchAttentionExpanded">
+                      <Icon :name="workbenchAttentionExpanded ? 'chevronDown' : 'chevronRight'" size="sm" />
+                    </button>
+                  </div>
+                  <div v-if="workbenchAttentionExpanded" class="workbench-attention-children">
+                    <button
+                      v-for="status in workbenchAttentionUsageStatuses"
+                      :key="status"
+                      type="button"
+                      :data-test="`workbench-usage-${status}`"
+                      :aria-current="selectedWorkbenchUsageStatus === status ? 'page' : undefined"
+                      :class="['workbench-nav-item', selectedWorkbenchUsageStatus === status ? 'workbench-nav-item-active' : '']"
+                      @click="selectWorkbenchUsageStatus(status)"
+                    >
+                      <span class="truncate font-medium">{{ workbenchUsageStatusLabel(status) }}</span>
+                      <span class="workbench-nav-count">{{ workbenchUsageStatusCount(status) }}</span>
+                    </button>
+                  </div>
+                </div>
+              </section>
+
+              <section class="workbench-axis" aria-labelledby="workbench-type-axis">
+                <h3 id="workbench-type-axis" class="workbench-axis-title">{{ t('admin.accounts.workbenchTypeAxis') }}</h3>
+                <button
+                  v-for="option in workbenchTypeOptions"
+                  :key="option.value"
+                  type="button"
+                  :data-test="`workbench-type-${option.value || 'all'}`"
+                  :aria-current="String(params.type || '') === option.value ? 'page' : undefined"
+                  :class="['workbench-nav-item', String(params.type || '') === option.value ? 'workbench-nav-item-active' : '']"
+                  @click="selectWorkbenchType(option.value)"
+                >
+                  <span class="truncate font-medium" :title="option.label">{{ option.label }}</span>
+                  <span class="workbench-nav-count">{{ option.count }}</span>
+                </button>
+              </section>
               <LoadingSpinner v-if="workbenchNavigatorLoading" class="m-3" />
             </div>
           </aside>
@@ -1271,10 +1349,11 @@ import { proxyExpiryBadgeClass, proxyExpiryLabelKey } from '@/utils/proxyExpiry'
 import { extractApiErrorMessage } from '@/utils/apiError'
 import { sanitizeUrl } from '@/utils/url'
 import type { Account, AccountPlatform, AccountSchedulerGroupScore, AccountType, Proxy as AccountProxy, AdminGroup, WindowStats, ClaudeModel } from '@/types'
-import type { AccountBatchStatusSummary, AccountImportBatchSummary, AccountListRow } from '@/api/admin/accounts'
+import type { AccountBatchStatusSummary, AccountImportBatchSummary, AccountListFilters, AccountListRow, AccountSelectionSummary } from '@/api/admin/accounts'
 import type { PoolApproval, PoolApprovalBusinessChange, PoolApprovalBusinessSummary, PoolApprovalScope, PoolApprovalStatus, PoolCredentialReveal, SharedPoolAccountCost } from '@/api/admin/sharedPool'
 
 type AccountWorkbenchScope = 'all' | 'standalone' | 'uploader' | 'batch'
+type WorkbenchUsageStatus = NonNullable<AccountListFilters['usage_status']>
 type AccountWorkbenchContext = {
   scope: AccountWorkbenchScope
   import_batch_id?: string
@@ -1285,6 +1364,7 @@ type AccountWorkbenchContext = {
   platform: string
   type: string
   status: string
+  usage_status?: WorkbenchUsageStatus
   group: string
   privacy_mode: string
   sort_by: string
@@ -1334,10 +1414,28 @@ const selectedWorkbenchBatchID = ref(props.initialWorkbenchContext.import_batch_
 const selectedWorkbenchUploaderID = ref<number | string>(
   props.initialWorkbenchContext.uploader_user_id ?? props.initialUploaderUserId
 )
-type WorkbenchNavigatorMode = 'uploader' | 'batch'
-const workbenchNavigatorMode = ref<WorkbenchNavigatorMode>(workbenchScope.value === 'batch' ? 'batch' : 'uploader')
 const workbenchBatches = ref<AccountImportBatchSummary[]>([])
 const workbenchNavigatorSearch = ref('')
+const expandedWorkbenchUploaders = ref(new Set<string>(
+  selectedWorkbenchUploaderID.value === '' ? [] : [String(selectedWorkbenchUploaderID.value)]
+))
+const workbenchAttentionExpanded = ref(false)
+const workbenchFacetSummary = ref<AccountSelectionSummary>({
+  total: 0,
+  platforms: [],
+  types: [],
+  type_counts: {},
+  usage_status_counts: {
+    all: 0,
+    in_use: 0,
+    ready: 0,
+    unused: 0,
+    attention: 0,
+    error: 0,
+    restricted: 0,
+    disabled: 0
+  }
+})
 const mobileWorkbenchNavigatorExpanded = ref(false)
 const workbenchSidebarRef = ref<HTMLElement | null>(null)
 const workbenchNavigatorLoading = ref(false)
@@ -1366,6 +1464,7 @@ type AccountBulkEditTarget =
         platform?: string
         type?: string
         status?: string
+        usage_status?: WorkbenchUsageStatus
         group?: string
         search?: string
         privacy_mode?: string
@@ -1480,7 +1579,9 @@ const APPROVAL_ACCOUNT_TYPE_KEYS: Record<string, string> = {
   oauth: 'admin.accounts.types.oauth',
   'setup-token': 'admin.accounts.setupToken',
   apikey: 'admin.accounts.apiKey',
-  bedrock: 'admin.accounts.bedrockLabel'
+  upstream: 'admin.accounts.types.upstream',
+  bedrock: 'admin.accounts.bedrockLabel',
+  service_account: 'admin.accounts.types.serviceAccount'
 }
 const approvalFieldLabel = (path: string) => {
   const field = path.replace(/^fields\./, '')
@@ -1968,7 +2069,8 @@ const {
   initialParams: {
     platform: props.initialWorkbenchContext.platform || '',
     type: props.initialWorkbenchContext.type || '',
-    status: props.initialWorkbenchContext.status || '',
+    status: embedded ? '' : props.initialWorkbenchContext.status || '',
+    usage_status: props.initialWorkbenchContext.usage_status || 'all',
     privacy_mode: props.initialWorkbenchContext.privacy_mode || '',
     uploader_user_id: '',
     group: props.initialWorkbenchContext.group || '',
@@ -1979,6 +2081,13 @@ const {
     sort_order: sortState.sort_order
   }
 })
+const accountTableFilterParams = computed(() => embedded
+  ? { ...params, type: '', status: '', uploader_user_id: '' }
+  : params
+)
+const selectedWorkbenchUsageStatus = computed<WorkbenchUsageStatus>(() =>
+  (params.usage_status || 'all') as WorkbenchUsageStatus
+)
 if (embedded) {
   pagination.page = Math.max(1, Number(props.initialWorkbenchContext.page || 1))
   if (props.initialWorkbenchContext.page_size) {
@@ -2012,6 +2121,7 @@ const buildImportBatchFilters = () => ({
   platform: String(params.platform || ''),
   type: String(params.type || ''),
   status: String(params.status || ''),
+  usage_status: selectedWorkbenchUsageStatus.value,
   group: String(params.group || ''),
   search: String(params.search || ''),
   privacy_mode: String(params.privacy_mode || ''),
@@ -2149,6 +2259,8 @@ const importBatchStatusItems = (batch: ImportBatchRow) => batchStatusItems(batch
 type WorkbenchUploaderGroup = {
   id: number | string
   label: string
+  avatarUrl: string
+  uploaderStatus: string
   count: number
   schedulableCount: number
   status: AccountBatchStatusSummary
@@ -2171,6 +2283,8 @@ const workbenchUploaderGroups = computed<WorkbenchUploaderGroup[]>(() => {
     const group = groups.get(key) || {
       id,
       label: batch.uploader_username || batch.uploader_email || t('admin.sharedPool.ledger.unassignedUploader'),
+      avatarUrl: batch.uploader_avatar_url || '',
+      uploaderStatus: batch.uploader_status || '',
       count: 0,
       schedulableCount: 0,
       status: {
@@ -2205,19 +2319,46 @@ const filteredWorkbenchUploaderGroups = computed<WorkbenchUploaderGroup[]>(() =>
     })
     .filter(group => group.batches.length > 0)
 })
-const filteredWorkbenchBatches = computed(() => {
-  const needle = workbenchNavigatorSearch.value.trim().toLocaleLowerCase()
-  const uploaderID = selectedWorkbenchUploaderID.value
-  return sortedWorkbenchBatches.value.filter(batch =>
-    (uploaderID === '' || String(batch.uploader_user_id ?? 'unassigned') === String(uploaderID)) &&
-    workbenchBatchMatchesSearch(batch, needle)
-  )
+const workbenchNavigatorResultCount = computed(() => filteredWorkbenchUploaderGroups.value.length)
+const workbenchPrimaryUsageStatuses: WorkbenchUsageStatus[] = ['all', 'in_use', 'ready', 'unused']
+const workbenchAttentionUsageStatuses: WorkbenchUsageStatus[] = ['error', 'restricted', 'disabled']
+watch(selectedWorkbenchUsageStatus, status => {
+  if (workbenchAttentionUsageStatuses.includes(status)) workbenchAttentionExpanded.value = true
+}, { immediate: true })
+const workbenchUsageStatusLabel = (status: WorkbenchUsageStatus) => t(`admin.accounts.workbenchUsageStatus.${status}`)
+const workbenchUsageStatusCount = (status: WorkbenchUsageStatus) =>
+  workbenchFacetSummary.value.usage_status_counts?.[status] ?? (status === 'all' ? workbenchFacetSummary.value.total : 0)
+const workbenchAccountTypeLabel = (accountType: string) => {
+  const key = APPROVAL_ACCOUNT_TYPE_KEYS[accountType]
+  return key ? t(key) : accountType.replace(/[_-]+/g, ' ')
+}
+const workbenchTypeOptions = computed(() => {
+  const counts = { ...(workbenchFacetSummary.value.type_counts || {}) }
+  const selected = String(params.type || '')
+  if (selected && counts[selected] === undefined) counts[selected] = 0
+  const entries = Object.entries(counts)
+    .map(([value, count]) => ({ value, count, label: workbenchAccountTypeLabel(value) }))
+    .sort((left, right) => left.label.localeCompare(right.label))
+  const total = entries.length
+    ? entries.reduce((sum, option) => sum + option.count, 0)
+    : workbenchFacetSummary.value.total
+  return [{ value: '', count: total, label: t('admin.accounts.allTypes') }, ...entries]
 })
-const workbenchNavigatorResultCount = computed(() =>
-  workbenchNavigatorMode.value === 'uploader'
-    ? filteredWorkbenchUploaderGroups.value.length
-    : filteredWorkbenchBatches.value.length
-)
+const workbenchUploaderInitial = (label: string) => label.trim().charAt(0).toLocaleUpperCase() || '?'
+const workbenchUploaderAttentionCount = (group: WorkbenchUploaderGroup) => Math.max(0, group.count - group.status.normal)
+const isWorkbenchUploaderExpanded = (group: WorkbenchUploaderGroup) =>
+  expandedWorkbenchUploaders.value.has(String(group.id))
+const toggleWorkbenchUploader = (id: number | string) => {
+  const next = new Set(expandedWorkbenchUploaders.value)
+  const key = String(id)
+  next.has(key) ? next.delete(key) : next.add(key)
+  expandedWorkbenchUploaders.value = next
+}
+const formatWorkbenchDate = (value: string) => new Date(value).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+const workbenchBatchTitle = (batch: AccountImportBatchSummary) => {
+  const statuses = batchStatusItems(batch.status).map(item => `${item.label} ${item.count}`).join(' · ')
+  return [batch.names.join('、') || t('admin.accounts.importBatchGroup'), formatDateTime(batch.created_at), statuses].filter(Boolean).join(' · ')
+}
 const selectedWorkbenchBatch = computed(() =>
   workbenchBatches.value.find(batch => batch.id === selectedWorkbenchBatchID.value)
 )
@@ -2245,6 +2386,7 @@ const workbenchNavigatorFilters = () => ({
   platform: String(params.platform || ''),
   type: String(params.type || ''),
   status: String(params.status || ''),
+  usage_status: selectedWorkbenchUsageStatus.value,
   group: String(params.group || ''),
   search: workbenchNavigatorSearch.value.trim() || String(params.search || ''),
   privacy_mode: String(params.privacy_mode || ''),
@@ -2263,10 +2405,24 @@ const loadWorkbenchNavigator = async () => {
     const summaryFilters = { ...filters } as Record<string, unknown>
     delete summaryFilters.import_batch_scope
     summaryFilters.search = String(params.search || '')
-    const [result, summary, standalone] = await Promise.all([
+    const summaryPromise = adminAPI.accounts.getSelectionSummary(summaryFilters)
+    const facetFilters = workbenchRequestFilters(summaryFilters)
+    if (workbenchScope.value === 'batch' && selectedWorkbenchBatchID.value) {
+      facetFilters.import_batch_id = selectedWorkbenchBatchID.value
+    } else if (workbenchScope.value === 'standalone') {
+      facetFilters.import_batch_scope = 'standalone'
+    }
+    const facetPromise = workbenchScope.value === 'all'
+      ? summaryPromise
+      : adminAPI.accounts.getSelectionSummary(facetFilters)
+    const standalonePromise = workbenchScope.value === 'standalone'
+      ? facetPromise
+      : adminAPI.accounts.getSelectionSummary({ ...summaryFilters, import_batch_scope: 'standalone' })
+    const [result, summary, standalone, facets] = await Promise.all([
       adminAPI.accounts.listRows(1, 100, filters),
-      adminAPI.accounts.getSelectionSummary(summaryFilters),
-      adminAPI.accounts.getSelectionSummary({ ...summaryFilters, import_batch_scope: 'standalone' })
+      summaryPromise,
+      standalonePromise,
+      facetPromise
     ])
     if (revision !== workbenchNavigatorRevision) return
     let batches = result.items
@@ -2305,6 +2461,7 @@ const loadWorkbenchNavigator = async () => {
     }
     if (revision !== workbenchNavigatorRevision) return
     workbenchBatches.value = batches
+    workbenchFacetSummary.value = facets
     workbenchAccountTotal.value = summary.total
     workbenchStandaloneCount.value = standalone.total
     workbenchBatchTotal.value = result.total
@@ -2352,20 +2509,33 @@ const emitWorkbenchContext = () => emit('workbench-context', {
   platform: String(params.platform || ''),
   type: String(params.type || ''),
   status: String(params.status || ''),
+  usage_status: selectedWorkbenchUsageStatus.value,
   group: String(params.group || ''),
   privacy_mode: String(params.privacy_mode || ''),
   sort_by: sortState.sort_by,
   sort_order: sortState.sort_order
 })
-const setWorkbenchNavigatorMode = (mode: WorkbenchNavigatorMode) => {
-  workbenchNavigatorMode.value = mode
-}
-const clearWorkbenchUploaderBatchFilter = () => {
-  selectedWorkbenchUploaderID.value = ''
-  if (workbenchScope.value !== 'uploader') return
-  workbenchScope.value = 'all'
+const selectWorkbenchUsageStatus = (status: WorkbenchUsageStatus) => {
+  if (selectedWorkbenchUsageStatus.value === status) {
+    closeMobileWorkbenchNavigator()
+    return
+  }
+  params.usage_status = status
   clearSelection()
   pagination.page = 1
+  closeMobileWorkbenchNavigator()
+  emitWorkbenchContext()
+  void reload()
+}
+const selectWorkbenchType = (accountType: string) => {
+  if (String(params.type || '') === accountType) {
+    closeMobileWorkbenchNavigator()
+    return
+  }
+  params.type = accountType
+  clearSelection()
+  pagination.page = 1
+  closeMobileWorkbenchNavigator()
   emitWorkbenchContext()
   void reload()
 }
@@ -2452,6 +2622,7 @@ const selectWorkbenchUploader = (group: WorkbenchUploaderGroup) => {
   workbenchScope.value = 'uploader'
   selectedWorkbenchBatchID.value = ''
   selectedWorkbenchUploaderID.value = group.id
+  expandedWorkbenchUploaders.value = new Set(expandedWorkbenchUploaders.value).add(String(group.id))
   clearSelection()
   pagination.page = 1
   closeMobileWorkbenchNavigator()
@@ -2462,6 +2633,7 @@ const selectWorkbenchBatch = (batch: AccountImportBatchSummary) => {
   workbenchScope.value = 'batch'
   selectedWorkbenchBatchID.value = batch.id
   selectedWorkbenchUploaderID.value = batch.uploader_user_id ?? 'unassigned'
+  expandedWorkbenchUploaders.value = new Set(expandedWorkbenchUploaders.value).add(String(selectedWorkbenchUploaderID.value))
   clearSelection()
   pagination.page = 1
   closeMobileWorkbenchNavigator()
@@ -2644,7 +2816,7 @@ const reload = async (resetPage = true) => {
 const applyWorkbenchContext = async (context: Partial<AccountWorkbenchContext>) => {
   const nextBatchID = context.import_batch_id || ''
   const nextScope = nextBatchID ? 'batch' : context.scope || props.initialWorkbenchScope
-  const nextUploaderID = nextScope === 'uploader' ? context.uploader_user_id ?? '' : ''
+  const nextUploaderID = nextScope === 'uploader' || nextScope === 'batch' ? context.uploader_user_id ?? '' : ''
   const nextPage = Math.max(1, Number(context.page || 1))
   const nextPageSize = Math.max(1, Number(context.page_size || 20))
   const nextSortBy = ACCOUNT_SORTABLE_KEYS.has(context.sort_by || '') ? context.sort_by! : 'created_at'
@@ -2653,7 +2825,8 @@ const applyWorkbenchContext = async (context: Partial<AccountWorkbenchContext>) 
     search: context.search || '',
     platform: context.platform || '',
     type: context.type || '',
-    status: context.status || '',
+    status: '',
+    usage_status: context.usage_status || selectedWorkbenchUsageStatus.value,
     group: context.group || '',
     privacy_mode: context.privacy_mode || ''
   }
@@ -2671,8 +2844,9 @@ const applyWorkbenchContext = async (context: Partial<AccountWorkbenchContext>) 
   workbenchScope.value = nextScope
   selectedWorkbenchBatchID.value = nextBatchID
   selectedWorkbenchUploaderID.value = nextUploaderID
-  if (nextScope === 'batch') workbenchNavigatorMode.value = 'batch'
-  if (nextScope === 'uploader') workbenchNavigatorMode.value = 'uploader'
+  if (nextUploaderID !== '') {
+    expandedWorkbenchUploaders.value = new Set(expandedWorkbenchUploaders.value).add(String(nextUploaderID))
+  }
   pagination.page = nextPage
   pagination.page_size = nextPageSize
   sortState.sort_by = nextSortBy
@@ -2734,7 +2908,15 @@ const handleSearchChange = (value: string) => {
 }
 
 const handleFiltersChange = (filters: Record<string, unknown>) => {
-  Object.assign(params, filters)
+  if (embedded) {
+    const primaryFilters = { ...filters }
+    delete primaryFilters.type
+    delete primaryFilters.status
+    delete primaryFilters.uploader_user_id
+    Object.assign(params, primaryFilters)
+  } else {
+    Object.assign(params, filters)
+  }
   resetSelectionForFilterChange()
   expandedImportBatches.value = new Set()
   if (embedded) emitWorkbenchContext()
@@ -2746,6 +2928,7 @@ const clearFilters = () => {
     platform: '',
     type: '',
     status: '',
+    usage_status: 'all',
     privacy_mode: '',
     uploader_user_id: '',
     group: '',
@@ -3758,6 +3941,7 @@ const buildBulkEditFilterSnapshot = () => {
     platform: typeof rawParams.platform === 'string' ? rawParams.platform : '',
     type: typeof rawParams.type === 'string' ? rawParams.type : '',
     status: typeof rawParams.status === 'string' ? rawParams.status : '',
+    usage_status: (rawParams.usage_status || 'all') as WorkbenchUsageStatus,
     group: typeof rawParams.group === 'string' ? rawParams.group : '',
     search: typeof rawParams.search === 'string' ? rawParams.search : '',
     privacy_mode: typeof rawParams.privacy_mode === 'string' ? rawParams.privacy_mode : '',
@@ -3797,7 +3981,8 @@ const openBulkEditSelected = () => {
 const hasEffectiveFilters = computed(() => {
   return Boolean(
     params.platform || params.type || params.status || params.group ||
-    String(params.search || '').trim() || params.privacy_mode || params.uploader_user_id
+    String(params.search || '').trim() || params.privacy_mode || params.uploader_user_id ||
+    selectedWorkbenchUsageStatus.value !== 'all' || (embedded && workbenchScope.value !== 'all')
   )
 })
 
@@ -3844,6 +4029,7 @@ const buildAccountQueryFilters = () => {
     platform: params.platform || '',
     type: params.type || '',
     status: params.status || '',
+    usage_status: selectedWorkbenchUsageStatus.value,
     group: params.group || '',
     privacy_mode: params.privacy_mode || '',
     uploader_user_id: params.uploader_user_id || '',
@@ -4263,6 +4449,12 @@ onUnmounted(() => {
   display: none;
 }
 
+.workbench-primary-filters :deep(.account-filter-controls > div:first-child > :nth-child(3)),
+.workbench-primary-filters :deep(.account-filter-controls > div:first-child > :nth-child(4)),
+.workbench-primary-filters :deep(.account-filter-controls > .border-t > :first-child) {
+  display: none;
+}
+
 .account-operation-actions {
   flex: 0 0 auto;
   padding: 0;
@@ -4276,12 +4468,8 @@ onUnmounted(() => {
   @apply shrink-0 border-b border-gray-200 bg-white/90 p-3 dark:border-dark-700 dark:bg-dark-900/80;
 }
 
-.workbench-scope-list {
-  @apply shrink-0 space-y-0.5 px-2 pb-1 pt-2;
-}
-
 .workbench-nav-item {
-  @apply relative flex min-h-11 w-full min-w-0 items-center gap-2 rounded-md border-l-[3px] border-transparent px-2.5 py-2 text-left text-sm text-gray-700 transition-colors hover:bg-white focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary-500 dark:text-gray-200 dark:hover:bg-dark-800;
+  @apply relative flex min-h-11 w-full min-w-0 items-center gap-2 rounded-md border-l-[3px] border-transparent px-2.5 py-2 text-left text-sm text-gray-700 transition-colors hover:bg-gray-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary-500 dark:text-gray-200 dark:hover:bg-dark-800;
 }
 
 .workbench-nav-item-active {
@@ -4292,45 +4480,77 @@ onUnmounted(() => {
   @apply ml-auto min-w-5 shrink-0 text-right text-xs tabular-nums text-gray-500 dark:text-gray-400;
 }
 
-.workbench-navigator-modes {
-  @apply mx-2 my-2 grid shrink-0 grid-cols-2 rounded-md bg-gray-100 p-1 dark:bg-dark-800;
-}
-
-.workbench-navigator-mode {
-  @apply min-h-11 rounded px-2 text-xs font-medium text-gray-500 hover:text-gray-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 dark:text-gray-400 dark:hover:text-white;
-}
-
-.workbench-navigator-mode-active {
-  @apply bg-white text-gray-900 shadow-sm dark:bg-dark-700 dark:text-white;
-}
-
 .workbench-navigator-list {
-  @apply min-h-0 flex-1 overflow-y-auto px-2 pb-3;
+  @apply min-h-0 flex-1 space-y-3 overflow-y-auto px-2 pb-3 pt-2;
   overscroll-behavior: contain;
 }
 
-.workbench-batch-item {
-  @apply flex min-h-[52px] min-w-0 items-stretch rounded-md text-left text-xs transition-colors hover:bg-white dark:hover:bg-dark-800;
+.workbench-axis {
+  @apply min-w-0 border-b border-gray-200 pb-3 last:border-b-0 dark:border-dark-700;
+}
+
+.workbench-axis-title {
+  @apply px-2.5 pb-1.5 text-xs font-semibold text-gray-500 dark:text-gray-400;
+}
+
+.workbench-uploader-group,
+.workbench-attention-group {
+  @apply min-w-0;
+}
+
+.workbench-uploader-row,
+.workbench-attention-row {
+  @apply flex min-h-11 min-w-0 items-center rounded-md border-l-[3px] border-transparent text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-dark-800;
+}
+
+.workbench-uploader-main,
+.workbench-attention-main {
+  @apply flex min-h-11 min-w-0 flex-1 items-center gap-2 px-2 py-1.5 text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary-500;
+}
+
+.workbench-uploader-avatar {
+  @apply flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full bg-gray-200 text-xs font-semibold text-gray-600 dark:bg-dark-700 dark:text-gray-200;
+}
+
+.workbench-uploader-avatar img {
+  @apply h-full w-full object-cover;
+}
+
+.workbench-uploader-disabled {
+  @apply shrink-0 rounded bg-gray-200 px-1.5 py-0.5 text-[11px] font-medium text-gray-600 dark:bg-dark-700 dark:text-gray-300;
+}
+
+.workbench-uploader-stats {
+  @apply mt-0.5 block truncate text-xs text-gray-500 dark:text-gray-400;
+}
+
+.workbench-tree-toggle {
+  @apply inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-md text-gray-400 hover:bg-gray-200 hover:text-gray-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary-500 dark:hover:bg-dark-700 dark:hover:text-gray-200;
+}
+
+.workbench-uploader-batches,
+.workbench-attention-children {
+  @apply ml-5 border-l border-gray-200 pl-2 dark:border-dark-700;
 }
 
 .workbench-batch-item-active {
-  @apply border-l-[3px] border-l-primary-500 bg-primary-50/70 dark:border-l-primary-400 dark:bg-primary-900/20;
+  @apply border-l-[3px] border-l-primary-500 bg-primary-50/70 text-primary-700 dark:border-l-primary-400 dark:bg-primary-900/20 dark:text-primary-300;
 }
 
 .workbench-batch-main {
-  @apply flex min-h-[52px] min-w-0 flex-1 items-center gap-2 px-2.5 py-2 text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary-500;
+  @apply flex min-h-[60px] w-full min-w-0 items-center gap-2 rounded-md border-l-[3px] border-transparent px-2.5 py-2 text-left text-xs hover:bg-gray-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary-500 dark:hover:bg-dark-800;
 }
 
 .workbench-batch-meta {
   @apply mt-0.5 block truncate text-xs text-gray-500 dark:text-gray-400;
 }
 
-.workbench-batch-context {
-  @apply mb-1 flex min-h-11 items-center justify-between gap-2 border-b border-gray-200 px-2 text-xs font-medium text-gray-600 dark:border-dark-700 dark:text-gray-300;
+.workbench-batch-statuses {
+  @apply mt-1 flex min-w-0 gap-1 overflow-hidden;
 }
 
-.workbench-context-clear {
-  @apply inline-flex min-h-11 shrink-0 items-center px-2 text-xs font-semibold text-primary-600 hover:text-primary-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 dark:text-primary-400;
+.workbench-status-pill {
+  @apply max-w-[96px] truncate rounded px-1.5 py-0.5 text-[11px] font-medium;
 }
 
 .workbench-sort-control {
@@ -4412,10 +4632,13 @@ onUnmounted(() => {
 
   .workbench-sidebar:not(.workbench-mobile-collapsed) {
     position: fixed;
-    inset: max(12px, env(safe-area-inset-top)) 12px max(12px, env(safe-area-inset-bottom));
+    top: 50%;
+    left: 50%;
     z-index: 61;
     display: flex;
     width: min(420px, calc(100vw - 24px));
+    height: min(72dvh, 620px);
+    max-height: calc(100dvh - max(24px, env(safe-area-inset-top) + env(safe-area-inset-bottom)));
     min-height: 0;
     flex-direction: column;
     overflow: hidden;
@@ -4423,6 +4646,7 @@ onUnmounted(() => {
     border-radius: 8px;
     background: white;
     box-shadow: 0 20px 48px rgb(15 23 42 / 0.24);
+    transform: translate(-50%, -50%);
   }
 
   .dark .workbench-sidebar:not(.workbench-mobile-collapsed) {
@@ -4438,7 +4662,7 @@ onUnmounted(() => {
   }
 
   .workbench-sidebar:not(.workbench-mobile-collapsed) .workbench-nav-item,
-  .workbench-sidebar:not(.workbench-mobile-collapsed) .workbench-batch-item {
+  .workbench-sidebar:not(.workbench-mobile-collapsed) .workbench-batch-main {
     width: 100%;
     min-width: 0;
   }
@@ -4451,7 +4675,7 @@ onUnmounted(() => {
 @media (min-width: 1180px) {
   .workbench-layout {
     display: grid;
-    grid-template-columns: 240px minmax(0, 1fr);
+    grid-template-columns: 264px minmax(0, 1fr);
   }
 
   .workbench-sidebar {
@@ -4474,7 +4698,7 @@ onUnmounted(() => {
   }
 
   .workbench-nav-item,
-  .workbench-batch-item {
+  .workbench-batch-main {
     width: 100%;
     min-width: 0;
   }

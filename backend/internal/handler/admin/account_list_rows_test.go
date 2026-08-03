@@ -13,9 +13,11 @@ func TestBuildAccountLogicalRowsGroupsBatchesAndSummarizesStatus(t *testing.T) {
 	now := time.Date(2026, 7, 30, 12, 0, 0, 0, time.UTC)
 	batchID := "7a7897f8-0b96-4d0f-994a-916613a66459"
 	uploader := "alice"
+	avatar := "https://cdn.example/alice.png"
+	uploaderStatus := service.StatusDisabled
 	accounts := []service.Account{
 		{ID: 9, Name: "standalone", Status: service.StatusActive, Schedulable: true, CreatedAt: now},
-		{ID: 8, Name: "batch-b", Status: service.StatusActive, Schedulable: true, CreatedAt: now, UploaderUsername: &uploader, Extra: map[string]any{"import_batch_id": batchID}},
+		{ID: 8, Name: "batch-b", Status: service.StatusActive, Schedulable: true, CreatedAt: now, UploaderUsername: &uploader, UploaderAvatarURL: &avatar, UploaderStatus: &uploaderStatus, Extra: map[string]any{"import_batch_id": batchID}},
 		{ID: 7, Name: "batch-a", Status: service.StatusError, Schedulable: true, CreatedAt: now.Add(-time.Minute), UploaderUsername: &uploader, Extra: map[string]any{"import_batch_id": batchID}},
 	}
 
@@ -27,6 +29,8 @@ func TestBuildAccountLogicalRowsGroupsBatchesAndSummarizesStatus(t *testing.T) {
 	require.Equal(t, 1, rows[1].Batch.SchedulableCount)
 	require.Equal(t, 1, rows[1].Batch.Status.Normal)
 	require.Equal(t, 1, rows[1].Batch.Status.Error)
+	require.Equal(t, avatar, *rows[1].Batch.UploaderAvatarURL)
+	require.Equal(t, uploaderStatus, *rows[1].Batch.UploaderStatus)
 	require.Equal(t, now.Add(-time.Minute), rows[1].Batch.CreatedAt)
 }
 

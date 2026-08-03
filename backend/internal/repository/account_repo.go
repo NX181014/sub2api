@@ -935,6 +935,77 @@ func (r *accountRepository) accountListFilteredQuery(platform, accountType, stat
 	return q
 }
 
+func accountRestrictedPredicate(now time.Time) dbpredicate.Account {
+	return dbaccount.And(
+		dbaccount.StatusEQ(service.StatusActive),
+		dbaccount.Or(
+			dbaccount.OverloadUntilGT(now),
+			dbaccount.RateLimitResetAtGT(now),
+			dbaccount.TempUnschedulableUntilGT(now),
+		),
+	)
+}
+
+func accountEffectivelySchedulablePredicate(now time.Time) dbpredicate.Account {
+	return dbaccount.And(
+		dbaccount.StatusEQ(service.StatusActive),
+		dbaccount.SchedulableEQ(true),
+		notExpiredPredicate(now),
+		notOverloadedPredicate(now),
+		notRateLimitedPredicate(now),
+		dbaccount.Or(dbaccount.TempUnschedulableUntilIsNil(), dbaccount.TempUnschedulableUntilLTE(now)),
+		accountQuotaAvailablePredicate(),
+	)
+}
+
+func accountUsageStatusPredicate(usageStatus string, inUseAccountIDs []int64, now time.Time) dbpredicate.Account {
+	effective := accountEffectivelySchedulablePredicate(now)
+	notInUse := dbaccount.IDNotIn(inUseAccountIDs...)
+	switch usageStatus {
+	case service.AccountUsageStatusInUse:
+		if len(inUseAccountIDs) == 0 {
+			return dbaccount.IDEQ(-1)
+		}
+		return dbaccount.And(effective, dbaccount.IDIn(inUseAccountIDs...))
+	case service.AccountUsageStatusReady:
+		if len(inUseAccountIDs) == 0 {
+			return dbaccount.And(effective, dbaccount.LastUsedAtNotNil())
+		}
+		return dbaccount.And(effective, dbaccount.LastUsedAtNotNil(), notInUse)
+	case service.AccountUsageStatusUnused:
+		if len(inUseAccountIDs) == 0 {
+			return dbaccount.And(effective, dbaccount.LastUsedAtIsNil())
+		}
+		return dbaccount.And(effective, dbaccount.LastUsedAtIsNil(), notInUse)
+	case service.AccountUsageStatusAttention:
+		return dbaccount.Not(effective)
+	case service.AccountUsageStatusError:
+		return dbaccount.StatusEQ(service.StatusError)
+	case service.AccountUsageStatusRestricted:
+		return accountRestrictedPredicate(now)
+	case service.AccountUsageStatusDisabled:
+		return dbaccount.And(
+			dbaccount.StatusNEQ(service.StatusError),
+			dbaccount.Not(accountRestrictedPredicate(now)),
+			dbaccount.Not(effective),
+		)
+	default:
+		return nil
+	}
+}
+
+func (r *accountRepository) accountSelectionFilteredQuery(filters service.AccountSelectionFilters) *dbent.AccountQuery {
+	var uploaderUserID *int64
+	if filters.UploaderUserID > 0 {
+		uploaderUserID = &filters.UploaderUserID
+	}
+	q := r.accountListFilteredQuery(filters.Platform, filters.Type, filters.Status, filters.Search, filters.GroupID, filters.PrivacyMode, uploaderUserID, filters.UploaderUnassigned, filters.ImportBatchID, filters.ImportBatchScope)
+	if predicate := accountUsageStatusPredicate(filters.UsageStatus, filters.InUseAccountIDs, time.Now()); predicate != nil {
+		q = q.Where(predicate)
+	}
+	return q
+}
+
 func (r *accountRepository) ListWithFilters(ctx context.Context, params pagination.PaginationParams, platform, accountType, status, search string, groupID int64, privacyMode string) ([]service.Account, *pagination.PaginationResult, error) {
 	return r.listWithFilters(ctx, params, platform, accountType, status, search, groupID, privacyMode, nil, false, "", "", false)
 }
@@ -954,15 +1025,16 @@ func (r *accountRepository) ListWithFiltersAndPoolMetrics(ctx context.Context, p
 }
 
 func (r *accountRepository) ListWithSelectionFilters(ctx context.Context, params pagination.PaginationParams, filters service.AccountSelectionFilters, includePoolMetrics bool) ([]service.Account, *pagination.PaginationResult, error) {
-	var uploaderUserID *int64
-	if filters.UploaderUserID > 0 {
-		uploaderUserID = &filters.UploaderUserID
-	}
-	return r.listWithFilters(ctx, params, filters.Platform, filters.Type, filters.Status, filters.Search, filters.GroupID, filters.PrivacyMode, uploaderUserID, filters.UploaderUnassigned, filters.ImportBatchID, filters.ImportBatchScope, includePoolMetrics)
+	q := r.accountSelectionFilteredQuery(filters)
+	return r.listAccountQuery(ctx, params, q, includePoolMetrics)
 }
 
 func (r *accountRepository) listWithFilters(ctx context.Context, params pagination.PaginationParams, platform, accountType, status, search string, groupID int64, privacyMode string, uploaderUserID *int64, uploaderUnassigned bool, importBatchID, importBatchScope string, includePoolMetrics bool) ([]service.Account, *pagination.PaginationResult, error) {
 	q := r.accountListFilteredQuery(platform, accountType, status, search, groupID, privacyMode, uploaderUserID, uploaderUnassigned, importBatchID, importBatchScope)
+	return r.listAccountQuery(ctx, params, q, includePoolMetrics)
+}
+
+func (r *accountRepository) listAccountQuery(ctx context.Context, params pagination.PaginationParams, q *dbent.AccountQuery, includePoolMetrics bool) ([]service.Account, *pagination.PaginationResult, error) {
 	// Clone before Count so interceptor-appended predicates (SoftDeleteMixin's
 	// deleted_at IS NULL) don't accumulate on the shared builder and pollute the
 	// subsequent list query. Same pattern used in group_repo/promo_code_repo/user_repo
@@ -1005,11 +1077,7 @@ func (r *accountRepository) ListAllWithFilters(ctx context.Context, platform, ac
 }
 
 func (r *accountRepository) GetSelectionSummary(ctx context.Context, filters service.AccountSelectionFilters) (*service.AccountSelectionSummary, error) {
-	var uploaderUserID *int64
-	if filters.UploaderUserID > 0 {
-		uploaderUserID = &filters.UploaderUserID
-	}
-	q := r.accountListFilteredQuery(filters.Platform, filters.Type, filters.Status, filters.Search, filters.GroupID, filters.PrivacyMode, uploaderUserID, filters.UploaderUnassigned, filters.ImportBatchID, filters.ImportBatchScope)
+	q := r.accountSelectionFilteredQuery(filters)
 	total, err := q.Clone().Count(ctx)
 	if err != nil {
 		return nil, err
@@ -1037,7 +1105,51 @@ func (r *accountRepository) GetSelectionSummary(ctx context.Context, filters ser
 	}
 	slices.Sort(platforms)
 	slices.Sort(types)
-	return &service.AccountSelectionSummary{Total: int64(total), Platforms: platforms, Types: types}, nil
+
+	typeFilters := filters
+	typeFilters.Type = ""
+	typeRows := make([]struct {
+		Type  string `json:"type"`
+		Count int64  `json:"count"`
+	}, 0)
+	if err := r.accountSelectionFilteredQuery(typeFilters).
+		GroupBy(dbaccount.FieldType).
+		Aggregate(dbent.As(dbent.Count(), "count")).
+		Scan(ctx, &typeRows); err != nil {
+		return nil, err
+	}
+	typeCounts := make(map[string]int64, len(typeRows))
+	for _, row := range typeRows {
+		typeCounts[row.Type] = row.Count
+	}
+
+	usageFilters := filters
+	usageFilters.UsageStatus = ""
+	usageStatusCounts := make(map[string]int64, 8)
+	for _, usageStatus := range []string{
+		service.AccountUsageStatusInUse,
+		service.AccountUsageStatusReady,
+		service.AccountUsageStatusUnused,
+		service.AccountUsageStatusError,
+		service.AccountUsageStatusRestricted,
+		service.AccountUsageStatusDisabled,
+	} {
+		usageFilters.UsageStatus = usageStatus
+		count, countErr := r.accountSelectionFilteredQuery(usageFilters).Count(ctx)
+		if countErr != nil {
+			return nil, countErr
+		}
+		usageStatusCounts[usageStatus] = int64(count)
+	}
+	usageStatusCounts[service.AccountUsageStatusAttention] = usageStatusCounts[service.AccountUsageStatusError] +
+		usageStatusCounts[service.AccountUsageStatusRestricted] + usageStatusCounts[service.AccountUsageStatusDisabled]
+	usageStatusCounts["all"] = usageStatusCounts[service.AccountUsageStatusInUse] +
+		usageStatusCounts[service.AccountUsageStatusReady] + usageStatusCounts[service.AccountUsageStatusUnused] +
+		usageStatusCounts[service.AccountUsageStatusAttention]
+	return &service.AccountSelectionSummary{
+		Total: int64(total), Platforms: platforms, Types: types,
+		TypeCounts: typeCounts, UsageStatusCounts: usageStatusCounts,
+	}, nil
 }
 
 func (r *accountRepository) enrichAccountListPoolMetrics(ctx context.Context, accounts []service.Account) error {
@@ -1055,7 +1167,7 @@ func (r *accountRepository) enrichAccountListPoolMetrics(ctx context.Context, ac
 	}
 
 	rows, err := r.sql.QueryContext(ctx, `
-SELECT a.id,uploader.email,uploader.username,a.expected_token_count,
+SELECT a.id,uploader.email,uploader.username,uploader_avatar.url,uploader.status,a.expected_token_count,
        COALESCE(costs.cost_basis_minor,0)::bigint,
        COALESCE(costs.refund_minor,0)::bigint,
        COALESCE(costs.transferred_out_minor,0)::bigint,
@@ -1070,7 +1182,8 @@ SELECT a.id,uploader.email,uploader.username,a.expected_token_count,
 	   latest_source.name,latest_source.paid_at,
        COALESCE(lifecycle.event_type,'active')
 FROM accounts a
-LEFT JOIN users uploader ON uploader.id=a.created_by_user_id
+LEFT JOIN users uploader ON uploader.id=a.created_by_user_id AND uploader.deleted_at IS NULL
+LEFT JOIN user_avatars uploader_avatar ON uploader_avatar.user_id=uploader.id
 LEFT JOIN LATERAL (
     SELECT COALESCE(SUM(c.cny_amount_minor) FILTER (WHERE c.entry_type NOT IN ('refund','replacement_out','write_off')),0)::bigint cost_basis_minor,
            COALESCE(-SUM(c.cny_amount_minor) FILTER (WHERE c.entry_type='refund' AND c.cny_amount_minor<0),0)::bigint refund_minor,
@@ -1120,6 +1233,7 @@ WHERE a.id IN (`+strings.Join(placeholders, ",")+`)`, args...)
 		var (
 			accountID                                  int64
 			uploaderEmail, uploaderUsername            sql.NullString
+			uploaderAvatarURL, uploaderStatus          sql.NullString
 			expectedTokens                             sql.NullInt64
 			costBasis, refund, transferred, writtenOff int64
 			netCost, totalUsage                        int64
@@ -1130,7 +1244,7 @@ WHERE a.id IN (`+strings.Join(placeholders, ",")+`)`, args...)
 			latestPurchasedAt                          sql.NullTime
 			lifecycleStatus                            string
 		)
-		if err := rows.Scan(&accountID, &uploaderEmail, &uploaderUsername, &expectedTokens, &costBasis, &refund, &transferred, &writtenOff, &netCost, &purchaseCost, &purchaseSourceCount, &unpricedPositiveCount, &futurePurchaseCount, &trancheJSON, &totalUsage, &latestPurchaseSource, &latestPurchasedAt, &lifecycleStatus); err != nil {
+		if err := rows.Scan(&accountID, &uploaderEmail, &uploaderUsername, &uploaderAvatarURL, &uploaderStatus, &expectedTokens, &costBasis, &refund, &transferred, &writtenOff, &netCost, &purchaseCost, &purchaseSourceCount, &unpricedPositiveCount, &futurePurchaseCount, &trancheJSON, &totalUsage, &latestPurchaseSource, &latestPurchasedAt, &lifecycleStatus); err != nil {
 			return err
 		}
 		tranches, err := decodePoolCostTranches(trancheJSON)
@@ -1146,6 +1260,12 @@ WHERE a.id IN (`+strings.Join(placeholders, ",")+`)`, args...)
 		}
 		if uploaderUsername.Valid {
 			account.UploaderUsername = &uploaderUsername.String
+		}
+		if uploaderAvatarURL.Valid {
+			account.UploaderAvatarURL = &uploaderAvatarURL.String
+		}
+		if uploaderStatus.Valid {
+			account.UploaderStatus = &uploaderStatus.String
 		}
 		if expectedTokens.Valid {
 			account.ExpectedTokenCount = &expectedTokens.Int64

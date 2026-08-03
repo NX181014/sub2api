@@ -225,6 +225,7 @@ type BulkUpdateAccountFilters struct {
 	Platform           string `json:"platform"`
 	Type               string `json:"type"`
 	Status             string `json:"status"`
+	UsageStatus        string `json:"usage_status"`
 	Group              string `json:"group"`
 	Search             string `json:"search"`
 	PrivacyMode        string `json:"privacy_mode"`
@@ -281,6 +282,7 @@ func parseAccountFilterQuery(c *gin.Context) (accountFilterQuery, error) {
 			Platform:         c.Query("platform"),
 			Type:             c.Query("type"),
 			Status:           c.Query("status"),
+			UsageStatus:      strings.TrimSpace(c.Query("usage_status")),
 			Search:           strings.TrimSpace(c.Query("search")),
 			PrivacyMode:      strings.TrimSpace(c.Query("privacy_mode")),
 			ImportBatchID:    strings.TrimSpace(c.Query("import_batch_id")),
@@ -329,11 +331,77 @@ func parseAccountFilterQuery(c *gin.Context) (accountFilterQuery, error) {
 	if filters.ImportBatchID != "" && filters.ImportBatchScope != "" {
 		return accountFilterQuery{}, infraerrors.BadRequest("CONFLICTING_IMPORT_BATCH_FILTER", "import batch id and scope cannot be combined")
 	}
+	var valid bool
+	filters.UsageStatus, valid = normalizeAccountUsageStatus(filters.UsageStatus)
+	if !valid {
+		return accountFilterQuery{}, infraerrors.BadRequest("INVALID_ACCOUNT_USAGE_STATUS", "invalid account usage status")
+	}
+	return filters, nil
+}
+
+func normalizeAccountUsageStatus(usageStatus string) (string, bool) {
+	usageStatus = strings.TrimSpace(usageStatus)
+	if usageStatus == "all" {
+		return "", true
+	}
+	switch usageStatus {
+	case "",
+		service.AccountUsageStatusInUse,
+		service.AccountUsageStatusReady,
+		service.AccountUsageStatusUnused,
+		service.AccountUsageStatusAttention,
+		service.AccountUsageStatusError,
+		service.AccountUsageStatusRestricted,
+		service.AccountUsageStatusDisabled:
+		return usageStatus, true
+	default:
+		return "", false
+	}
+}
+
+func usageStatusNeedsRuntime(usageStatus string) bool {
+	return usageStatus == service.AccountUsageStatusInUse ||
+		usageStatus == service.AccountUsageStatusReady ||
+		usageStatus == service.AccountUsageStatusUnused
+}
+
+func (h *AccountHandler) resolveAccountUsageRuntime(ctx context.Context, filters accountFilterQuery, force bool) (accountFilterQuery, error) {
+	if (!force && !usageStatusNeedsRuntime(filters.UsageStatus)) || h.concurrencyService == nil {
+		return filters, nil
+	}
+	base := filters
+	base.UsageStatus = ""
+	base.InUseAccountIDs = nil
+	// Type is cleared so selection-summary can calculate the type facet against
+	// the same runtime snapshot; the final query still applies the requested type.
+	base.Type = ""
+	accounts, err := h.loadAllAccountRows(ctx, base, false)
+	if err != nil {
+		return accountFilterQuery{}, err
+	}
+	accountIDs := make([]int64, len(accounts))
+	for i := range accounts {
+		accountIDs[i] = accounts[i].ID
+	}
+	if len(accountIDs) == 0 {
+		filters.InUseAccountIDs = []int64{}
+		return filters, nil
+	}
+	counts, err := h.concurrencyService.GetAccountConcurrencyBatch(ctx, accountIDs)
+	if err != nil {
+		return accountFilterQuery{}, infraerrors.InternalServer("ACCOUNT_USAGE_STATUS_UNAVAILABLE", "account usage status is unavailable").WithCause(err)
+	}
+	filters.InUseAccountIDs = make([]int64, 0)
+	for _, accountID := range accountIDs {
+		if counts[accountID] > 0 {
+			filters.InUseAccountIDs = append(filters.InUseAccountIDs, accountID)
+		}
+	}
 	return filters, nil
 }
 
 func (h *AccountHandler) listAccountPage(ctx context.Context, page, pageSize int, filters accountFilterQuery, includePoolMetrics bool) ([]service.Account, int64, error) {
-	if filters.ImportBatchID != "" || filters.ImportBatchScope != "" || filters.UploaderUnassigned {
+	if filters.ImportBatchID != "" || filters.ImportBatchScope != "" || filters.UploaderUnassigned || filters.UsageStatus != "" {
 		selectionService, ok := h.adminService.(accountSelectionListService)
 		if !ok {
 			return nil, 0, infraerrors.InternalServer("ACCOUNT_SELECTION_FILTER_UNAVAILABLE", "account selection filter is unavailable")
@@ -670,6 +738,11 @@ func (h *AccountHandler) List(c *gin.Context) {
 		response.ErrorFrom(c, filterErr)
 		return
 	}
+	filters, filterErr = h.resolveAccountUsageRuntime(c.Request.Context(), filters, false)
+	if filterErr != nil {
+		response.ErrorFrom(c, filterErr)
+		return
+	}
 	platform, accountType, status, search := filters.Platform, filters.Type, filters.Status, filters.Search
 	privacyMode, groupID, uploaderUserID := filters.PrivacyMode, filters.GroupID, filters.UploaderUserID
 	lite := parseBoolQueryWithDefault(c.Query("lite"), false)
@@ -883,6 +956,11 @@ func (h *AccountHandler) List(c *gin.Context) {
 // SelectionSummary returns exact cardinality and compatibility facets for the current filters.
 func (h *AccountHandler) SelectionSummary(c *gin.Context) {
 	filters, err := parseAccountFilterQuery(c)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	filters, err = h.resolveAccountUsageRuntime(c.Request.Context(), filters, true)
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
@@ -2326,6 +2404,12 @@ func (h *AccountHandler) BulkUpdate(c *gin.Context) {
 	if req.Filters != nil {
 		req.Filters.ImportBatchID = strings.TrimSpace(req.Filters.ImportBatchID)
 		req.Filters.ImportBatchScope = strings.TrimSpace(req.Filters.ImportBatchScope)
+		var valid bool
+		req.Filters.UsageStatus, valid = normalizeAccountUsageStatus(req.Filters.UsageStatus)
+		if !valid {
+			response.BadRequest(c, "invalid account usage status")
+			return
+		}
 		switch req.Filters.ImportBatchScope {
 		case "", "standalone", "batched":
 		default:
@@ -2365,9 +2449,25 @@ func (h *AccountHandler) BulkUpdate(c *gin.Context) {
 		return
 	}
 
+	serviceFilters := toServiceBulkUpdateAccountFilters(req.Filters)
+	if serviceFilters != nil && usageStatusNeedsRuntime(serviceFilters.UsageStatus) {
+		resolved, resolveErr := h.resolveAccountUsageRuntime(c.Request.Context(), accountFilterQuery{
+			AccountSelectionFilters: service.AccountSelectionFilters{
+				Platform: serviceFilters.Platform, Type: serviceFilters.Type, Status: serviceFilters.Status,
+				UsageStatus: serviceFilters.UsageStatus, Search: serviceFilters.Search, PrivacyMode: serviceFilters.PrivacyMode,
+				UploaderUserID: serviceFilters.UploaderUserID, UploaderUnassigned: serviceFilters.UploaderUnassigned,
+				ImportBatchID: serviceFilters.ImportBatchID, ImportBatchScope: serviceFilters.ImportBatchScope,
+			},
+		}, false)
+		if resolveErr != nil {
+			response.ErrorFrom(c, resolveErr)
+			return
+		}
+		serviceFilters.InUseAccountIDs = resolved.InUseAccountIDs
+	}
 	result, err := h.adminService.BulkUpdateAccounts(c.Request.Context(), &service.BulkUpdateAccountsInput{
 		AccountIDs:            req.AccountIDs,
-		Filters:               toServiceBulkUpdateAccountFilters(req.Filters),
+		Filters:               serviceFilters,
 		Name:                  req.Name,
 		ProxyID:               req.ProxyID,
 		Concurrency:           req.Concurrency,
@@ -2412,6 +2512,7 @@ func toServiceBulkUpdateAccountFilters(filters *BulkUpdateAccountFilters) *servi
 		Platform:           filters.Platform,
 		Type:               filters.Type,
 		Status:             filters.Status,
+		UsageStatus:        filters.UsageStatus,
 		Group:              filters.Group,
 		Search:             filters.Search,
 		PrivacyMode:        filters.PrivacyMode,

@@ -62,6 +62,7 @@ type stubAdminService struct {
 	}
 	selectionSummary        *service.AccountSelectionSummary
 	selectionSummaryFilters service.AccountSelectionFilters
+	lastSelectionFilters    service.AccountSelectionFilters
 	selectionSummaryCalls   int
 	lastListUsers           struct {
 		page      int
@@ -446,6 +447,7 @@ func (s *stubAdminService) ListAccountsWithPoolMetrics(ctx context.Context, page
 }
 
 func (s *stubAdminService) ListAccountsBySelection(ctx context.Context, page, pageSize int, filters service.AccountSelectionFilters, _ bool, sortBy, sortOrder string) ([]service.Account, int64, error) {
+	s.lastSelectionFilters = filters
 	s.lastListAccounts.uploaderID = filters.UploaderUserID
 	s.lastListAccounts.uploaderUnassigned = filters.UploaderUnassigned
 	s.lastListAccounts.batchID = filters.ImportBatchID

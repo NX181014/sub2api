@@ -67,6 +67,7 @@ import { useAuthStore } from '@/stores/auth'
 const props = defineProps<{ show: boolean }>()
 const emit = defineEmits<{
   close: []
+  applied: [approval: PoolApproval]
   'proxy-revealed': [proxy: RevealedProxy]
   'export-revealed': [proxies: RevealedProxy[]]
 }>()
@@ -98,7 +99,12 @@ const load = async () => {
 const changeScope = (value: PoolApprovalScope) => { scope.value = value; load() }
 const approve = async (approval: PoolApproval, immediate = false) => {
   busy.value = approval.id
-  try { await adminAPI.sharedPool.approveApproval(approval.id); appStore.showSuccess(immediate ? '变更已立即应用' : '审批已通过'); await load() }
+  try {
+    const applied = await adminAPI.sharedPool.approveApproval(approval.id)
+    appStore.showSuccess(immediate ? '变更已立即应用' : '审批已通过')
+    emit('applied', applied)
+    await load()
+  }
   catch (error: any) { appStore.showError(error.response?.data?.detail || (immediate ? '立即应用失败' : '审批失败')) }
   finally { busy.value = null }
 }

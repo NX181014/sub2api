@@ -31,6 +31,7 @@ export interface AccountListFilters {
   platform?: string
   type?: string
   status?: string
+  usage_status?: 'all' | 'in_use' | 'ready' | 'unused' | 'attention' | 'error' | 'restricted' | 'disabled'
   group?: string
   search?: string
   privacy_mode?: string
@@ -48,6 +49,8 @@ export interface AccountSelectionSummary {
   total: number
   platforms: string[]
   types: string[]
+  type_counts: Record<string, number>
+  usage_status_counts: Record<'all' | 'in_use' | 'ready' | 'unused' | 'attention' | 'error' | 'restricted' | 'disabled', number>
 }
 
 export interface AccountBatchStatusSummary {
@@ -65,6 +68,8 @@ export interface AccountImportBatchSummary {
   uploader_user_id?: number | null
   uploader_email?: string | null
   uploader_username?: string | null
+  uploader_avatar_url?: string | null
+  uploader_status?: string | null
   created_at: string
   matched_count: number
   total_count: number
@@ -692,6 +697,7 @@ export async function exportData(options?: {
     platform?: string
     type?: string
     status?: string
+    usage_status?: AccountListFilters['usage_status']
     group?: string
     privacy_mode?: string
     search?: string
@@ -707,10 +713,11 @@ export async function exportData(options?: {
   if (options?.ids && options.ids.length > 0) {
     params.ids = options.ids.join(',')
   } else if (options?.filters) {
-    const { platform, type, status, group, privacy_mode, search, uploader_user_id, import_batch_id, import_batch_scope, sort_by, sort_order } = options.filters
+    const { platform, type, status, usage_status, group, privacy_mode, search, uploader_user_id, import_batch_id, import_batch_scope, sort_by, sort_order } = options.filters
     if (platform) params.platform = platform
     if (type) params.type = type
     if (status) params.status = status
+    if (usage_status && usage_status !== 'all') params.usage_status = usage_status
     if (group) params.group = group
     if (privacy_mode) params.privacy_mode = privacy_mode
     if (search) params.search = search
