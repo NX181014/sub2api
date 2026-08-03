@@ -242,6 +242,7 @@ func (s *MihomoService) Workbench(ctx context.Context) (*MihomoWorkbench, error)
 	s.mu.Unlock()
 
 	subscriptionNameByID := make(map[int64]string, len(subscriptions))
+	subscriptionProviderByID := make(map[int64]string, len(subscriptions))
 	counts := make(map[int64][2]int, len(subscriptions))
 	for _, node := range nodes {
 		count := counts[node.SubscriptionID]
@@ -253,6 +254,7 @@ func (s *MihomoService) Workbench(ctx context.Context) (*MihomoWorkbench, error)
 	}
 	for _, subscription := range subscriptions {
 		subscriptionNameByID[subscription.ID] = subscription.Name
+		subscriptionProviderByID[subscription.ID] = subscription.ProviderKey
 		count := counts[subscription.ID]
 		maskedURL := ""
 		if subscription.MaskedHost != "" {
@@ -312,7 +314,23 @@ func (s *MihomoService) Workbench(ctx context.Context) (*MihomoWorkbench, error)
 				}
 			}
 		}
-		currentNode := runtimeGroups[fmt.Sprintf("SUB2API-ROUTE-%d", route.ID)]
+		currentNode := ""
+		runtimeNode := runtimeGroups[fmt.Sprintf("SUB2API-ROUTE-%d", route.ID)]
+		for _, relation := range routeNodes {
+			node, ok := nodeByID[relation.NodeID]
+			if !ok || node.UpstreamRemovedAt != nil || node.Excluded || isMihomoSubscriptionMetadataNode(node.OriginalName) {
+				continue
+			}
+			configuredName := "[" + subscriptionProviderByID[node.SubscriptionID] + "] " + strings.TrimSpace(node.OriginalName)
+			if runtimeNode != configuredName && runtimeNode != node.OriginalName {
+				continue
+			}
+			currentNode = node.DisplayName
+			if currentNode == "" {
+				currentNode = node.OriginalName
+			}
+			break
+		}
 		if currentNode == "" && route.CurrentNodeID != nil {
 			if node, ok := nodeByID[*route.CurrentNodeID]; ok && node.UpstreamRemovedAt == nil && !node.Excluded && !isMihomoSubscriptionMetadataNode(node.OriginalName) {
 				currentNode = node.DisplayName
@@ -912,8 +930,9 @@ func (s *MihomoService) proxyGroups(ctx context.Context) (map[string]string, err
 func (s *MihomoService) reconcileManagedRouteSelections(ctx context.Context, routes []mihomoConfigRoute) error {
 	var raw struct {
 		Proxies map[string]struct {
-			Now string   `json:"now"`
-			All []string `json:"all"`
+			Type string   `json:"type"`
+			Now  string   `json:"now"`
+			All  []string `json:"all"`
 		} `json:"proxies"`
 	}
 	if err := s.controllerJSON(ctx, http.MethodGet, "/proxies", nil, &raw); err != nil {
@@ -924,6 +943,9 @@ func (s *MihomoService) reconcileManagedRouteSelections(ctx context.Context, rou
 		group, ok := raw.Proxies[groupName]
 		if !ok || len(group.All) == 0 {
 			return fmt.Errorf("mihomo route %d has no runtime nodes", route.ID)
+		}
+		if group.Type != "Selector" {
+			continue
 		}
 		valid := false
 		for _, candidate := range group.All {

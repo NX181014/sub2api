@@ -362,7 +362,7 @@ func TestMihomoManagedRuntimeRollbackRestoresConfigAndLegacyProxy(t *testing.T) 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/proxies":
-			_, _ = w.Write([]byte(`{"proxies":{"SUB2API-ROUTE-20":{"now":"[primary] 剩余流量：995.36 GB","all":["[primary] Hong Kong"]}}}`))
+			_, _ = w.Write([]byte(`{"proxies":{"SUB2API-ROUTE-20":{"type":"Selector","now":"[primary] 剩余流量：995.36 GB","all":["[primary] Hong Kong"]}}}`))
 			return
 		case r.Method == http.MethodPut && r.URL.Path == "/proxies/SUB2API-ROUTE-20":
 			var request struct {
@@ -468,6 +468,73 @@ func TestMihomoManagedRuntimeRollbackRestoresConfigAndLegacyProxy(t *testing.T) 
 	}
 	if listeners, ok := applied["listeners"].([]any); !ok || len(listeners) != 1 {
 		t.Fatalf("managed payload did not apply its listener: %#v", applied["listeners"])
+	}
+}
+
+func TestReconcileManagedRouteSelectionsSkipsNonSelectors(t *testing.T) {
+	selectionCalls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/proxies":
+			_, _ = w.Write([]byte(`{"proxies":{"SUB2API-ROUTE-7":{"type":"URLTest","now":"Traffic Remaining: 995 GB","all":["[primary] Hong Kong"]}}}`))
+		case r.Method == http.MethodPut && r.URL.Path == "/proxies/SUB2API-ROUTE-7":
+			selectionCalls++
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	configPath := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(configPath, []byte("secret: test-secret\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	svc := NewMihomoService(&config.Config{Mihomo: config.MihomoConfig{
+		Enabled: true, ControllerURL: server.URL, ConfigPath: configPath,
+	}}, nil, nil)
+	if err := svc.reconcileManagedRouteSelections(context.Background(), []mihomoConfigRoute{{ID: 7}}); err != nil {
+		t.Fatal(err)
+	}
+	if selectionCalls != 0 {
+		t.Fatalf("non-selector received %d selection calls", selectionCalls)
+	}
+}
+
+func TestMihomoWorkbenchRejectsStaleRuntimeMetadataNode(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/version":
+			_, _ = w.Write([]byte(`{"version":"v-test"}`))
+		case "/proxies":
+			_, _ = w.Write([]byte(`{"proxies":{"SUB2API-ROUTE-20":{"now":"[primary] Traffic Remaining: 995 GB"}}}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	configPath := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(configPath, []byte("secret: test-secret\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	currentNodeID := int64(10)
+	resources := &mihomoResourceRepoStub{
+		subscriptions: []MihomoSubscription{{ID: 1, Name: "Primary", ProviderKey: "primary", Status: StatusActive}},
+		nodes:         []MihomoManagedNode{{ID: 10, SubscriptionID: 1, OriginalName: "Hong Kong", DisplayName: "Hong Kong", Alive: true, LastSeenAt: time.Now().UTC()}},
+		routes:        []MihomoRoute{{ID: 20, Name: "Dedicated", Kind: "dedicated", Status: StatusActive, CurrentNodeID: &currentNodeID}},
+		routeNodes:    map[int64][]MihomoRouteNode{20: {{RouteID: 20, NodeID: 10}}},
+	}
+	svc := NewMihomoService(&config.Config{Mihomo: config.MihomoConfig{
+		Enabled: true, ControllerURL: server.URL, ConfigPath: configPath,
+	}}, &mihomoProxyRepoStub{}, nil).SetResourceRepository(resources)
+
+	workbench, err := svc.Workbench(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(workbench.Routes) != 1 || workbench.Routes[0].CurrentNode != "Hong Kong" {
+		t.Fatalf("runtime metadata leaked into workbench: %+v", workbench.Routes)
 	}
 }
 
