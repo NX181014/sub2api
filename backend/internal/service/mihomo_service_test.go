@@ -358,8 +358,23 @@ func TestMihomoApprovalLockHeldUntilFinalized(t *testing.T) {
 
 func TestMihomoManagedRuntimeRollbackRestoresConfigAndLegacyProxy(t *testing.T) {
 	var loadedPayloads []string
+	var selectedNode string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPut || r.URL.Path != "/configs" {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/proxies":
+			_, _ = w.Write([]byte(`{"proxies":{"SUB2API-ROUTE-20":{"now":"[primary] 剩余流量：995.36 GB","all":["[primary] Hong Kong"]}}}`))
+			return
+		case r.Method == http.MethodPut && r.URL.Path == "/proxies/SUB2API-ROUTE-20":
+			var request struct {
+				Name string `json:"name"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+				t.Fatal(err)
+			}
+			selectedNode = request.Name
+			w.WriteHeader(http.StatusNoContent)
+			return
+		case r.Method != http.MethodPut || r.URL.Path != "/configs":
 			http.NotFound(w, r)
 			return
 		}
@@ -406,6 +421,9 @@ func TestMihomoManagedRuntimeRollbackRestoresConfigAndLegacyProxy(t *testing.T) 
 	}
 	if resources.routes[0].ProxyID == nil || *resources.routes[0].ProxyID != 44 {
 		t.Fatalf("legacy proxy was not reused: %+v", resources.routes[0])
+	}
+	if selectedNode != "[primary] Hong Kong" {
+		t.Fatalf("stale route selection was not repaired: %q", selectedNode)
 	}
 	generated, err := os.ReadFile(configPath)
 	if err != nil {

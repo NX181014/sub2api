@@ -314,7 +314,7 @@ func (s *MihomoService) Workbench(ctx context.Context) (*MihomoWorkbench, error)
 		}
 		currentNode := runtimeGroups[fmt.Sprintf("SUB2API-ROUTE-%d", route.ID)]
 		if currentNode == "" && route.CurrentNodeID != nil {
-			if node, ok := nodeByID[*route.CurrentNodeID]; ok {
+			if node, ok := nodeByID[*route.CurrentNodeID]; ok && node.UpstreamRemovedAt == nil && !node.Excluded && !isMihomoSubscriptionMetadataNode(node.OriginalName) {
 				currentNode = node.DisplayName
 				if currentNode == "" {
 					currentNode = node.OriginalName
@@ -555,6 +555,13 @@ func (s *MihomoService) ApplyManagedRuntime(ctx context.Context) (func(bool) err
 	if err = s.loadManagedPayload(ctx, newRaw); err != nil {
 		if rollbackErr := s.loadManagedPayload(context.Background(), oldRaw); rollbackErr != nil {
 			slog.Error("mihomo controller rollback failed after managed config load error", "error", rollbackErr)
+		}
+		s.reloadError = err.Error()
+		return nil, err
+	}
+	if err = s.reconcileManagedRouteSelections(ctx, routes); err != nil {
+		if rollbackErr := s.loadManagedPayload(context.Background(), oldRaw); rollbackErr != nil {
+			slog.Error("mihomo controller rollback failed after route selection reconciliation", "error", rollbackErr)
 		}
 		s.reloadError = err.Error()
 		return nil, err
@@ -900,6 +907,38 @@ func (s *MihomoService) proxyGroups(ctx context.Context) (map[string]string, err
 		out[name] = group.Now
 	}
 	return out, nil
+}
+
+func (s *MihomoService) reconcileManagedRouteSelections(ctx context.Context, routes []mihomoConfigRoute) error {
+	var raw struct {
+		Proxies map[string]struct {
+			Now string   `json:"now"`
+			All []string `json:"all"`
+		} `json:"proxies"`
+	}
+	if err := s.controllerJSON(ctx, http.MethodGet, "/proxies", nil, &raw); err != nil {
+		return err
+	}
+	for _, route := range routes {
+		groupName := fmt.Sprintf("SUB2API-ROUTE-%d", route.ID)
+		group, ok := raw.Proxies[groupName]
+		if !ok || len(group.All) == 0 {
+			return fmt.Errorf("mihomo route %d has no runtime nodes", route.ID)
+		}
+		valid := false
+		for _, candidate := range group.All {
+			if candidate == group.Now {
+				valid = true
+				break
+			}
+		}
+		if !valid {
+			if err := s.selectProxy(ctx, groupName, group.All[0]); err != nil {
+				return fmt.Errorf("select Mihomo route %d fallback: %w", route.ID, err)
+			}
+		}
+	}
+	return nil
 }
 
 func (s *MihomoService) controllerJSON(ctx context.Context, method, path string, input, output any) error {
