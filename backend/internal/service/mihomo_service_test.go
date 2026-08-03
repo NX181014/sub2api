@@ -462,6 +462,8 @@ func TestRefreshManagedSubscriptionKeepsUnknownDelayAndSkipsProviderMetadata(t *
 			_, _ = w.Write([]byte(`{"providers":{"primary":{"proxies":[` +
 				`{"name":"[primary] 剩余流量：995.36 GB","alive":true,"history":[]},` +
 				`{"name":"[primary] 套餐到期: 长期有效","alive":true,"history":[]},` +
+				`{"name":"[primary] 📅 到期时间：2026-12-31","alive":true,"history":[]},` +
+				`{"name":"[primary] Traffic Remaining: 100 GB","alive":true,"history":[]},` +
 				`{"name":"[primary] 未检测节点","alive":false,"history":[]},` +
 				`{"name":"[primary] 已检测节点","alive":true,"history":[{"delay":42}]},` +
 				`{"name":"[primary] 剩余流量专线","alive":true,"history":[{"delay":55}]}` +

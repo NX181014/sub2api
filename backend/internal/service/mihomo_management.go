@@ -740,7 +740,7 @@ func (s *MihomoService) applyLegacyImport(ctx context.Context, update MihomoAppr
 	for _, route := range update.ImportRoutes {
 		for _, name := range route.NodeNames {
 			name = strings.TrimSpace(name)
-			if name == "" {
+			if name == "" || isMihomoSubscriptionMetadataNode(name) {
 				continue
 			}
 			if _, exists := seenNames[name]; exists {

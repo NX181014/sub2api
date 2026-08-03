@@ -26,6 +26,17 @@
           >
             <template #after>
               <button
+                v-if="hasEffectiveFilters && selIds.length === 0"
+                type="button"
+                data-test="edit-filtered"
+                class="btn btn-secondary min-h-11 px-3"
+                @click="openBulkEditFiltered"
+              >
+                <Icon name="edit" size="sm" />
+                <span class="hidden lg:inline">{{ t('admin.accounts.bulkActions.editFiltered', { count: pagination.total }) }}</span>
+                <span class="lg:hidden">{{ pagination.total }}</span>
+              </button>
+              <button
                 type="button"
                 class="btn btn-secondary relative px-2 md:px-3"
                 :title="t('admin.sharedPool.approval.title')"
@@ -47,7 +58,7 @@
                 <button
                   @click="
                     showAutoRefreshDropdown = !showAutoRefreshDropdown;
-                    showAccountToolsDropdown = false
+                    showAccountToolsDialog = false
                   "
                   class="btn btn-secondary px-2 md:px-3"
                   :title="t('admin.accounts.autoRefresh')"
@@ -88,100 +99,16 @@
               </div>
 
               <!-- More Tools Dropdown -->
-              <div class="relative" ref="accountToolsDropdownRef">
+              <div>
                 <button
-                  ref="accountToolsTriggerRef"
-                  @click="toggleAccountToolsDropdown"
+                  @click="openAccountToolsDialog"
                   class="btn btn-secondary px-2 md:px-3"
                   :title="t('admin.accounts.moreActions')"
-                  :aria-expanded="showAccountToolsDropdown"
+                  :aria-expanded="showAccountToolsDialog"
                 >
                   <Icon name="more" size="sm" class="md:mr-1.5" />
                   <span class="hidden md:inline">{{ t('admin.accounts.moreActions') }}</span>
-                  <Icon name="chevronDown" size="xs" class="ml-1 hidden md:inline" />
                 </button>
-                <Teleport to="body">
-                  <div
-                    v-if="showAccountToolsDropdown"
-                    class="fixed z-[9999] origin-top-right overflow-hidden rounded-lg border border-gray-200 bg-white shadow-xl dark:border-dark-700 dark:bg-dark-800"
-                    :style="accountToolsDropdownStyle"
-                    @click.stop
-                  >
-                    <div class="overflow-y-auto p-2" :style="{ maxHeight: `${accountToolsDropdownPosition.maxHeight}px` }">
-                      <div class="px-2 py-2">
-                        <div class="text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">
-                          {{ t('admin.accounts.dataActions') }}
-                        </div>
-                      </div>
-                      <button class="account-tools-menu-item" @click="openSyncFromCrs">
-                        <span class="account-tools-menu-icon bg-blue-50 text-blue-600 dark:bg-blue-900/30 dark:text-blue-300">
-                          <Icon name="sync" size="sm" />
-                        </span>
-                        <span class="flex-1 text-left">{{ t('admin.accounts.syncFromCrs') }}</span>
-                      </button>
-                      <button class="account-tools-menu-item" @click="openImportData">
-                        <span class="account-tools-menu-icon bg-emerald-50 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-300">
-                          <Icon name="upload" size="sm" />
-                        </span>
-                        <span class="flex-1 text-left">{{ t('admin.accounts.dataImport') }}</span>
-                      </button>
-                      <button class="account-tools-menu-item" @click="openExportDataDialogFromMenu">
-                        <span class="account-tools-menu-icon bg-violet-50 text-violet-600 dark:bg-violet-900/30 dark:text-violet-300">
-                          <Icon name="download" size="sm" />
-                        </span>
-                        <span class="flex-1 text-left">
-                          {{ selIds.length ? t('admin.accounts.dataExportSelected') : t('admin.accounts.dataExport') }}
-                        </span>
-                        <span
-                          v-if="selIds.length"
-                          class="rounded-full bg-primary-100 px-2 py-0.5 text-xs font-medium text-primary-700 dark:bg-primary-900/40 dark:text-primary-300"
-                        >
-                          {{ t('admin.accounts.selectedCount', { count: selIds.length }) }}
-                        </span>
-                      </button>
-
-                      <div class="my-2 border-t border-gray-100 dark:border-dark-700"></div>
-                      <div class="px-2 py-2">
-                        <div class="text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">
-                          {{ t('admin.accounts.toolActions') }}
-                        </div>
-                      </div>
-                      <button class="account-tools-menu-item" @click="openErrorPassthrough">
-                        <span class="account-tools-menu-icon bg-amber-50 text-amber-600 dark:bg-amber-900/30 dark:text-amber-300">
-                          <Icon name="shield" size="sm" />
-                        </span>
-                        <span class="flex-1 text-left">{{ t('admin.errorPassthrough.title') }}</span>
-                      </button>
-                      <button class="account-tools-menu-item" @click="openTLSFingerprintProfiles">
-                        <span class="account-tools-menu-icon bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-200">
-                          <Icon name="lock" size="sm" />
-                        </span>
-                        <span class="flex-1 text-left">{{ t('admin.tlsFingerprintProfiles.title') }}</span>
-                      </button>
-
-                      <div class="my-2 border-t border-gray-100 dark:border-dark-700"></div>
-                      <div class="px-2 py-2">
-                        <div class="flex items-center justify-between gap-3">
-                          <span class="text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">
-                            {{ t('admin.accounts.viewColumns') }}
-                          </span>
-                          <Icon name="grid" size="sm" class="text-gray-400" />
-                        </div>
-                      </div>
-                      <div class="grid grid-cols-1 gap-1">
-                        <button
-                          v-for="col in toggleableColumns"
-                          :key="col.key"
-                          @click="toggleColumn(col.key)"
-                          class="flex w-full items-center justify-between rounded-md px-3 py-2 text-sm text-gray-700 transition-colors hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-dark-700"
-                        >
-                          <span class="truncate">{{ col.label }}</span>
-                          <Icon v-if="isColumnVisible(col.key)" name="check" size="sm" class="text-primary-500" />
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                </Teleport>
               </div>
             </template>
           </AccountTableActions>
@@ -201,11 +128,20 @@
       </template>
       <template #table>
         <div :class="embedded ? 'workbench-layout min-h-0 flex-1' : 'contents'">
+          <button
+            v-if="embedded && mobileWorkbenchNavigatorExpanded"
+            type="button"
+            class="workbench-navigator-backdrop"
+            :aria-label="t('common.close')"
+            @click="mobileWorkbenchNavigatorExpanded = false"
+          ></button>
           <aside
             v-if="embedded"
             class="workbench-sidebar shrink-0 border-b border-gray-200 bg-gray-50/60 dark:border-dark-700 dark:bg-dark-900/30"
             :class="{ 'workbench-mobile-collapsed': !mobileWorkbenchNavigatorExpanded }"
             :aria-label="t('admin.accounts.importBatchGroup')"
+            :role="mobileWorkbenchNavigatorExpanded ? 'dialog' : undefined"
+            :aria-modal="mobileWorkbenchNavigatorExpanded ? 'true' : undefined"
           >
             <div data-test="workbench-sidebar-header" class="border-b border-gray-200 p-3 dark:border-dark-700">
               <div class="mb-2 flex items-center justify-between gap-3">
@@ -323,11 +259,33 @@
 
           <section class="flex min-h-0 min-w-0 flex-1 flex-col">
             <header v-if="embedded" class="workbench-header flex flex-wrap items-start justify-between gap-3 border-b border-gray-200 px-4 py-3 dark:border-dark-700">
-              <div class="min-w-0">
-                <h2 class="truncate text-base font-semibold text-gray-900 dark:text-white" :title="workbenchTitle">{{ workbenchTitle }}</h2>
-                <p class="mt-0.5 truncate text-xs text-gray-500 dark:text-gray-400" :title="workbenchSubtitle">{{ workbenchSubtitle }}</p>
+              <div class="flex min-w-0 items-start gap-2">
+                <button
+                  type="button"
+                  class="workbench-navigator-open min-h-11 min-w-11 items-center justify-center rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 dark:border-dark-700 dark:text-gray-300 dark:hover:bg-dark-800"
+                  :aria-label="t('admin.accounts.workbenchNavigatorTitle')"
+                  @click="mobileWorkbenchNavigatorExpanded = true"
+                >
+                  <Icon name="grid" size="sm" />
+                </button>
+                <div v-if="!embedded || workbenchView !== 'finance'" class="min-w-0">
+                  <h2 class="truncate text-base font-semibold text-gray-900 dark:text-white" :title="workbenchTitle">{{ workbenchTitle }}</h2>
+                  <p class="mt-0.5 truncate text-xs text-gray-500 dark:text-gray-400" :title="workbenchSubtitle">{{ workbenchSubtitle }}</p>
+                </div>
               </div>
-              <div v-if="selectedWorkbenchBatch" class="flex max-w-full flex-wrap justify-end gap-1.5">
+              <div class="flex max-w-full flex-wrap items-center justify-end gap-2">
+                <div class="workbench-view-switch" :aria-label="t('admin.accounts.display.view')">
+                  <button
+                    v-for="view in workbenchViews"
+                    :key="view"
+                    type="button"
+                    :class="['workbench-view-option', workbenchView === view ? 'workbench-view-option-active' : '']"
+                    @click="setWorkbenchView(view)"
+                  >
+                    {{ t(`admin.accounts.display.${view}`) }}
+                  </button>
+                </div>
+                <template v-if="selectedWorkbenchBatch">
                 <span
                   v-for="item in batchStatusItems(selectedWorkbenchBatch.status)"
                   :key="item.key"
@@ -338,6 +296,7 @@
                 <span class="inline-flex items-center rounded bg-gray-100 px-2 py-1 text-xs font-medium text-gray-600 dark:bg-dark-700 dark:text-gray-300">
                   {{ t('admin.accounts.importBatchSchedulable', { current: selectedWorkbenchBatch.schedulable_count, total: selectedWorkbenchBatch.matched_count }) }}
                 </span>
+                </template>
               </div>
             </header>
         <AccountBulkActionsBar
@@ -363,7 +322,10 @@
         <div
           ref="accountTableRef"
           class="account-workbench-table flex min-h-0 flex-1 flex-col overflow-hidden"
-          :class="{ 'is-embedded': embedded }"
+          :class="[
+            { 'is-embedded': embedded, 'is-compact': embedded && workbenchDensity === 'compact', 'is-finance-first': embedded && workbenchModuleOrder === 'finance' },
+            embedded ? `workbench-view-${workbenchView}` : ''
+          ]"
         >
         <DataTable
           ref="dataTableRef"
@@ -613,7 +575,7 @@
             >
               <div :class="embedded ? 'account-usage-finance' : ''">
                 <div class="min-w-0">
-                  <div v-if="embedded" class="mb-2 flex items-center gap-1 text-xs font-semibold text-gray-500 dark:text-gray-400">
+                  <div v-if="embedded && workbenchView !== 'finance'" class="mb-2 flex items-center gap-1 text-xs font-semibold text-gray-500 dark:text-gray-400">
                     <span>{{ t('admin.accounts.columns.usageWindows') }}</span>
                     <HelpTooltip :content="t('admin.accounts.usageWindowsHint')" width-class="w-72" />
                   </div>
@@ -635,7 +597,7 @@
                 </div>
 
                 <button
-                  v-if="embedded"
+                  v-if="embedded && workbenchView !== 'runtime'"
                   type="button"
                   data-test="account-workbench-finance"
                   class="account-finance-summary min-h-11 min-w-0 text-left"
@@ -708,7 +670,7 @@
                 </button>
               </div>
               <div
-                v-if="embedded"
+                v-if="embedded && showWorkbenchSecondary"
                 data-test="account-workbench-secondary"
                 class="mt-3 flex min-w-0 flex-wrap items-center gap-x-4 gap-y-2 border-t border-gray-200 pt-3 text-[11px] text-gray-500 dark:border-dark-700 dark:text-gray-400"
               >
@@ -854,7 +816,7 @@
                 <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10" /></svg>
                 <span class="text-xs">{{ t('common.edit') }}</span>
               </button>
-              <button @click="openMenu(row, $event)" class="flex min-h-11 min-w-11 flex-col items-center justify-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-900 dark:hover:bg-dark-700 dark:hover:text-white">
+              <button @click="openMenu(row)" class="flex min-h-11 min-w-11 flex-col items-center justify-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-900 dark:hover:bg-dark-700 dark:hover:text-white">
                 <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M6.75 12a.75.75 0 11-1.5 0 .75.75 0 011.5 0zM12.75 12a.75.75 0 11-1.5 0 .75.75 0 011.5 0zM18.75 12a.75.75 0 11-1.5 0 .75.75 0 011.5 0z" /></svg>
                 <span class="text-xs">{{ t('common.more') }}</span>
               </button>
@@ -873,7 +835,77 @@
     <AccountTestModal :show="showTest" :account="testingAcc" @close="closeTestModal" />
     <AccountStatsModal :show="showStats" :account="statsAcc" @close="closeStatsModal" />
     <ScheduledTestsPanel :show="showSchedulePanel" :account-id="scheduleAcc?.id ?? null" :model-options="scheduleModelOptions" @close="closeSchedulePanel" />
-    <AccountActionMenu :show="menu.show" :account="menu.acc" :position="menu.pos" @close="menu.show = false" @test="handleTest" @stats="handleViewStats" @schedule="handleSchedule" @duplicate="handleDuplicateAccount" @reauth="handleReAuth" @refresh-token="handleRefresh" @recover-state="handleRecoverState" @reset-quota="handleResetQuota" @set-privacy="handleSetPrivacy" @create-spark-shadow="handleCreateSparkShadow" @credential="openCredentialRequest" @pool-record="emit('pool-record', $event)" @delete="handleDelete" />
+    <AccountActionMenu :show="menu.show" :account="menu.acc" @close="menu.show = false" @edit="handleEdit" @test="handleTest" @stats="handleViewStats" @schedule="handleSchedule" @duplicate="handleDuplicateAccount" @reauth="handleReAuth" @refresh-token="handleRefresh" @recover-state="handleRecoverState" @reset-quota="handleResetQuota" @set-privacy="handleSetPrivacy" @create-spark-shadow="handleCreateSparkShadow" @credential="openCredentialRequest" @pool-record="emit('pool-record', $event)" @delete="handleDelete" />
+    <BaseDialog
+      :show="showAccountToolsDialog"
+      :title="t('admin.accounts.toolsDialog.title')"
+      width="wide"
+      :close-on-click-outside="true"
+      @close="showAccountToolsDialog = false"
+    >
+      <div class="space-y-6">
+        <section>
+          <h4 class="dialog-section-title">{{ t('admin.accounts.dataActions') }}</h4>
+          <div class="dialog-action-grid">
+            <button class="dialog-action-button" @click="openSyncFromCrs"><Icon name="sync" size="md" class="text-blue-600" />{{ t('admin.accounts.syncFromCrs') }}</button>
+            <button class="dialog-action-button" @click="openImportData"><Icon name="upload" size="md" class="text-emerald-600" />{{ t('admin.accounts.dataImport') }}</button>
+            <button class="dialog-action-button" @click="openExportDataDialogFromMenu">
+              <Icon name="download" size="md" class="text-violet-600" />
+              {{ selIds.length ? t('admin.accounts.dataExportSelected') : t('admin.accounts.dataExport') }}
+              <span v-if="selIds.length" class="ml-auto rounded-full bg-primary-100 px-2 py-0.5 text-xs text-primary-700 dark:bg-primary-900/40 dark:text-primary-300">{{ selIds.length }}</span>
+            </button>
+          </div>
+        </section>
+        <section>
+          <h4 class="dialog-section-title">{{ t('admin.accounts.toolActions') }}</h4>
+          <div class="dialog-action-grid">
+            <button class="dialog-action-button" @click="openErrorPassthrough"><Icon name="shield" size="md" class="text-amber-600" />{{ t('admin.errorPassthrough.title') }}</button>
+            <button class="dialog-action-button" @click="openTLSFingerprintProfiles"><Icon name="lock" size="md" class="text-gray-600" />{{ t('admin.tlsFingerprintProfiles.title') }}</button>
+          </div>
+        </section>
+        <section v-if="embedded" class="space-y-4">
+          <h4 class="dialog-section-title">{{ t('admin.accounts.display.title') }}</h4>
+          <div>
+            <p class="mb-2 text-sm font-medium text-gray-700 dark:text-gray-200">{{ t('admin.accounts.display.view') }}</p>
+            <div class="grid grid-cols-1 gap-2 sm:grid-cols-3">
+              <button v-for="view in workbenchViews" :key="view" type="button" :class="['display-choice', workbenchView === view ? 'display-choice-active' : '']" @click="setWorkbenchView(view)">
+                {{ t(`admin.accounts.display.${view}`) }}
+              </button>
+            </div>
+          </div>
+          <div class="grid gap-4 sm:grid-cols-2">
+            <label class="display-setting-row">
+              <span>{{ t('admin.accounts.display.secondary') }}</span>
+              <input v-model="showWorkbenchSecondary" type="checkbox" class="h-5 w-5 rounded border-gray-300 text-primary-600 focus:ring-primary-500" @change="saveWorkbenchDisplay" />
+            </label>
+            <label class="display-setting-row">
+              <span>{{ t('admin.accounts.display.density') }}</span>
+              <select v-model="workbenchDensity" class="input min-h-11 w-36" @change="saveWorkbenchDisplay">
+                <option value="comfortable">{{ t('admin.accounts.display.comfortable') }}</option>
+                <option value="compact">{{ t('admin.accounts.display.compact') }}</option>
+              </select>
+            </label>
+            <label class="display-setting-row sm:col-span-2">
+              <span>{{ t('admin.accounts.display.order') }}</span>
+              <select v-model="workbenchModuleOrder" class="input min-h-11 w-44" @change="saveWorkbenchDisplay">
+                <option value="usage">{{ t('admin.accounts.display.usageFirst') }}</option>
+                <option value="finance">{{ t('admin.accounts.display.financeFirst') }}</option>
+              </select>
+            </label>
+          </div>
+          <button type="button" class="btn btn-secondary min-h-11" @click="resetWorkbenchDisplay">{{ t('admin.accounts.display.reset') }}</button>
+        </section>
+        <section v-else>
+          <h4 class="dialog-section-title">{{ t('admin.accounts.viewColumns') }}</h4>
+          <div class="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            <button v-for="col in toggleableColumns" :key="col.key" type="button" class="display-choice flex items-center justify-between" @click="toggleColumn(col.key)">
+              <span class="truncate">{{ col.label }}</span>
+              <Icon v-if="isColumnVisible(col.key)" name="check" size="sm" class="text-primary-500" />
+            </button>
+          </div>
+        </section>
+      </div>
+    </BaseDialog>
     <SyncFromCrsModal :show="showSync" @close="showSync = false" @synced="reload" />
     <ImportDataModal :show="showImportData" @close="showImportData = false" @imported="handleDataImported" />
     <BulkEditAccountModal
@@ -1219,7 +1251,6 @@ import { formatDateTime, formatRelativeTime } from '@/utils/format'
 import { proxyExpiryBadgeClass, proxyExpiryLabelKey } from '@/utils/proxyExpiry'
 import { extractApiErrorMessage } from '@/utils/apiError'
 import { sanitizeUrl } from '@/utils/url'
-import { getFloatingPanelPosition } from '@/utils/floatingPanel'
 import type { Account, AccountPlatform, AccountSchedulerGroupScore, AccountType, Proxy as AccountProxy, AdminGroup, WindowStats, ClaudeModel } from '@/types'
 import type { AccountBatchStatusSummary, AccountImportBatchSummary, AccountListRow } from '@/api/admin/accounts'
 import type { PoolApproval, PoolApprovalBusinessChange, PoolApprovalBusinessSummary, PoolApprovalScope, PoolApprovalStatus, PoolCredentialReveal, SharedPoolAccountCost } from '@/api/admin/sharedPool'
@@ -1385,7 +1416,7 @@ const showSchedulePanel = ref(false)
 const scheduleAcc = ref<Account | null>(null)
 const scheduleModelOptions = ref<SelectOption[]>([])
 const togglingSchedulable = ref<number | null>(null)
-const menu = reactive<{show:boolean, acc:Account|null, pos:{top:number, left:number}|null}>({ show: false, acc: null, pos: null })
+const menu = reactive<{ show: boolean; acc: Account | null }>({ show: false, acc: null })
 const exportingData = ref(false)
 const probingUpstreamBilling = reactive(new Set<number>())
 const upstreamBillingProbeGloballyEnabled = ref<boolean | undefined>(undefined)
@@ -1518,23 +1549,56 @@ const approvalBusinessChangeValue = (change: PoolApprovalBusinessChange, side: '
 )
 const approvalBusinessChangeImpact = (change: PoolApprovalBusinessChange) => t(`admin.sharedPool.approval.effects.${change.impact}`)
 
-// Account tools dropdown
-const showAccountToolsDropdown = ref(false)
-const accountToolsDropdownRef = ref<HTMLElement | null>(null)
-const accountToolsTriggerRef = ref<HTMLElement | null>(null)
-const accountToolsDropdownPosition = reactive({
-  top: null as number | null,
-  bottom: null as number | null,
-  left: 16,
-  width: 320,
-  maxHeight: 0
-})
-const accountToolsDropdownStyle = computed(() => ({
-  top: accountToolsDropdownPosition.top == null ? 'auto' : `${accountToolsDropdownPosition.top}px`,
-  bottom: accountToolsDropdownPosition.bottom == null ? 'auto' : `${accountToolsDropdownPosition.bottom}px`,
-  left: `${accountToolsDropdownPosition.left}px`,
-  width: `${accountToolsDropdownPosition.width}px`
-}))
+const showAccountToolsDialog = ref(false)
+type WorkbenchView = 'runtime' | 'finance' | 'full'
+type WorkbenchDensity = 'comfortable' | 'compact'
+type WorkbenchModuleOrder = 'usage' | 'finance'
+const WORKBENCH_DISPLAY_STORAGE_KEY = 'account-workbench-display-v1'
+const workbenchViews: WorkbenchView[] = ['runtime', 'finance', 'full']
+const workbenchView = ref<WorkbenchView>('full')
+const workbenchDensity = ref<WorkbenchDensity>('comfortable')
+const workbenchModuleOrder = ref<WorkbenchModuleOrder>('usage')
+const showWorkbenchSecondary = ref(true)
+
+const saveWorkbenchDisplay = () => {
+  try {
+    localStorage.setItem(WORKBENCH_DISPLAY_STORAGE_KEY, JSON.stringify({
+      view: workbenchView.value,
+      density: workbenchDensity.value,
+      moduleOrder: workbenchModuleOrder.value,
+      showSecondary: showWorkbenchSecondary.value
+    }))
+  } catch (error) {
+    console.error('Failed to save account workbench display:', error)
+  }
+}
+
+const loadWorkbenchDisplay = () => {
+  try {
+    const saved = localStorage.getItem(WORKBENCH_DISPLAY_STORAGE_KEY)
+    if (!saved) return
+    const value = JSON.parse(saved) as { view?: string; density?: string; moduleOrder?: string; showSecondary?: boolean }
+    if (workbenchViews.includes(value.view as WorkbenchView)) workbenchView.value = value.view as WorkbenchView
+    if (value.density === 'comfortable' || value.density === 'compact') workbenchDensity.value = value.density
+    if (value.moduleOrder === 'usage' || value.moduleOrder === 'finance') workbenchModuleOrder.value = value.moduleOrder
+    if (typeof value.showSecondary === 'boolean') showWorkbenchSecondary.value = value.showSecondary
+  } catch (error) {
+    console.error('Failed to load account workbench display:', error)
+  }
+}
+
+const setWorkbenchView = (view: WorkbenchView) => {
+  workbenchView.value = view
+  saveWorkbenchDisplay()
+}
+
+const resetWorkbenchDisplay = () => {
+  workbenchView.value = 'full'
+  workbenchDensity.value = 'comfortable'
+  workbenchModuleOrder.value = 'usage'
+  showWorkbenchSecondary.value = true
+  saveWorkbenchDisplay()
+}
 const hiddenColumns = reactive<Set<string>>(new Set())
 const DEFAULT_HIDDEN_COLUMNS = embedded
   ? [
@@ -1772,6 +1836,7 @@ const saveAutoRefreshToStorage = () => {
 if (typeof window !== 'undefined') {
   loadSavedColumns()
   loadSavedAutoRefresh()
+  loadWorkbenchDisplay()
 }
 
 const setAutoRefreshEnabled = (enabled: boolean) => {
@@ -2195,12 +2260,16 @@ const emitWorkbenchContext = () => emit('workbench-context', {
   sort_order: sortState.sort_order
 })
 const selectWorkbenchScope = (scope: 'all' | 'standalone') => {
-  if (workbenchScope.value === scope) return
+  if (workbenchScope.value === scope) {
+    mobileWorkbenchNavigatorExpanded.value = false
+    return
+  }
   workbenchScope.value = scope
   selectedWorkbenchBatchID.value = ''
   selectedWorkbenchUploaderID.value = ''
   clearSelection()
   pagination.page = 1
+  mobileWorkbenchNavigatorExpanded.value = false
   emitWorkbenchContext()
   void reload()
 }
@@ -2210,6 +2279,7 @@ const selectWorkbenchUploader = (group: WorkbenchUploaderGroup) => {
   selectedWorkbenchUploaderID.value = group.id
   clearSelection()
   pagination.page = 1
+  mobileWorkbenchNavigatorExpanded.value = false
   emitWorkbenchContext()
   void reload()
 }
@@ -2219,6 +2289,7 @@ const selectWorkbenchBatch = (batch: AccountImportBatchSummary) => {
   selectedWorkbenchUploaderID.value = ''
   clearSelection()
   pagination.page = 1
+  mobileWorkbenchNavigatorExpanded.value = false
   emitWorkbenchContext()
   void reload()
 }
@@ -2574,6 +2645,8 @@ const isAnyModalOpen = computed(() => {
     showTest.value ||
     showStats.value ||
     showSchedulePanel.value ||
+    showAccountToolsDialog.value ||
+    menu.show ||
     showErrorPassthrough.value ||
     showTLSFingerprintProfiles.value
   )
@@ -2670,36 +2743,22 @@ const loadUpstreamBillingProbeGlobalState = async () => {
   }
 }
 
-const closeAccountToolsDropdown = () => {
-  showAccountToolsDropdown.value = false
+const closeAccountToolsDialog = () => {
+  showAccountToolsDialog.value = false
 }
 
-const updateAccountToolsDropdownPosition = () => {
-  const trigger = accountToolsTriggerRef.value
-  if (!trigger) return
-
-  const position = getFloatingPanelPosition(
-    trigger.getBoundingClientRect(),
-    document.documentElement.clientWidth || window.innerWidth,
-    window.innerHeight
-  )
-  Object.assign(accountToolsDropdownPosition, position)
-}
-
-const toggleAccountToolsDropdown = () => {
-  const nextVisible = !showAccountToolsDropdown.value
+const openAccountToolsDialog = () => {
   showAutoRefreshDropdown.value = false
-  if (nextVisible) updateAccountToolsDropdownPosition()
-  showAccountToolsDropdown.value = nextVisible
+  showAccountToolsDialog.value = true
 }
 
 const openSyncFromCrs = () => {
-  closeAccountToolsDropdown()
+  closeAccountToolsDialog()
   showSync.value = true
 }
 
 const openImportData = () => {
-  closeAccountToolsDropdown()
+  closeAccountToolsDialog()
   if (embedded) {
     emit('pool-import-request')
     return
@@ -2720,17 +2779,17 @@ const continueImportWithPoolDraft = () => { showImportData.value = true }
 defineExpose({ continueCreateWithPoolDraft, continueImportWithPoolDraft, reload })
 
 const openExportDataDialogFromMenu = () => {
-  closeAccountToolsDropdown()
+  closeAccountToolsDialog()
   openExportDataDialog()
 }
 
 const openErrorPassthrough = () => {
-  closeAccountToolsDropdown()
+  closeAccountToolsDialog()
   showErrorPassthrough.value = true
 }
 
 const openTLSFingerprintProfiles = () => {
-  closeAccountToolsDropdown()
+  closeAccountToolsDialog()
   showTLSFingerprintProfiles.value = true
 }
 
@@ -2747,7 +2806,7 @@ const { pause: pauseAutoRefresh, resume: resumeAutoRefresh } = useIntervalFn(
     if (document.hidden) return
     if (loading.value || autoRefreshFetching.value || pageBatchLoading.value) return
     if (isAnyModalOpen.value) return
-    if (menu.show || showAccountToolsDropdown.value || showAutoRefreshDropdown.value) return
+    if (menu.show || showAccountToolsDialog.value || showAutoRefreshDropdown.value) return
     if (inAutoRefreshSilentWindow()) {
       autoRefreshCountdown.value = Math.max(
         0,
@@ -3268,55 +3327,8 @@ const handleApprovalSubmitted = () => {
   void loadPendingApprovalCount()
 }
 
-const openMenu = (a: Account, e: MouseEvent) => {
-  menu.acc = a
-
-  const target = e.currentTarget as HTMLElement
-  if (target) {
-    const rect = target.getBoundingClientRect()
-    const menuWidth = 200
-    const menuHeight = 240
-    const padding = 8
-    const viewportWidth = window.innerWidth
-    const viewportHeight = window.innerHeight
-
-    let left: number
-    let top: number
-
-    if (viewportWidth < 768) {
-      // 居中显示,水平位置
-      left = Math.max(padding, Math.min(
-        rect.left + rect.width / 2 - menuWidth / 2,
-        viewportWidth - menuWidth - padding
-      ))
-
-      // 优先显示在按钮下方
-      top = rect.bottom + 4
-
-      // 如果下方空间不够,显示在上方
-      if (top + menuHeight > viewportHeight - padding) {
-        top = rect.top - menuHeight - 4
-        // 如果上方也不够,就贴在视口顶部
-        if (top < padding) {
-          top = padding
-        }
-      }
-    } else {
-      left = Math.max(padding, Math.min(
-        e.clientX - menuWidth,
-        viewportWidth - menuWidth - padding
-      ))
-      top = e.clientY
-      if (top + menuHeight > viewportHeight - padding) {
-        top = viewportHeight - menuHeight - padding
-      }
-    }
-
-    menu.pos = { top, left }
-  } else {
-    menu.pos = { top: e.clientY, left: e.clientX - 200 }
-  }
-
+const openMenu = (account: Account) => {
+  menu.acc = account
   menu.show = true
 }
 const toggleSelectAllVisible = async (event: Event) => {
@@ -3937,22 +3949,9 @@ const proxyExpiryText = (p: AccountProxy): string => {
   return params ? t(key, params) : t(key)
 }
 
-// 表格滚动时关闭行操作菜单，并让顶部工具菜单继续贴紧触发按钮。
-const handleScroll = () => {
-  menu.show = false
-  if (showAccountToolsDropdown.value) updateAccountToolsDropdownPosition()
-}
-
-const handleViewportResize = () => {
-  if (showAccountToolsDropdown.value) updateAccountToolsDropdownPosition()
-}
-
-// 点击外部关闭顶部下拉菜单
+// 点击外部关闭自动刷新选项。
 const handleClickOutside = (event: MouseEvent) => {
   const target = event.target as HTMLElement
-  if (accountToolsDropdownRef.value && !accountToolsDropdownRef.value.contains(target)) {
-    showAccountToolsDropdown.value = false
-  }
   if (autoRefreshDropdownRef.value && !autoRefreshDropdownRef.value.contains(target)) {
     showAutoRefreshDropdown.value = false
   }
@@ -3978,8 +3977,6 @@ onMounted(async () => {
   } catch (error) {
     console.error('Failed to load account uploader options:', error)
   }
-  window.addEventListener('scroll', handleScroll, true)
-  window.addEventListener('resize', handleViewportResize)
   document.addEventListener('click', handleClickOutside)
 
   if (autoRefreshEnabled.value) {
@@ -3993,19 +3990,51 @@ onMounted(async () => {
 onUnmounted(() => {
   if (credentialClearTimer) clearTimeout(credentialClearTimer)
   credentialReveal.value = null
-  window.removeEventListener('scroll', handleScroll, true)
-  window.removeEventListener('resize', handleViewportResize)
   document.removeEventListener('click', handleClickOutside)
 })
 </script>
 
 <style scoped>
-.account-tools-menu-item {
-  @apply flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm text-gray-700 transition-colors hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-dark-700;
+.dialog-section-title {
+  @apply mb-2 text-xs font-semibold uppercase text-gray-500 dark:text-gray-400;
+  letter-spacing: 0;
 }
 
-.account-tools-menu-icon {
-  @apply inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-md;
+.dialog-action-grid {
+  @apply grid grid-cols-1 gap-2 sm:grid-cols-2;
+}
+
+.dialog-action-button {
+  @apply flex min-h-11 min-w-0 items-center gap-3 rounded-lg border border-gray-200 bg-white px-3 py-2.5 text-left text-sm font-medium text-gray-800 hover:border-primary-300 hover:bg-primary-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 dark:border-dark-700 dark:bg-dark-800 dark:text-gray-100 dark:hover:border-primary-700 dark:hover:bg-primary-900/20;
+}
+
+.display-choice {
+  @apply min-h-11 rounded-lg border border-gray-200 px-3 py-2 text-left text-sm font-medium text-gray-700 hover:border-primary-300 hover:bg-primary-50 dark:border-dark-700 dark:text-gray-200 dark:hover:border-primary-700 dark:hover:bg-primary-900/20;
+}
+
+.display-choice-active {
+  @apply border-primary-400 bg-primary-50 text-primary-700 ring-1 ring-primary-200 dark:border-primary-700 dark:bg-primary-900/30 dark:text-primary-300 dark:ring-primary-800;
+}
+
+.display-setting-row {
+  @apply flex min-h-11 items-center justify-between gap-3 rounded-lg border border-gray-200 px-3 py-2 text-sm font-medium text-gray-700 dark:border-dark-700 dark:text-gray-200;
+}
+
+.workbench-view-switch {
+  @apply inline-flex min-h-11 items-center rounded-lg border border-gray-200 bg-gray-50 p-1 dark:border-dark-700 dark:bg-dark-800;
+}
+
+.workbench-view-option {
+  @apply min-h-9 rounded-md px-3 text-xs font-medium text-gray-600 hover:text-gray-900 dark:text-gray-300 dark:hover:text-white;
+}
+
+.workbench-view-option-active {
+  @apply bg-white text-primary-700 shadow-sm dark:bg-dark-700 dark:text-primary-300;
+}
+
+.workbench-navigator-open,
+.workbench-navigator-backdrop {
+  display: none;
 }
 
 .account-operation-band {
@@ -4067,6 +4096,7 @@ onUnmounted(() => {
 
 .workbench-layout {
   display: flex;
+  min-width: 0;
   flex-direction: column;
 }
 
@@ -4105,6 +4135,75 @@ onUnmounted(() => {
   .account-operation-filters :deep(> div:not(:first-child)) {
     order: 4;
     flex: 1 0 100%;
+  }
+}
+
+@media (max-width: 1179px) {
+  .workbench-navigator-open {
+    display: inline-flex;
+  }
+
+  .workbench-navigator-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 60;
+    display: block;
+    background: rgb(15 23 42 / 0.45);
+  }
+
+  .workbench-sidebar.workbench-mobile-collapsed {
+    display: none;
+  }
+
+  .workbench-sidebar:not(.workbench-mobile-collapsed) {
+    position: fixed;
+    inset: max(12px, env(safe-area-inset-top)) 12px max(12px, env(safe-area-inset-bottom));
+    z-index: 61;
+    display: flex;
+    width: min(420px, calc(100vw - 24px));
+    min-height: 0;
+    flex-direction: column;
+    overflow: hidden;
+    border: 1px solid rgb(226 232 240);
+    border-radius: 8px;
+    background: white;
+    box-shadow: 0 20px 48px rgb(15 23 42 / 0.24);
+  }
+
+  .dark .workbench-sidebar:not(.workbench-mobile-collapsed) {
+    border-color: rgb(51 65 85);
+    background: rgb(15 23 42);
+  }
+
+  .workbench-sidebar:not(.workbench-mobile-collapsed) .workbench-navigator-list {
+    display: block;
+    min-height: 0;
+    flex: 1 1 auto;
+    overflow-y: auto;
+  }
+
+  .workbench-sidebar:not(.workbench-mobile-collapsed) .workbench-navigator-list > * + *,
+  .workbench-sidebar:not(.workbench-mobile-collapsed) .workbench-uploader-group > * + * {
+    margin-top: 8px;
+  }
+
+  .workbench-sidebar:not(.workbench-mobile-collapsed) .workbench-nav-item,
+  .workbench-sidebar:not(.workbench-mobile-collapsed) .workbench-batch-item,
+  .workbench-sidebar:not(.workbench-mobile-collapsed) .workbench-uploader-group {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .workbench-sidebar:not(.workbench-mobile-collapsed) .workbench-uploader-group {
+    display: block;
+    padding-top: 8px;
+    padding-left: 0;
+    border-top: 1px solid rgb(226 232 240);
+    border-left: 0;
+  }
+
+  .workbench-mobile-toggle {
+    display: inline-flex;
   }
 }
 
@@ -4181,6 +4280,20 @@ onUnmounted(() => {
   width: 100%;
   padding-top: 12px;
   border-top: 1px solid rgb(226 232 240 / 0.9);
+}
+
+.account-workbench-table.is-finance-first .account-finance-summary {
+  order: -1;
+}
+
+.account-workbench-table.is-compact :deep(.table-body tr[data-row-id] td) {
+  padding-top: 8px;
+  padding-bottom: 8px;
+}
+
+.account-workbench-table.is-compact :deep(.table-body tr[data-row-id]) {
+  margin-top: 4px;
+  margin-bottom: 4px;
 }
 
 .dark .account-finance-summary {
@@ -4376,6 +4489,12 @@ onUnmounted(() => {
   display: none;
 }
 
+@media (max-width: 1179px) {
+  .workbench-mobile-toggle {
+    display: inline-flex;
+  }
+}
+
 @media (max-width: 767px) {
   .account-operation-band {
     gap: 8px;
@@ -4393,7 +4512,7 @@ onUnmounted(() => {
 
   .workbench-navigator-list {
     display: block;
-    overflow: hidden;
+    overflow-y: auto;
   }
 
   .workbench-navigator-list > * + *,
@@ -4465,6 +4584,18 @@ onUnmounted(() => {
     width: 100%;
     max-width: none;
     text-align: left;
+  }
+}
+
+.account-workbench-table.workbench-view-runtime .account-usage-finance,
+.account-workbench-table.workbench-view-finance .account-usage-finance {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+@media (min-width: 768px) {
+  .account-workbench-table.workbench-view-finance .account-finance-summary {
+    padding-left: 0;
+    border-left: 0;
   }
 }
 </style>

@@ -1,7 +1,7 @@
 <template>
-  <div class="account-filter-controls min-w-0 flex-1 space-y-3 rounded-xl border border-gray-200 bg-white p-3 shadow-sm dark:border-dark-700 dark:bg-dark-800/70 sm:p-3.5">
-    <div class="flex flex-wrap items-start gap-3">
-      <div class="min-w-0 w-full sm:w-[220px]">
+  <div class="account-filter-controls min-w-0 flex-1 space-y-3">
+    <div class="flex flex-wrap items-start gap-2">
+      <div class="min-w-0 w-full sm:min-w-[240px] sm:flex-1">
         <SearchInput
           :model-value="searchQuery"
           :placeholder="t('admin.accounts.searchAccounts')"
@@ -10,9 +10,9 @@
         />
         <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.accounts.searchAccountsHint') }}</p>
       </div>
-      <Select :model-value="filters.platform" class="w-40" :options="pOpts" :aria-label="t('admin.accounts.columns.platform')" @update:model-value="updatePlatform" />
-      <Select :model-value="filters.status" class="w-40" :options="sOpts" :aria-label="t('admin.accounts.columns.status')" @update:model-value="updateStatus" />
-      <Select :model-value="filters.uploader_user_id" class="w-48" :options="uploaderOpts" :aria-label="t('admin.sharedPool.columns.uploader')" searchable @update:model-value="updateUploader" />
+      <Select :model-value="filters.platform" class="min-w-36 flex-1 sm:max-w-40" :options="pOpts" :aria-label="t('admin.accounts.columns.platform')" @update:model-value="updatePlatform" />
+      <Select :model-value="filters.status" class="min-w-36 flex-1 sm:max-w-40" :options="sOpts" :aria-label="t('admin.accounts.columns.status')" @update:model-value="updateStatus" />
+      <Select :model-value="filters.uploader_user_id" class="min-w-40 flex-1 sm:max-w-48" :options="uploaderOpts" :aria-label="t('admin.sharedPool.columns.uploader')" searchable @update:model-value="updateUploader" />
       <button
         type="button"
         class="btn btn-secondary btn-sm"
@@ -27,7 +27,7 @@
       </button>
     </div>
 
-    <div v-if="showAdvanced" class="flex flex-wrap items-center gap-3 rounded-lg border border-gray-200 bg-gray-50 p-3 dark:border-dark-700 dark:bg-dark-800/60">
+    <div v-if="showAdvanced" class="flex flex-wrap items-center gap-2 border-t border-gray-200 pt-3 dark:border-dark-700">
       <Select :model-value="filters.type" class="w-40" :options="tOpts" :aria-label="t('admin.accounts.columns.type')" @update:model-value="updateType" />
       <Select :model-value="filters.privacy_mode" class="w-44" :options="privacyOpts" :aria-label="t('admin.accounts.privacyLabel')" @update:model-value="updatePrivacyMode" />
       <Select :model-value="filters.group" class="w-40" :options="gOpts" :aria-label="t('admin.accounts.columns.groups')" @update:model-value="updateGroup" />

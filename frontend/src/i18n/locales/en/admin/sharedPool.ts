@@ -18,7 +18,7 @@ export default {
     ledger: {
       writtenOffLoss: 'Written-off Loss',
       title: 'Account Cost Ledger', subtitle: 'Review account summaries and trace every purchase, renewal, and adjustment',
-      summaryView: 'Account Summary', entriesView: 'Cost Entries', batchAdd: 'Add Costs in Batch',
+      summaryView: 'Account Summary', entriesView: 'Cost Entries', batchAdd: 'Add Costs in Batch', moreFilters: 'More filters', lessFilters: 'Fewer filters',
       searchPlaceholder: 'Search account or provider identity...', searchEntries: 'Search account, order, or note...', searchAccounts: 'Search accounts to add costs...', selectedCount: '{count} accounts selected',
       selectVisible: 'Select current results', clearVisible: 'Clear current results', allUploaders: 'All uploaders', unassignedUploader: 'Uploader not recorded', allPayers: 'All payers', allSources: 'All sources', allAccounts: 'All accounts', allStatuses: 'All statuses', allEntryTypes: 'All cost types',
       costState: 'Cost State', allCostStates: 'All cost states', withCost: 'With cost', withoutCost: 'Without cost', startDate: 'Start Date', endDate: 'End Date',

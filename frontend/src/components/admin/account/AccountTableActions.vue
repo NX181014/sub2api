@@ -1,5 +1,5 @@
 <template>
-  <div class="flex w-full min-w-0 flex-wrap items-center justify-end gap-2 rounded-xl border border-gray-200 bg-white p-2 shadow-sm dark:border-dark-700 dark:bg-dark-800/70 sm:w-auto sm:gap-3 sm:border-0 sm:bg-transparent sm:p-0 sm:shadow-none">
+  <div class="flex w-full min-w-0 flex-wrap items-center justify-end gap-2 sm:w-auto">
     <slot name="before"></slot>
     <button
       type="button"

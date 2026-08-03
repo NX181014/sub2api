@@ -18,7 +18,7 @@ export default {
     ledger: {
       writtenOffLoss: '核销损失',
       title: '账号成本台账', subtitle: '按账号查看成本摘要，按流水追溯每次采购、续费和调整',
-      summaryView: '账号成本汇总', entriesView: '成本流水', batchAdd: '批量添加成本',
+      summaryView: '账号成本汇总', entriesView: '成本流水', batchAdd: '批量添加成本', moreFilters: '更多筛选', lessFilters: '收起筛选',
       searchPlaceholder: '搜索账号或上游身份...', searchEntries: '搜索账号、订单号或备注...', searchAccounts: '搜索要录入成本的账号...', selectedCount: '已选择 {count} 个账号',
       selectVisible: '选择当前结果', clearVisible: '取消当前结果', allUploaders: '全部上传人', unassignedUploader: '未记录上传人', allPayers: '全部付款人', allSources: '全部来源', allAccounts: '全部账号', allStatuses: '全部状态', allEntryTypes: '全部成本类型',
       costState: '成本状态', allCostStates: '全部成本状态', withCost: '已有成本', withoutCost: '未录入成本', startDate: '开始日期', endDate: '结束日期',

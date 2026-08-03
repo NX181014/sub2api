@@ -5,9 +5,27 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"unicode"
 )
 
 var mihomoProviderKeyPattern = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
+
+func isMihomoSubscriptionMetadataNode(name string) bool {
+	name = strings.NewReplacer("：", ":", "﹕", ":").Replace(strings.TrimSpace(name))
+	name = strings.ToLower(strings.TrimLeftFunc(name, func(r rune) bool {
+		return unicode.IsSpace(r) || unicode.IsPunct(r) || unicode.IsSymbol(r)
+	}))
+	for _, prefix := range []string{
+		"剩余流量:", "流量剩余:", "套餐到期:", "到期时间:", "过期时间:", "有效期:",
+		"重置倒计时:", "下次重置:", "官网:", "remaining traffic:", "traffic remaining:",
+		"expires:", "expiration:", "reset:",
+	} {
+		if strings.HasPrefix(name, prefix) {
+			return true
+		}
+	}
+	return false
+}
 
 type mihomoConfigSubscription struct {
 	ID              int64
@@ -68,7 +86,7 @@ func generateManagedMihomoConfig(base map[string]any, subscriptions []mihomoConf
 	nodeProviderByID := make(map[int64]string, len(nodes))
 	for _, node := range nodes {
 		subscription, ok := subscriptionByID[node.SubscriptionID]
-		if node.ID <= 0 || !ok || node.Excluded || strings.TrimSpace(node.Name) == "" {
+		if node.ID <= 0 || !ok || node.Excluded || strings.TrimSpace(node.Name) == "" || isMihomoSubscriptionMetadataNode(node.Name) {
 			continue
 		}
 		nodeNameByID[node.ID] = "[" + subscription.ProviderKey + "] " + strings.TrimSpace(node.Name)

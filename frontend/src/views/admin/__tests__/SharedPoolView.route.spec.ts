@@ -122,10 +122,17 @@ describe('SharedPoolView route state', () => {
 
     expect(getOverview).toHaveBeenLastCalledWith(expect.objectContaining({ account_id: 7 }))
 
+    listSources.mockResolvedValueOnce({
+      items: [
+        { uploader_user_id: 1, uploader_name: 'uploader-a', account_count: 1, purchase_cost: 10, usage_value: 8, roi_rate: 80, ban_rate_30d: 0, sources: [{ name: 'source-a', account_count: 1, sample_size: 1, purchase_cost: 10, usage_value: 8, roi_rate: 80, ban_rate_7d: 0, ban_rate_30d: 0, ban_rate_90d: 0, refund_rate: 0, average_survival_days: 30, accounts: [] }] },
+        { uploader_user_id: 2, uploader_name: 'uploader-b', account_count: 1, purchase_cost: 20, usage_value: 22, roi_rate: 110, ban_rate_30d: 0, sources: [{ name: 'source-a', account_count: 1, sample_size: 1, purchase_cost: 20, usage_value: 22, roi_rate: 110, ban_rate_7d: 0, ban_rate_30d: 0, ban_rate_90d: 0, refund_rate: 0, average_survival_days: 20, accounts: [] }] }
+      ]
+    })
     await router.push('/?tab=sources&account_id=7')
     await flushPromises()
 
     expect(listSources).toHaveBeenLastCalledWith(expect.objectContaining({ account_id: 7 }))
+    expect(wrapper.findAll('h3').filter((node) => node.text() === 'source-a')).toHaveLength(1)
 
     await router.push('/?tab=accounts&account_scope=batch&import_batch_id=batch-9&account_page=3')
     await flushPromises()

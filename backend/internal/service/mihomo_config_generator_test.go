@@ -21,11 +21,13 @@ func TestGenerateManagedMihomoConfigBuildsMultipleProvidersAndRoutes(t *testing.
 			{ID: 11, SubscriptionID: 1, Name: "Hong Kong (01)+"},
 			{ID: 12, SubscriptionID: 2, Name: "Tokyo"},
 			{ID: 13, SubscriptionID: 2, Name: "Excluded", Excluded: true},
+			{ID: 14, SubscriptionID: 1, Name: "📊 剩余流量：995.36 GB"},
+			{ID: 15, SubscriptionID: 2, Name: "Traffic Remaining: 100 GB"},
 		},
 		[]mihomoConfigRoute{
 			{ID: 21, Kind: "select", ListenerPort: 26781, NodeIDs: []int64{11}},
 			{ID: 22, Kind: "url-test", ListenerPort: 26784, NodeIDs: []int64{11, 12}},
-			{ID: 23, Kind: "load-balance", ListenerPort: 26785, NodeIDs: []int64{11, 12}, Selector: json.RawMessage(`{"strategy":"consistent-hashing"}`)},
+			{ID: 23, Kind: "load-balance", ListenerPort: 26785, NodeIDs: []int64{11, 12, 14, 15}, Selector: json.RawMessage(`{"strategy":"consistent-hashing"}`)},
 		})
 	require.NoError(t, err)
 	providers, ok := generated["proxy-providers"].(map[string]any)
@@ -71,6 +73,15 @@ func TestGenerateManagedMihomoConfigBuildsMultipleProvidersAndRoutes(t *testing.
 	}
 	if generated["secret"] != "controller-secret" || generated["external-controller"] != "0.0.0.0:26790" {
 		t.Fatalf("base controller config was not preserved: %#v", generated)
+	}
+}
+
+func TestMihomoSubscriptionMetadataNode(t *testing.T) {
+	for _, name := range []string{"剩余流量：995.36 GB", "📅 套餐到期: 长期有效", "Traffic Remaining: 100 GB", "Expiration: 2026-12-31"} {
+		require.True(t, isMihomoSubscriptionMetadataNode(name), name)
+	}
+	for _, name := range []string{"剩余流量专线", "Traffic Relay", "Hong Kong"} {
+		require.False(t, isMihomoSubscriptionMetadataNode(name), name)
 	}
 }
 

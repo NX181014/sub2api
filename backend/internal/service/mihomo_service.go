@@ -858,8 +858,7 @@ func (s *MihomoService) RefreshManagedSubscription(ctx context.Context, subscrip
 	managedNodes := make([]MihomoManagedNode, 0, len(provider.Nodes))
 	for _, node := range provider.Nodes {
 		originalName := strings.TrimSpace(strings.TrimPrefix(node.Name, prefix))
-		if strings.HasPrefix(originalName, "剩余流量：") || strings.HasPrefix(originalName, "剩余流量:") ||
-			strings.HasPrefix(originalName, "套餐到期：") || strings.HasPrefix(originalName, "套餐到期:") {
+		if isMihomoSubscriptionMetadataNode(originalName) {
 			continue
 		}
 		digest := sha256.Sum256([]byte(subscription.ProviderKey + "\x00" + originalName))

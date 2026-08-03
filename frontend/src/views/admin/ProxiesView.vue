@@ -43,106 +43,77 @@
       class="min-[1024px]:!h-[calc(100vh-64px-8rem)]"
     >
       <template #filters>
-        <div class="flex flex-wrap items-center gap-3">
-          <!-- Left: Search + Filters -->
-          <div class="relative w-full sm:w-64">
-            <Icon
-              name="search"
-              size="md"
-              class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500"
-            />
-            <input
-              v-model="searchQuery"
-              type="text"
-              :placeholder="t('admin.proxies.searchProxies')"
-              class="input pl-10"
-              @input="handleSearch"
-            />
+        <div class="space-y-3">
+          <div class="flex min-w-0 flex-wrap items-center gap-2">
+            <div class="relative min-w-0 flex-1 basis-64 sm:max-w-xl">
+              <Icon name="search" size="md" class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
+              <input v-model="searchQuery" type="search" :placeholder="t('admin.proxies.searchProxies')" class="input min-w-0 pl-10" @input="handleSearch" />
+            </div>
+            <button type="button" class="btn btn-primary min-h-11" @click="showCreateModal = true">
+              <Icon name="plus" size="md" class="mr-2" />{{ t('admin.proxies.createProxy') }}
+            </button>
+            <details class="relative">
+              <summary class="btn btn-secondary min-h-11 cursor-pointer list-none">更多操作</summary>
+              <div class="absolute right-0 z-30 mt-2 grid w-44 gap-1 rounded-lg border border-gray-200 bg-white p-2 shadow-lg dark:border-dark-600 dark:bg-dark-800">
+                <button type="button" class="btn btn-secondary min-h-11 justify-start" :disabled="loading" @click="loadProxies">
+                  <Icon name="refresh" size="sm" class="mr-2" :class="loading ? 'animate-spin' : ''" />{{ t('common.refresh') }}
+                </button>
+                <button type="button" class="btn btn-secondary min-h-11 justify-start" @click="showImportData = true">{{ t('admin.proxies.dataImport') }}</button>
+                <button type="button" class="btn btn-secondary min-h-11 justify-start" @click="openExportApproval">
+                  {{ selectedCount > 0 ? t('admin.proxies.dataExportSelected') : '导出当前结果' }}
+                </button>
+                <button type="button" class="btn btn-secondary min-h-11 justify-start" @click="showProxyApprovalCenter = true">
+                  <Icon name="shield" size="sm" class="mr-2" />{{ t('admin.sharedPool.approval.title') }}
+                </button>
+              </div>
+            </details>
           </div>
 
-          <div class="w-full sm:w-40">
-            <Select
-              v-model="filters.protocol"
-              :options="protocolOptions"
-              :placeholder="t('admin.proxies.allProtocols')"
-              @change="loadProxies"
-            />
-          </div>
-          <div class="w-full sm:w-36">
-            <Select
-              v-model="filters.status"
-              :options="statusOptions"
-              :placeholder="t('admin.proxies.allStatus')"
-              @change="loadProxies"
-            />
+          <div class="flex min-w-0 flex-wrap items-center gap-2">
+            <div class="w-full sm:w-40">
+              <Select v-model="filters.protocol" :options="protocolOptions" :placeholder="t('admin.proxies.allProtocols')" @change="handleFilterChange" />
+            </div>
+            <div class="w-full sm:w-36">
+              <Select v-model="filters.status" :options="statusOptions" :placeholder="t('admin.proxies.allStatus')" @change="handleFilterChange" />
+            </div>
+            <select v-model="proxySourceFilter" class="input w-full sm:w-36" aria-label="按代理来源筛选" @change="handleSourceFilterChange">
+              <option value="">全部来源</option>
+              <option value="manual">手动代理</option>
+              <option value="mihomo">Mihomo 线路</option>
+            </select>
+            <template v-if="proxySourceFilter === 'mihomo'">
+              <select v-model="mihomoSubscriptionFilter" class="input w-full sm:w-40" aria-label="按 Mihomo 订阅筛选" @change="handleFilterChange">
+                <option value="">全部订阅</option>
+                <option v-for="option in mihomoSubscriptionOptions" :key="option.id" :value="String(option.id)">{{ option.name }}</option>
+              </select>
+              <select v-model="mihomoKindFilter" class="input w-full sm:w-36" aria-label="按 Mihomo 策略筛选" @change="handleFilterChange">
+                <option value="">全部策略</option>
+                <option value="dedicated">专线</option><option value="automatic">最低延迟</option><option value="fallback">故障转移</option><option value="dynamic">动态轮换</option><option value="directional">定向</option>
+              </select>
+              <select v-model="mihomoHealthFilter" class="input w-full sm:w-36" aria-label="按 Mihomo 健康状态筛选" @change="handleFilterChange">
+                <option value="">全部健康状态</option>
+                <option value="healthy">健康</option><option value="degraded">降级</option><option value="failed">异常</option><option value="unknown">未检测</option>
+              </select>
+            </template>
           </div>
 
-          <select v-model="proxySourceFilter" class="input w-full sm:w-36" aria-label="按代理来源筛选">
-            <option value="">全部来源</option>
-            <option value="manual">手动代理</option>
-            <option value="mihomo">Mihomo 线路</option>
-          </select>
-          <select v-model="mihomoSubscriptionFilter" class="input w-full sm:w-40" aria-label="按 Mihomo 订阅筛选">
-            <option value="">全部订阅</option>
-            <option v-for="option in mihomoSubscriptionOptions" :key="option.id" :value="String(option.id)">{{ option.name }}</option>
-          </select>
-          <select v-model="mihomoKindFilter" class="input w-full sm:w-36" aria-label="按 Mihomo 策略筛选">
-            <option value="">全部策略</option>
-            <option value="dedicated">专线</option><option value="automatic">最低延迟</option><option value="fallback">故障转移</option><option value="dynamic">动态轮换</option><option value="directional">定向</option>
-          </select>
-          <select v-model="mihomoHealthFilter" class="input w-full sm:w-36" aria-label="按 Mihomo 健康状态筛选">
-            <option value="">全部健康状态</option>
-            <option value="healthy">健康</option><option value="degraded">降级</option><option value="failed">异常</option><option value="unknown">未检测</option>
-          </select>
-
-          <!-- Right: All action buttons -->
-          <div class="flex flex-1 flex-wrap items-center justify-end gap-2">
-            <button
-              @click="loadProxies"
-              :disabled="loading"
-              class="btn btn-secondary"
-              :title="t('common.refresh')"
-            >
-              <Icon name="refresh" size="md" :class="loading ? 'animate-spin' : ''" />
+          <div v-if="selectedCount > 0" class="flex min-w-0 flex-wrap items-center gap-2 border-l-4 border-primary-500 bg-primary-50 px-3 py-2 dark:bg-primary-900/15">
+            <span class="text-sm font-medium text-gray-800 dark:text-gray-100">已选 {{ selectedCount }} 个</span>
+            <span class="mr-auto text-sm text-gray-500 dark:text-gray-400">当前结果 {{ pagination.total }} 个</span>
+            <button type="button" class="btn btn-secondary min-h-11" :disabled="selectingCurrentResults || pagination.total === selectedCount" @click="handleSelectCurrentResults">选择当前结果</button>
+            <button type="button" class="btn btn-secondary min-h-11" @click="clearSelection">清空</button>
+            <button type="button" class="btn btn-primary min-h-11" :disabled="batchTesting || loading" @click="handleBatchTest">
+              <Icon name="play" size="sm" class="mr-2" />检测所选
             </button>
-            <button
-              @click="handleBatchTest"
-              :disabled="batchTesting || loading"
-              class="btn btn-secondary"
-              :title="t('admin.proxies.testConnection')"
-            >
-              <Icon name="play" size="md" class="mr-2" />
-              {{ t('admin.proxies.testConnection') }}
-            </button>
-            <button
-              @click="handleBatchQualityCheck"
-              :disabled="batchQualityChecking || loading"
-              class="btn btn-secondary"
-              :title="t('admin.proxies.batchQualityCheck')"
-            >
-              <Icon name="shield" size="md" class="mr-2" :class="batchQualityChecking ? 'animate-pulse' : ''" />
-              {{ t('admin.proxies.batchQualityCheck') }}
-            </button>
-            <button @click="showImportData = true" class="btn btn-secondary">
-              {{ t('admin.proxies.dataImport') }}
-            </button>
-            <button @click="openExportApproval" class="btn btn-secondary">
-              {{ selectedCount > 0 ? t('admin.proxies.dataExportSelected') : t('admin.proxies.dataExport') }}
-            </button>
-            <button @click="showProxyApprovalCenter = true" class="btn btn-secondary">
-              <Icon name="shield" size="md" class="mr-2" />
-              {{ t('admin.sharedPool.approval.title') }}
-            </button>
-            <button @click="showCreateModal = true" class="btn btn-primary">
-              <Icon name="plus" size="md" class="mr-2" />
-              {{ t('admin.proxies.createProxy') }}
+            <button type="button" class="btn btn-secondary min-h-11" :disabled="batchQualityChecking || loading" @click="handleBatchQualityCheck">
+              <Icon name="shield" size="sm" class="mr-2" :class="batchQualityChecking ? 'animate-pulse' : ''" />质量检测所选
             </button>
           </div>
         </div>
       </template>
 
       <template #table>
-        <div ref="proxyTableRef" class="hidden min-h-0 flex-1 flex-col overflow-hidden min-[1180px]:flex">
+        <div ref="proxyTableRef" class="proxy-table hidden min-h-0 flex-1 flex-col overflow-hidden min-[1180px]:flex">
         <DataTable
           :columns="columns"
           :data="displayedProxies"
@@ -157,6 +128,7 @@
               type="checkbox"
               class="h-4 w-4 cursor-pointer rounded border-gray-300 text-primary-600 focus:ring-primary-500"
               :checked="allVisibleSelected"
+              aria-label="选择当前页全部代理"
               @click.stop
               @change="toggleSelectAllVisible($event)"
             />
@@ -167,6 +139,7 @@
               type="checkbox"
               class="h-4 w-4 cursor-pointer rounded border-gray-300 text-primary-600 focus:ring-primary-500"
               :checked="selectedProxyIds.has(row.id)"
+              :aria-label="`选择代理 ${proxyDisplayName(row)}`"
               @click.stop
               @change="toggleSelectRow(row.id, $event)"
             />
@@ -176,14 +149,19 @@
             <button
               v-if="row.managed_source"
               type="button"
-              class="min-w-0 max-w-full text-left"
+              class="block min-w-0 max-w-full text-left"
               title="打开 Mihomo 线路工作台"
               @click="openManagedProxy(row)"
             >
-              <span class="block truncate font-medium text-gray-900 hover:text-primary-600 dark:text-white dark:hover:text-primary-400">{{ value }}</span>
-              <span class="mt-0.5 block text-xs text-gray-500">托管代理 #{{ row.id }}</span>
+              <span class="block truncate font-medium text-gray-900 hover:text-primary-600 dark:text-white dark:hover:text-primary-400" :title="proxyDisplayName(row)">{{ proxyDisplayName(row) }}</span>
+              <span class="mt-0.5 flex items-center gap-1 truncate text-xs text-gray-500">
+                <span>#{{ row.id }}</span><span class="min-[1440px]:hidden">· {{ row.protocol.toUpperCase() }} · Mihomo</span>
+              </span>
             </button>
-            <span v-else class="font-medium text-gray-900 dark:text-white">{{ value }}</span>
+            <div v-else class="min-w-0">
+              <span class="block truncate font-medium text-gray-900 dark:text-white" :title="String(value)">{{ value }}</span>
+              <span class="mt-0.5 block truncate text-xs text-gray-500">#{{ row.id }} · {{ t('admin.accounts.status.' + row.status) }}<span class="min-[1440px]:inline"> · {{ row.protocol.toUpperCase() }} · 手动</span></span>
+            </div>
           </template>
 
           <template #cell-protocol="{ value }">
@@ -213,17 +191,17 @@
           </template>
 
           <template #cell-location="{ row }">
-            <div class="flex items-center gap-2">
+            <div class="flex min-w-0 items-center gap-2" :title="formatLocation(row) || '位置未检测'">
               <img
                 v-if="row.country_code"
                 :src="flagUrl(row.country_code)"
                 :alt="row.country || row.country_code"
                 class="h-4 w-6 rounded-sm"
               />
-              <span v-if="formatLocation(row)" class="text-sm text-gray-700 dark:text-gray-200">
+              <span v-if="formatLocation(row)" class="truncate text-sm text-gray-700 dark:text-gray-200">
                 {{ formatLocation(row) }}
               </span>
-              <span v-else class="text-sm text-gray-400">-</span>
+              <span v-else class="truncate text-sm text-gray-400">位置未检测</span>
             </div>
           </template>
 
@@ -266,7 +244,7 @@
               <span v-else class="text-sm text-gray-400">-</span>
               <div
                 v-if="typeof row.quality_checked === 'number'"
-                class="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400"
+                class="hidden flex-col items-start gap-1 text-xs text-gray-500 dark:text-gray-400 min-[1440px]:flex"
                 :title="row.quality_summary || undefined"
               >
                 <span>{{ t('admin.proxies.qualityInline', { grade: row.quality_grade || '-', score: row.quality_score ?? '-' }) }}</span>
@@ -280,13 +258,13 @@
           <template #cell-expiry="{ row }">
             <span v-if="!row.expires_at" class="text-sm text-gray-400">{{ t('admin.proxies.neverExpires') }}</span>
             <div v-else class="flex flex-col text-xs">
-              <span class="text-gray-700 dark:text-gray-200">{{ formatDateTime(row.expires_at) }}</span>
+              <span class="text-gray-700 dark:text-gray-200">{{ formatDateTime(row.expires_at).split(' ')[0] }}</span>
               <span :class="expiryBadgeClass(row)">{{ expiryLabel(row) }}</span>
             </div>
           </template>
 
           <template #cell-created_at="{ row }">
-            <span class="text-xs text-gray-600 dark:text-gray-300">{{ formatDateTime(row.created_at) }}</span>
+            <span class="text-xs text-gray-600 dark:text-gray-300">{{ formatDateTime(row.created_at).split(' ')[0] }}</span>
           </template>
 
           <template #cell-status="{ row, value }">
@@ -305,7 +283,9 @@
               <button
                 @click="handleTestConnection(row)"
                 :disabled="testingProxyIds.has(row.id)"
-                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-emerald-50 hover:text-emerald-600 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-emerald-900/20 dark:hover:text-emerald-400"
+                class="inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg text-gray-500 transition-colors hover:bg-emerald-50 hover:text-emerald-600 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-emerald-900/20 dark:hover:text-emerald-400"
+                :aria-label="`检测 ${proxyDisplayName(row)}`"
+                :title="t('admin.proxies.testConnection')"
               >
                 <svg
                   v-if="testingProxyIds.has(row.id)"
@@ -328,12 +308,13 @@
                   ></path>
                 </svg>
                 <Icon v-else name="checkCircle" size="sm" />
-                <span class="text-xs">{{ t('admin.proxies.testConnection') }}</span>
               </button>
               <button
                 @click="handleQualityCheck(row)"
                 :disabled="qualityCheckingProxyIds.has(row.id)"
-                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-blue-50 hover:text-blue-600 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-blue-900/20 dark:hover:text-blue-400"
+                class="inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg text-gray-500 transition-colors hover:bg-blue-50 hover:text-blue-600 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-blue-900/20 dark:hover:text-blue-400"
+                :aria-label="`质量检测 ${proxyDisplayName(row)}`"
+                :title="t('admin.proxies.qualityCheck')"
               >
                 <svg
                   v-if="qualityCheckingProxyIds.has(row.id)"
@@ -356,30 +337,23 @@
                   ></path>
                 </svg>
                 <Icon v-else name="shield" size="sm" />
-                <span class="text-xs">{{ t('admin.proxies.qualityCheck') }}</span>
               </button>
               <button
                 @click="row.managed_source ? openManagedProxy(row) : openProxyCredentialRequest(row)"
-                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-primary-600 dark:hover:bg-dark-700 dark:hover:text-primary-400"
+                class="inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg text-gray-500 transition-colors hover:bg-gray-100 hover:text-primary-600 dark:hover:bg-dark-700 dark:hover:text-primary-400"
+                :aria-label="`${row.managed_source ? '管理' : '查看'} ${proxyDisplayName(row)}`"
+                :title="row.managed_source ? '管理线路' : t('common.view')"
               >
                 <Icon :name="row.managed_source ? 'cog' : 'eye'" size="sm" />
-                <span class="text-xs">{{ row.managed_source ? '管理' : t('common.view') }}</span>
-              </button>
-              <button
-                v-if="!row.managed_source"
-                @click="openProxyCredentialRequest(row)"
-                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-primary-600 dark:hover:bg-dark-700 dark:hover:text-primary-400"
-              >
-                <Icon name="edit" size="sm" />
-                <span class="text-xs">{{ t('common.edit') }}</span>
               </button>
               <button
                 v-if="isPrimaryAdmin && !row.managed_source"
                 @click="handleDelete(row)"
-                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20 dark:hover:text-red-400"
+                class="inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg text-gray-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20 dark:hover:text-red-400"
+                :aria-label="`删除 ${proxyDisplayName(row)}`"
+                :title="t('common.delete')"
               >
                 <Icon name="trash" size="sm" />
-                <span class="text-xs">{{ t('common.delete') }}</span>
               </button>
             </div>
           </template>
@@ -403,39 +377,42 @@
             <div class="flex min-w-0 items-start justify-between gap-3">
               <div class="min-w-0 flex-1">
                 <div class="flex min-w-0 flex-wrap items-center gap-2">
-                  <h3 class="truncate font-semibold text-gray-900 dark:text-white" :title="proxy.name">{{ proxy.name }}</h3>
+                  <h3 class="truncate font-semibold text-gray-900 dark:text-white" :title="proxyDisplayName(proxy)">{{ proxyDisplayName(proxy) }}</h3>
                   <span class="badge badge-gray">{{ proxy.protocol.toUpperCase() }}</span>
                   <span v-if="proxy.managed_source" class="badge badge-primary">Mihomo</span>
                 </div>
-                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">#{{ proxy.id }} · {{ formatLocation(proxy) || '-' }}</p>
-                <p v-if="managedRoute(proxy)" class="mt-1 truncate text-xs text-gray-500" :title="routeSubscriptionLabel(managedRoute(proxy))">{{ routeSubscriptionLabel(managedRoute(proxy)) }} · {{ mihomoRouteKindLabel(managedRoute(proxy)!.kind) }}</p>
               </div>
-              <span :class="['badge shrink-0 whitespace-nowrap', managedRoute(proxy) ? mihomoHealthClass(managedRoute(proxy)!.health) : proxy.status === 'active' ? 'badge-success' : 'badge-danger']">
-                {{ managedRoute(proxy) ? mihomoHealthLabel(managedRoute(proxy)!.health) : t('admin.accounts.status.' + proxy.status) }}
-              </span>
+              <div class="flex shrink-0 items-center gap-2">
+                <span :class="['badge whitespace-nowrap', managedRoute(proxy) ? mihomoHealthClass(managedRoute(proxy)!.health) : proxy.status === 'active' ? 'badge-success' : 'badge-danger']">
+                  {{ managedRoute(proxy) ? mihomoHealthLabel(managedRoute(proxy)!.health) : t('admin.accounts.status.' + proxy.status) }}
+                </span>
+                <input type="checkbox" class="h-4 w-4 cursor-pointer rounded border-gray-300 text-primary-600 focus:ring-primary-500" :checked="selectedProxyIds.has(proxy.id)" :aria-label="`选择代理 ${proxyDisplayName(proxy)}`" @change="toggleSelectRow(proxy.id, $event)" />
+              </div>
             </div>
-            <dl class="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
+            <div class="mt-3 flex min-w-0 items-center gap-2 text-sm text-gray-700 dark:text-gray-200" :title="formatLocation(proxy) || '位置未检测'">
+              <img v-if="proxy.country_code" :src="flagUrl(proxy.country_code)" :alt="proxy.country || proxy.country_code" class="h-4 w-6 rounded-sm" />
+              <span class="truncate">{{ formatLocation(proxy) || '位置未检测' }}</span>
+              <span class="ml-auto shrink-0 text-xs text-gray-500">#{{ proxy.id }}</span>
+            </div>
+            <div class="mt-3 min-w-0 text-sm">
+              <p class="text-xs text-gray-500 dark:text-gray-400">线路 / 节点</p>
+              <p v-if="managedRoute(proxy)" class="mt-1 truncate font-medium text-gray-800 dark:text-gray-100" :title="managedRoute(proxy)?.current_node || undefined">{{ routeSubscriptionLabel(managedRoute(proxy)) }} · {{ mihomoRouteKindLabel(managedRoute(proxy)!.kind) }} · {{ managedRoute(proxy)?.current_node || '未选择节点' }}</p>
+              <p v-else class="mt-1 font-medium text-gray-800 dark:text-gray-100">{{ t(proxy.connection_configured ? 'admin.proxies.connectionConfigured' : 'admin.proxies.connectionMissing') }} · {{ t(proxy.auth_configured ? 'admin.proxies.authConfigured' : 'admin.proxies.authNotConfigured') }}</p>
+            </div>
+            <dl class="mt-3 grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
               <div>
-                <dt class="text-xs text-gray-500 dark:text-gray-400">{{ managedRoute(proxy) ? '当前节点' : t('admin.proxies.columns.address') }}</dt>
-                <dd class="mt-1 truncate font-medium text-gray-800 dark:text-gray-100" :title="managedRoute(proxy)?.current_node || undefined">{{ managedRoute(proxy)?.current_node || t(proxy.connection_configured ? 'admin.proxies.connectionConfigured' : 'admin.proxies.connectionMissing') }}</dd>
-              </div>
-              <div>
-                <dt class="text-xs text-gray-500 dark:text-gray-400">{{ managedRoute(proxy) ? '出口 IP' : t('admin.proxies.columns.auth') }}</dt>
-                <dd class="mt-1 truncate font-medium text-gray-800 dark:text-gray-100" :title="managedRoute(proxy)?.exit_ip || undefined">{{ managedRoute(proxy)?.exit_ip || t(proxy.auth_configured ? 'admin.proxies.authConfigured' : 'admin.proxies.authNotConfigured') }}</dd>
+                <dt class="text-xs text-gray-500 dark:text-gray-400">健康 / 延迟</dt>
+                <dd class="mt-1 font-medium text-gray-800 dark:text-gray-100">{{ managedRoute(proxy) ? mihomoHealthLabel(managedRoute(proxy)!.health) : proxy.latency_status === 'failed' ? t('admin.proxies.latencyFailed') : '未检测' }} · {{ typeof (managedRoute(proxy)?.latency_ms ?? proxy.latency_ms) === 'number' ? `${managedRoute(proxy)?.latency_ms ?? proxy.latency_ms}ms` : '-' }}</dd>
               </div>
               <div>
                 <dt class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.proxies.columns.accounts') }}</dt>
                 <dd class="mt-1 font-medium text-gray-800 dark:text-gray-100">{{ managedRoute(proxy)?.account_count ?? proxy.account_count ?? 0 }}</dd>
               </div>
-              <div>
-                <dt class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.proxies.columns.latency') }}</dt>
-                <dd class="mt-1 font-medium text-gray-800 dark:text-gray-100">{{ typeof (managedRoute(proxy)?.latency_ms ?? proxy.latency_ms) === 'number' ? `${managedRoute(proxy)?.latency_ms ?? proxy.latency_ms}ms` : '-' }}</dd>
-              </div>
             </dl>
             <div class="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
               <button type="button" class="btn btn-secondary min-h-11 px-2" @click="handleTestConnection(proxy)">{{ t('admin.proxies.testConnection') }}</button>
+              <button type="button" class="btn btn-secondary min-h-11 px-2" @click="handleQualityCheck(proxy)">{{ t('admin.proxies.qualityCheck') }}</button>
               <button type="button" class="btn btn-secondary min-h-11 px-2" @click="proxy.managed_source ? openManagedProxy(proxy) : openProxyCredentialRequest(proxy)">{{ proxy.managed_source ? '管理线路' : t('common.view') }}</button>
-              <button v-if="!proxy.managed_source" type="button" class="btn btn-secondary min-h-11 px-2" @click="openProxyCredentialRequest(proxy)">{{ t('common.edit') }}</button>
               <button v-if="isPrimaryAdmin && !proxy.managed_source" type="button" class="btn btn-danger min-h-11 px-2" @click="handleDelete(proxy)">{{ t('common.delete') }}</button>
             </div>
           </article>
@@ -490,7 +467,7 @@
     <BaseDialog :show="showApprovalRequestDialog" :title="approvalRequestTitle" width="normal" @close="closeApprovalRequest">
       <form id="proxy-approval-request-form" class="space-y-4" @submit.prevent="submitApprovalRequest()">
         <div class="rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm dark:border-dark-700 dark:bg-dark-900/40">
-          {{ approvalRequestAction === 'export' ? `导出 ${approvalRequestIDs.length || '全部'} 个代理的连接信息` : `查看并编辑 ${approvalRequestProxy?.name || ''} 的连接信息` }}
+          {{ approvalRequestAction === 'export' ? (approvalRequestIDs.length ? `导出已选 ${approvalRequestIDs.length} 个代理的连接信息` : `导出当前筛选结果 ${pagination.total} 个代理的连接信息`) : `查看并编辑 ${approvalRequestProxy?.name || ''} 的连接信息` }}
         </div>
         <div>
           <label for="proxy-approval-reason" class="input-label">用途与原因</label>
@@ -1128,18 +1105,17 @@ const isPrimaryAdmin = computed(() => authStore.user?.is_primary_admin === true)
 const { copyToClipboard } = useClipboard()
 
 const columns = computed<Column[]>(() => [
-  { key: 'select', label: '', sortable: false },
-  { key: 'name', label: t('admin.proxies.columns.name'), sortable: true },
-  { key: 'protocol', label: t('admin.proxies.columns.protocol'), sortable: true },
-  { key: 'source', label: '来源 / 订阅', sortable: false },
-  { key: 'route', label: '线路 / 节点', sortable: false },
-  { key: 'location', label: t('admin.proxies.columns.location'), sortable: false },
-  { key: 'account_count', label: t('admin.proxies.columns.accounts'), sortable: true },
-  { key: 'latency', label: t('admin.proxies.columns.latency'), sortable: false },
-  { key: 'expiry', label: t('admin.proxies.columns.expiry'), sortable: true },
-  { key: 'created_at', label: t('admin.proxies.columns.createdAt'), sortable: true },
-  { key: 'status', label: t('admin.proxies.columns.status'), sortable: true },
-  { key: 'actions', label: t('admin.proxies.columns.actions'), sortable: false }
+  { key: 'select', label: '', sortable: false, class: 'w-10 min-w-10 max-w-10' },
+  { key: 'name', label: t('admin.proxies.columns.name'), sortable: true, class: 'w-36 min-w-36 max-w-36' },
+  { key: 'protocol', label: t('admin.proxies.columns.protocol'), sortable: true, class: 'hidden w-20 min-w-20 max-w-20 min-[1440px]:table-cell' },
+  { key: 'source', label: '来源 / 订阅', sortable: false, class: 'hidden w-32 min-w-32 max-w-32 min-[1440px]:table-cell' },
+  { key: 'route', label: '线路 / 节点', sortable: false, class: 'w-32 min-w-32 max-w-32' },
+  { key: 'location', label: t('admin.proxies.columns.location'), sortable: false, class: 'w-36 min-w-36 max-w-36' },
+  { key: 'account_count', label: t('admin.proxies.columns.accounts'), sortable: true, class: 'w-20 min-w-20 max-w-20 whitespace-nowrap text-center' },
+  { key: 'latency', label: t('admin.proxies.columns.latency'), sortable: false, class: 'w-24 min-w-24 max-w-24' },
+  { key: 'expiry', label: t('admin.proxies.columns.expiry'), sortable: true, class: 'hidden w-28 min-w-28 max-w-28 min-[1440px]:table-cell' },
+  { key: 'created_at', label: t('admin.proxies.columns.createdAt'), sortable: true, class: 'hidden w-28 min-w-28 max-w-28 min-[1440px]:table-cell' },
+  { key: 'actions', label: t('admin.proxies.columns.actions'), sortable: false, class: 'w-48 min-w-48 max-w-48' }
 ])
 
 // Filter options
@@ -1201,7 +1177,10 @@ const mihomoSubscriptionOptions = computed(() => {
   mihomoRoutes.value.forEach(route => route.subscription_ids.forEach((id, index) => items.set(id, route.subscription_names?.[index] || `订阅 #${id}`)))
   return Array.from(items, ([id, name]) => ({ id, name }))
 })
-const displayedProxies = computed(() => proxies.value.filter(proxy => {
+const hasLocalProxyFilters = computed(() => Boolean(
+  proxySourceFilter.value || mihomoSubscriptionFilter.value || mihomoKindFilter.value || mihomoHealthFilter.value
+))
+const matchesLocalProxyFilters = (proxy: Proxy) => {
   const route = mihomoRoutesByProxyID.value.get(proxy.id)
   const isManaged = Boolean(proxy.managed_source || route)
   if (proxySourceFilter.value === 'manual' && isManaged) return false
@@ -1211,7 +1190,8 @@ const displayedProxies = computed(() => proxies.value.filter(proxy => {
   if (mihomoHealthFilter.value && route?.health !== mihomoHealthFilter.value) return false
   if ((mihomoSubscriptionFilter.value || mihomoKindFilter.value || mihomoHealthFilter.value) && !route) return false
   return true
-}))
+}
+const displayedProxies = computed(() => proxies.value)
 
 const showCreateModal = ref(false)
 const createPasswordVisible = ref(false)
@@ -1234,14 +1214,17 @@ const testingProxyIds = ref<Set<number>>(new Set())
 const qualityCheckingProxyIds = ref<Set<number>>(new Set())
 const batchTesting = ref(false)
 const batchQualityChecking = ref(false)
+const selectingCurrentResults = ref(false)
 const proxyTableRef = ref<HTMLElement | null>(null)
 const {
   selectedSet: selectedProxyIds,
   selectedCount,
   allVisibleSelected,
   isSelected,
+  setSelectedIds,
   select,
   deselect,
+  clear: clearSelection,
   removeMany: removeSelectedProxies,
   toggleVisible,
   batchUpdate
@@ -1355,6 +1338,16 @@ const loadProxies = async () => {
   abortController = currentAbortController
   loading.value = true
   try {
+    if (hasLocalProxyFilters.value) {
+      const all = await fetchAllProxiesForBatch(currentAbortController.signal)
+      if (currentAbortController.signal.aborted || abortController !== currentAbortController) return
+      pagination.total = all.length
+      pagination.pages = Math.ceil(all.length / pagination.page_size)
+      pagination.page = Math.min(pagination.page, Math.max(pagination.pages, 1))
+      const start = (pagination.page - 1) * pagination.page_size
+      proxies.value = all.slice(start, start + pagination.page_size)
+      return
+    }
     const response = await adminAPI.proxies.list(
       pagination.page,
       pagination.page_size,
@@ -1386,8 +1379,24 @@ const handleSearch = () => {
   clearTimeout(searchTimeout)
   searchTimeout = setTimeout(() => {
     pagination.page = 1
+    clearSelection()
     loadProxies()
   }, 300)
+}
+
+const handleFilterChange = () => {
+  pagination.page = 1
+  clearSelection()
+  loadProxies()
+}
+
+const handleSourceFilterChange = () => {
+  if (proxySourceFilter.value !== 'mihomo') {
+    mihomoSubscriptionFilter.value = ''
+    mihomoKindFilter.value = ''
+    mihomoHealthFilter.value = ''
+  }
+  handleFilterChange()
 }
 
 const handlePageChange = (page: number) => {
@@ -1730,16 +1739,21 @@ const routeSubscriptionLabel = (route?: MihomoRoute) => route?.subscription_name
 const mihomoRouteKindLabel = (kind: MihomoRoute['kind']) => ({ dedicated: '专线', automatic: '最低延迟', latency: '最低延迟', fallback: '故障转移', dynamic: '动态轮换', directional: '定向' })[kind] || kind
 const mihomoHealthLabel = (health: MihomoRoute['health']) => ({ healthy: '健康', degraded: '降级', failed: '异常', unknown: '未检测' })[health] || health
 const mihomoHealthClass = (health: MihomoRoute['health']) => health === 'healthy' ? 'badge-success' : health === 'degraded' ? 'badge-warning' : health === 'failed' ? 'badge-danger' : 'badge-gray'
-const handleMihomoRoutesLoaded = (routes: MihomoRoute[]) => { mihomoRoutes.value = routes }
+const handleMihomoRoutesLoaded = (routes: MihomoRoute[]) => {
+  mihomoRoutes.value = routes
+  if (hasLocalProxyFilters.value) loadProxies()
+}
 const openManagedProxy = (proxy: Proxy) => {
   activeTab.value = 'mihomo'
   mihomoPanelRef.value?.openManagedProxy(proxy.id)
 }
 
+const proxyDisplayName = (proxy: Proxy) => proxy.managed_source
+  ? proxy.name.replace(/^Mihomo\s*·\s*/i, '')
+  : proxy.name
+
 const formatLocation = (proxy: Proxy) => {
-  const route = managedRoute(proxy)
-  if (route?.exit_ip) return route.exit_ip
-  const parts = [proxy.country, proxy.city].filter(Boolean) as string[]
+  const parts = [proxy.country, proxy.city || proxy.region].filter(Boolean) as string[]
   return parts.join(' · ')
 }
 
@@ -1996,7 +2010,7 @@ const qualityTargetLabel = (target: string) => {
   }
 }
 
-const fetchAllProxiesForBatch = async (): Promise<Proxy[]> => {
+const fetchAllProxiesForBatch = async (signal?: AbortSignal): Promise<Proxy[]> => {
   const pageSize = 200
   const result: Proxy[] = []
   let page = 1
@@ -2006,20 +2020,28 @@ const fetchAllProxiesForBatch = async (): Promise<Proxy[]> => {
     const response = await adminAPI.proxies.list(
       page,
       pageSize,
-      {
-        protocol: filters.protocol || undefined,
-        status: filters.status as any,
-        search: searchQuery.value || undefined,
-        sort_by: sortState.sort_by,
-        sort_order: sortState.sort_order
-      }
+      buildProxyQueryFilters(),
+      { signal }
     )
     result.push(...response.items)
     totalPages = response.pages || 1
     page++
   }
 
-  return result
+  return result.filter(matchesLocalProxyFilters)
+}
+
+const handleSelectCurrentResults = async () => {
+  if (selectingCurrentResults.value) return
+  selectingCurrentResults.value = true
+  try {
+    const current = await fetchAllProxiesForBatch()
+    setSelectedIds(current.map(proxy => proxy.id))
+  } catch (error: any) {
+    appStore.showError(error.response?.data?.detail || t('admin.proxies.failedToLoad'))
+  } finally {
+    selectingCurrentResults.value = false
+  }
 }
 
 const runBatchProxyTests = async (ids: number[]) => {
@@ -2044,13 +2066,7 @@ const handleBatchTest = async () => {
 
   batchTesting.value = true
   try {
-    let ids: number[] = []
-    if (selectedCount.value > 0) {
-      ids = Array.from(selectedProxyIds.value)
-    } else {
-      const allProxies = await fetchAllProxiesForBatch()
-      ids = allProxies.map((proxy) => proxy.id)
-    }
+    const ids = Array.from(selectedProxyIds.value)
 
     if (ids.length === 0) {
       appStore.showInfo(t('admin.proxies.batchTestEmpty'))
@@ -2073,13 +2089,7 @@ const handleBatchQualityCheck = async () => {
 
   batchQualityChecking.value = true
   try {
-    let ids: number[] = []
-    if (selectedCount.value > 0) {
-      ids = Array.from(selectedProxyIds.value)
-    } else {
-      const allProxies = await fetchAllProxiesForBatch()
-      ids = allProxies.map((proxy) => proxy.id)
-    }
+    const ids = Array.from(selectedProxyIds.value)
 
     if (ids.length === 0) {
       appStore.showInfo(t('admin.proxies.batchQualityEmpty'))
@@ -2263,3 +2273,14 @@ onUnmounted(() => {
   abortController?.abort()
 })
 </script>
+
+<style scoped>
+.proxy-table :deep(.table-wrapper) {
+  overflow-x: hidden;
+}
+
+.proxy-table :deep(table) {
+  min-width: 0 !important;
+  table-layout: fixed;
+}
+</style>
