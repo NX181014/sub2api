@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 
 import AccountsView from '../AccountsView.vue'
+import AccountBulkActionsBar from '@/components/admin/account/AccountBulkActionsBar.vue'
 
 const {
   listAccounts,
@@ -400,7 +401,7 @@ describe('admin AccountsView bulk edit scope', () => {
     expect(listAccounts.mock.calls.at(-1)?.[2]).toMatchObject({ import_batch_scope: 'standalone' })
   })
 
-  it('switches navigator modes and expands only the selected uploader', async () => {
+  it('keeps uploader context when switching to the flat batch navigator', async () => {
     const navigatorRows = [
       navigatorBatchRow('batch-a-new', '2026-08-03T00:00:00Z', 7, 'Uploader A', 'August'),
       navigatorBatchRow('batch-a-old', '2026-08-01T00:00:00Z', 7, 'Uploader A', 'July'),
@@ -417,19 +418,23 @@ describe('admin AccountsView bulk edit scope', () => {
     expect(wrapper.find('[data-test="workbench-mode-batch"]').exists()).toBe(true)
     expect(wrapper.findAll('[data-test="workbench-uploader"]')).toHaveLength(2)
     expect(wrapper.findAll('[data-test="workbench-batch"]')).toHaveLength(0)
-
-    const navigatorSearch = wrapper.get('[data-test="workbench-sidebar-search"]')
-    await navigatorSearch.setValue('batch-b')
-    expect(wrapper.findAll('[data-test="workbench-batch"]')).toHaveLength(1)
-    expect(wrapper.get('[data-test="workbench-uploader"]').attributes('aria-expanded')).toBe('true')
-    await navigatorSearch.setValue('')
+    expect(wrapper.findAll('[data-test="workbench-uploader"]')[0]!.attributes('aria-expanded')).toBeUndefined()
 
     await wrapper.findAll('[data-test="workbench-uploader"]')[0].trigger('click')
     await flushPromises()
-    expect(wrapper.findAll('[data-test="workbench-batch"]')).toHaveLength(2)
+    expect(wrapper.emitted('workbench-context')?.at(-1)?.[0]).toMatchObject({
+      scope: 'uploader',
+      uploader_user_id: 7
+    })
+    expect(wrapper.findAll('[data-test="workbench-batch"]')).toHaveLength(0)
 
     await wrapper.get('[data-test="workbench-mode-batch"]').trigger('click')
-    expect(wrapper.findAll('[data-test="workbench-batch"]')).toHaveLength(3)
+    const batches = wrapper.findAll('[data-test="workbench-batch"]')
+    expect(batches).toHaveLength(2)
+    expect(batches.map(batch => batch.text())).toEqual([
+      expect.stringContaining('August'),
+      expect.stringContaining('July')
+    ])
     expect(wrapper.findAll('[data-test="workbench-uploader"]')).toHaveLength(0)
   })
 
@@ -449,18 +454,18 @@ describe('admin AccountsView bulk edit scope', () => {
 
     const batchIDs = () => wrapper.findAll('[data-test="workbench-batch"]').map(row => row.text())
     expect(batchIDs()).toEqual([
-      expect.stringContaining('batch-new'),
-      expect.stringContaining('batch-middle'),
-      expect.stringContaining('batch-old')
+      expect.stringContaining('August'),
+      expect.stringContaining('Quarterly'),
+      expect.stringContaining('July')
     ])
 
     const search = wrapper.get('[data-test="workbench-sidebar-search"]')
     await search.setValue('Uploader B')
     expect(batchIDs()).toHaveLength(2)
     await search.setValue('Quarterly')
-    expect(batchIDs()).toEqual([expect.stringContaining('batch-middle')])
+    expect(batchIDs()).toEqual([expect.stringContaining('Quarterly')])
     await search.setValue('batch-old')
-    expect(batchIDs()).toEqual([expect.stringContaining('batch-old')])
+    expect(batchIDs()).toEqual([expect.stringContaining('July')])
   })
 
   it('loads only the first 100 navigator rows even when the response reports more pages', async () => {
@@ -545,7 +550,7 @@ describe('admin AccountsView bulk edit scope', () => {
     expect(wrapper.get('[data-test="workbench-standalone"]').attributes('aria-current')).toBeUndefined()
   })
 
-  it('renders the planned workbench hierarchy and keeps usage activity ahead of runtime details', async () => {
+  it('defaults to the focused runtime view and reveals finance on demand', async () => {
     const batchID = 'batch-layout'
     listAccounts.mockResolvedValue({
       items: [{
@@ -580,12 +585,16 @@ describe('admin AccountsView bulk edit scope', () => {
     expect(wrapper.find('[data-test="account-workbench-identity"]').exists()).toBe(true)
     expect(wrapper.find('[data-test="account-workbench-usage"]').exists()).toBe(true)
     expect(wrapper.get('[data-test="account-workbench-last-used"]').text()).toContain('admin.accounts.columns.lastUsed')
+    expect(wrapper.find('[data-test="account-workbench-finance"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="account-workbench-secondary"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="account-workbench-runtime"]').exists()).toBe(true)
+
+    const financeView = wrapper.findAll('.workbench-view-option').find(button => button.text() === 'admin.accounts.display.finance')
+    expect(financeView).toBeDefined()
+    await financeView!.trigger('click')
     expect(wrapper.get('[data-test="account-workbench-finance"]').text()).toContain('Supplier A')
     expect(wrapper.get('[data-test="account-workbench-finance"]').text()).toContain('47.6%')
     expect(wrapper.get('[data-test="account-workbench-finance"]').text()).toContain('admin.sharedPool.workbench.dataQuality.future_purchase_time')
-    expect(wrapper.get('[data-test="account-workbench-secondary"]').text()).toContain('Uploader A')
-    expect(wrapper.get('[data-test="account-workbench-secondary"]').text()).toContain(batchID)
-    expect(wrapper.find('[data-test="account-workbench-runtime"]').exists()).toBe(true)
     expect(wrapper.find('[data-test="account-workbench-actions"]').exists()).toBe(true)
 
     const table = wrapper.getComponent(DataTableStub)
@@ -694,27 +703,23 @@ describe('admin AccountsView bulk edit scope', () => {
     expect(listAccounts.mock.calls.at(-1)?.[2]).toMatchObject({ platform: 'openai' })
   })
 
-  it('keeps the header checkbox in unchecked, mixed and checked page states', async () => {
+  it('keeps current-page selection available before any embedded row is selected', async () => {
     listAccounts.mockResolvedValue({ items: [account(1), account(2)], total: 2, page: 1, page_size: 20, pages: 1 })
-    const wrapper = mountAccountsView()
+    const wrapper = mountAccountsView({ AccountBulkActionsBar: false, BaseDialog: true }, { embedded: true })
     await flushPromises()
 
-    const header = () => wrapper.get('[data-test="select-header"] input').element as HTMLInputElement
-    expect(header().checked).toBe(false)
-    expect(header().indeterminate).toBe(false)
+    const pageCheckbox = wrapper.get('[data-test="bulk-page-checkbox"]')
+    expect((pageCheckbox.element as HTMLInputElement).checked).toBe(false)
+    expect(wrapper.getComponent(AccountBulkActionsBar).props('selectedIds')).toEqual([])
 
-    await wrapper.findAll('[data-test="select-row"] input')[0]!.trigger('change')
-    expect(header().checked).toBe(false)
-    expect(header().indeterminate).toBe(true)
+    await pageCheckbox.setValue(true)
+    await flushPromises()
+    expect((pageCheckbox.element as HTMLInputElement).checked).toBe(true)
+    expect(wrapper.getComponent(AccountBulkActionsBar).props('selectedIds')).toEqual([1, 2])
 
-    await wrapper.get('[data-test="select-header"] input').setValue(true)
-    expect(header().checked).toBe(true)
-    expect(header().indeterminate).toBe(false)
-    expect(wrapper.getComponent(AccountBulkActionsBarStub).props('selectedIds')).toEqual([1, 2])
-
-    await wrapper.get('[data-test="toggle-page"]').trigger('click')
-    expect(header().checked).toBe(false)
-    expect(wrapper.findComponent(AccountBulkActionsBarStub).exists()).toBe(false)
+    await pageCheckbox.setValue(false)
+    await flushPromises()
+    expect(wrapper.getComponent(AccountBulkActionsBar).props('selectedIds')).toEqual([])
   })
 
   it('loads collapsed import batches only when the current page is selected or expanded', async () => {
