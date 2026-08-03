@@ -109,6 +109,23 @@ describe('ImportDataModal', () => {
     expect(adminAPI.accounts.importData).not.toHaveBeenCalled()
   })
 
+  it('rejects an unsupported account platform before importing', async () => {
+    const { adminAPI } = await import('@/api/admin')
+    const wrapper = mountModal()
+    const input = wrapper.find('input[type="file"]')
+    setInputFiles(input.element, [makeJsonFile(
+      'unknown-platform.json',
+      JSON.stringify({ proxies: [], accounts: [{ platform: 'unknown' }] })
+    )])
+
+    await input.trigger('change')
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+
+    expect(showError).toHaveBeenCalledWith('admin.accounts.dataImportInvalidFile')
+    expect(adminAPI.accounts.importData).not.toHaveBeenCalled()
+  })
+
   it('无有效 JSON 的选择不清空已有选择', async () => {
     const { adminAPI } = await import('@/api/admin')
     vi.mocked(adminAPI.accounts.importData).mockResolvedValue({

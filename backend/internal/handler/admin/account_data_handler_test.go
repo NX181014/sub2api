@@ -536,3 +536,40 @@ func TestImportDataRejectsIncompatibleGroupBeforeCreating(t *testing.T) {
 	require.Empty(t, adminSvc.createdProxies)
 	require.Empty(t, adminSvc.createdAccounts)
 }
+
+func TestImportDataRejectsUnknownPlatformBeforeCreating(t *testing.T) {
+	router, adminSvc := setupAccountDataRouter()
+	adminSvc.groups = []service.Group{{
+		ID:       41,
+		Platform: service.PlatformComposite,
+		Status:   service.StatusActive,
+	}}
+	payload := map[string]any{
+		"data": map[string]any{
+			"type":    dataType,
+			"version": dataVersion,
+			"proxies": []map[string]any{{
+				"protocol": "socks5",
+				"host":     "127.0.0.1",
+				"port":     1080,
+			}},
+			"accounts": []map[string]any{{
+				"name":        "unknown-platform-account",
+				"platform":    "unknown",
+				"type":        service.AccountTypeOAuth,
+				"credentials": map[string]any{"token": "x"},
+			}},
+		},
+		"group_ids": []int64{41},
+	}
+	body, err := json.Marshal(payload)
+	require.NoError(t, err)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/accounts/data", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	require.Empty(t, adminSvc.createdProxies)
+	require.Empty(t, adminSvc.createdAccounts)
+}

@@ -291,6 +291,15 @@ func (h *AccountHandler) importData(ctx context.Context, req DataImportRequest) 
 			)
 		}
 	}
+	for i := range dataPayload.Accounts {
+		platform := strings.TrimSpace(dataPayload.Accounts[i].Platform)
+		if platform != "" && !service.IsAllowedQuotaPlatform(platform) {
+			return result, infraerrors.BadRequest(
+				"ACCOUNT_DATA_PLATFORM_INVALID",
+				fmt.Sprintf("account platform is invalid: %s", platform),
+			)
+		}
+	}
 
 	if len(req.GroupIDs) > 0 {
 		groups, groupErr := h.adminService.GetAllGroups(ctx)
@@ -710,6 +719,9 @@ func validateDataAccount(item DataAccount) error {
 	}
 	if strings.TrimSpace(item.Platform) == "" {
 		return errors.New("account platform is required")
+	}
+	if !service.IsAllowedQuotaPlatform(item.Platform) {
+		return fmt.Errorf("account platform is invalid: %s", item.Platform)
 	}
 	if strings.TrimSpace(item.Type) == "" {
 		return errors.New("account type is required")

@@ -287,7 +287,7 @@ const detectImportPlatforms = async (sourceFiles: File[]): Promise<AccountPlatfo
     try {
       const payload = JSON.parse(await readFileAsText(sourceFile)) as Partial<AdminDataPayload>
       for (const account of payload.accounts || []) {
-        if (typeof account.platform === 'string' && account.platform) {
+        if (SUPPORTED_ACCOUNT_PLATFORMS.has(account.platform)) {
           platforms.add(account.platform)
         }
       }
@@ -300,6 +300,13 @@ const detectImportPlatforms = async (sourceFiles: File[]): Promise<AccountPlatfo
 
 const SUPPORTED_DATA_TYPES = ['sub2api-data', 'sub2api-bundle']
 const SUPPORTED_DATA_VERSION = 1
+const SUPPORTED_ACCOUNT_PLATFORMS = new Set<AccountPlatform>([
+  'anthropic',
+  'openai',
+  'gemini',
+  'antigravity',
+  'grok'
+])
 
 // 与后端 validateDataHeader 对齐:合并前逐文件校验,避免坏文件混入合并 payload 后
 // 报错无法定位来源,或绕过后端本会对单文件做的 type/version 检查。
@@ -320,7 +327,12 @@ const isValidDataPayload = (payload: unknown): payload is AdminDataPayload => {
   ) {
     return false
   }
-  return Array.isArray(candidate.proxies) && Array.isArray(candidate.accounts)
+  if (!Array.isArray(candidate.proxies) || !Array.isArray(candidate.accounts)) return false
+  return candidate.accounts.every((account) => {
+    if (!account || typeof account !== 'object' || Array.isArray(account)) return false
+    const platform = (account as Record<string, unknown>).platform
+    return platform === undefined || SUPPORTED_ACCOUNT_PLATFORMS.has(platform as AccountPlatform)
+  })
 }
 
 const mergeDataPayloads = (payloads: AdminDataPayload[]): AdminDataPayload => {
