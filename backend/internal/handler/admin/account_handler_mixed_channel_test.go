@@ -223,6 +223,27 @@ func TestBulkUpdateAcceptsFilterTargetRequest(t *testing.T) {
 	require.Equal(t, float64(0), resp["code"])
 }
 
+func TestBulkUpdateUsageStatusRuntimeQueryKeepsGroupScope(t *testing.T) {
+	adminSvc := newStubAdminService()
+	adminSvc.accounts = []service.Account{{ID: 1, Status: service.StatusActive, Schedulable: true}}
+	concurrency := service.NewConcurrencyService(accountUsageConcurrencyCache{counts: map[int64]int{1: 1}})
+	handler := NewAccountHandler(adminSvc, nil, nil, nil, nil, nil, nil, nil, nil, concurrency, nil, nil, nil, nil)
+	router := gin.New()
+	router.POST("/api/v1/admin/accounts/bulk-update", handler.BulkUpdate)
+
+	body, _ := json.Marshal(map[string]any{
+		"filters":     map[string]any{"group": "12", "usage_status": "in_use"},
+		"schedulable": true,
+	})
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/accounts/bulk-update", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, int64(12), adminSvc.lastListAccounts.groupID)
+}
+
 func TestBulkUpdateAcceptsDedicatedUpstreamBillingProbeSetting(t *testing.T) {
 	adminSvc := newStubAdminService()
 	router := setupAccountMixedChannelRouter(adminSvc)

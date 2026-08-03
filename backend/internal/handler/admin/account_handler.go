@@ -2451,10 +2451,24 @@ func (h *AccountHandler) BulkUpdate(c *gin.Context) {
 
 	serviceFilters := toServiceBulkUpdateAccountFilters(req.Filters)
 	if serviceFilters != nil && usageStatusNeedsRuntime(serviceFilters.UsageStatus) {
+		groupID := int64(0)
+		switch raw := strings.TrimSpace(serviceFilters.Group); raw {
+		case "":
+		case accountListGroupUngroupedQueryValue:
+			groupID = service.AccountListGroupUngrouped
+		default:
+			parsed, parseErr := strconv.ParseInt(raw, 10, 64)
+			if parseErr != nil || parsed < 0 {
+				response.BadRequest(c, "invalid group filter")
+				return
+			}
+			groupID = parsed
+		}
 		resolved, resolveErr := h.resolveAccountUsageRuntime(c.Request.Context(), accountFilterQuery{
 			AccountSelectionFilters: service.AccountSelectionFilters{
 				Platform: serviceFilters.Platform, Type: serviceFilters.Type, Status: serviceFilters.Status,
 				UsageStatus: serviceFilters.UsageStatus, Search: serviceFilters.Search, PrivacyMode: serviceFilters.PrivacyMode,
+				GroupID:        groupID,
 				UploaderUserID: serviceFilters.UploaderUserID, UploaderUnassigned: serviceFilters.UploaderUnassigned,
 				ImportBatchID: serviceFilters.ImportBatchID, ImportBatchScope: serviceFilters.ImportBatchScope,
 			},

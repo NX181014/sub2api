@@ -51,11 +51,14 @@ describe('ProxiesView tabs', () => {
 
   it('refreshes proxies after Mihomo changes and keeps removed routes operable', () => {
     const routesLoaded = source.slice(source.indexOf('const handleMihomoRoutesLoaded'), source.indexOf('const openManagedProxy'))
+    const approvalApplied = source.slice(source.indexOf('const handleApprovalApplied'), source.indexOf('const handleProxyRevealed'))
 
     expect(routesLoaded).toContain('const shouldRefreshProxies = mihomoRoutesLoaded.value')
     expect(routesLoaded).toContain('if (shouldRefreshProxies) void loadProxies()')
+    expect(source).toContain("proxy.managed_source?.startsWith('mihomo:route:')")
     expect(source).toContain('@applied="handleApprovalApplied"')
-    expect(source).toContain("approval.action_type === 'UPDATE_MIHOMO'")
+    expect(approvalApplied).toContain('const routesWereLoaded = mihomoRoutesLoaded.value')
+    expect(approvalApplied).toContain('if (!routesWereLoaded) await loadProxies()')
     expect(source).toContain('线路已移除')
     expect(source).toContain('(!row.managed_source || isRemovedManagedRoute(row))')
   })

@@ -1744,7 +1744,7 @@ const applyQualityResult = (proxyId: number, result: ProxyQualityCheckResult) =>
 }
 
 const managedRoute = (proxy: Proxy) => mihomoRoutesByProxyID.value.get(proxy.id)
-const isRemovedManagedRoute = (proxy: Proxy) => Boolean(proxy.managed_source && mihomoRoutesLoaded.value && !managedRoute(proxy))
+const isRemovedManagedRoute = (proxy: Proxy) => Boolean(proxy.managed_source?.startsWith('mihomo:route:') && mihomoRoutesLoaded.value && !managedRoute(proxy))
 const routeSubscriptionLabel = (route?: MihomoRoute) => route?.subscription_names?.join('、') || route?.subscription_ids.map(id => `订阅 #${id}`).join('、') || '-'
 const mihomoRouteKindLabel = (kind: MihomoRoute['kind']) => ({ dedicated: '专线', automatic: '最低延迟', latency: '最低延迟', fallback: '故障转移', dynamic: '动态轮换', directional: '定向' })[kind] || kind
 const mihomoHealthLabel = (health: MihomoRoute['health']) => ({ healthy: '健康', degraded: '降级', failed: '异常', unknown: '未检测' })[health] || health
@@ -2210,7 +2210,9 @@ const submitApprovalRequest = async (direct = false) => {
 const handleApprovalSubmitted = () => { showProxyApprovalCenter.value = true }
 const handleApprovalApplied = async (approval: PoolApproval) => {
   if (approval.action_type === 'UPDATE_MIHOMO') {
+    const routesWereLoaded = mihomoRoutesLoaded.value
     await mihomoPanelRef.value?.reload()
+    if (!routesWereLoaded) await loadProxies()
     return
   }
   if (approval.action_type === 'UPDATE_PROXY') await loadProxies()
