@@ -5120,10 +5120,9 @@ onUnmounted(() => {
 
   .account-workbench-table.is-embedded :deep(.table-body tr[data-row-id] td) {
     display: flex;
-    flex: 1 1 0;
     min-width: 0;
     align-items: flex-start;
-    padding: 12px 10px;
+    padding-block: 12px;
     white-space: normal;
     overflow-wrap: anywhere;
     background: transparent;
@@ -5137,6 +5136,7 @@ onUnmounted(() => {
   .account-workbench-table.is-embedded :deep(.account-field-actions) {
     min-width: 0;
     max-width: none;
+    padding-inline: 10px;
   }
 
   .account-workbench-table.is-embedded :deep(.account-field-select) {
