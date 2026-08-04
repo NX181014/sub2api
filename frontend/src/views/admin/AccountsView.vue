@@ -5203,6 +5203,12 @@ onUnmounted(() => {
     padding-left: 0;
   }
 
+  .account-workbench-table.is-embedded :deep(.table-body tr[data-row-id] .account-field-select),
+  .account-workbench-table.is-embedded :deep(.table-body tr[data-row-id] .account-field-name),
+  .account-workbench-table.is-embedded :deep(.table-body tr[data-row-id] .account-field-actions) {
+    align-items: center;
+  }
+
   .account-workbench-table.is-embedded :deep(.account-row-actions) {
     margin-left: auto;
     gap: 8px;
