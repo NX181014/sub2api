@@ -903,7 +903,7 @@
               <Icon :name="expandedImportBatches.has(row.batchID) ? 'chevronDown' : 'chevronRight'" size="sm" />
               {{ expandedImportBatches.has(row.batchID) ? t('admin.accounts.collapseImportBatch') : t('admin.accounts.expandImportBatch') }}
             </button>
-            <div v-else-if="!embedded || isWorkbenchModuleEnabled('actions')" data-test="account-workbench-actions" class="flex items-center gap-1">
+            <div v-else-if="!embedded || isWorkbenchModuleEnabled('actions')" data-test="account-workbench-actions" class="account-row-actions flex items-center gap-1">
               <button :title="t('common.edit')" :aria-label="t('common.edit')" @click="handleEdit(row)" class="flex min-h-11 min-w-11 items-center justify-center rounded-md text-gray-500 transition-colors hover:bg-gray-100 hover:text-primary-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 dark:hover:bg-dark-700 dark:hover:text-primary-400">
                 <Icon name="edit" size="sm" />
               </button>
@@ -3582,7 +3582,7 @@ const allColumns = computed(() => {
   c.push(
     { key: 'uploader', label: t('admin.sharedPool.columns.uploader'), sortable: false },
     { key: 'today_stats', label: t('admin.accounts.columns.todayStats'), sortable: false },
-    { key: 'pool_record', label: t('admin.sharedPool.actions.poolRecord'), sortable: false },
+    { key: 'pool_record', label: t('admin.sharedPool.actions.poolRecord'), sortable: false, class: 'account-field-pool-record' },
     { key: 'proxy', label: t('admin.accounts.columns.proxy'), sortable: false },
     { key: 'priority', label: t('admin.accounts.columns.priority'), sortable: false },
     { key: 'scheduler_score', label: t('admin.accounts.columns.schedulerScore'), sortable: false },
@@ -5106,10 +5106,9 @@ onUnmounted(() => {
   }
 
   .account-workbench-table.is-embedded :deep(.table-body tr[data-row-id]) {
-    display: grid;
+    display: flex;
     width: 100%;
     min-width: 0;
-    grid-template-columns: minmax(2.75rem, 0.24fr) repeat(auto-fit, minmax(min(100%, 8rem), 1fr));
     margin: 0;
     overflow: visible;
     border: 0;
@@ -5121,9 +5120,10 @@ onUnmounted(() => {
 
   .account-workbench-table.is-embedded :deep(.table-body tr[data-row-id] td) {
     display: flex;
+    flex: 1 1 0;
     min-width: 0;
-    align-items: center;
-    padding: 12px;
+    align-items: flex-start;
+    padding: 12px 10px;
     white-space: normal;
     overflow-wrap: anywhere;
     background: transparent;
@@ -5133,9 +5133,43 @@ onUnmounted(() => {
   .account-workbench-table.is-embedded :deep(.account-field-name),
   .account-workbench-table.is-embedded :deep(.account-field-status),
   .account-workbench-table.is-embedded :deep(.account-field-usage),
+  .account-workbench-table.is-embedded :deep(.account-field-pool-record),
   .account-workbench-table.is-embedded :deep(.account-field-actions) {
     min-width: 0;
     max-width: none;
+  }
+
+  .account-workbench-table.is-embedded :deep(.account-field-select) {
+    flex: 0 0 3rem;
+    justify-content: center;
+  }
+
+  .account-workbench-table.is-embedded :deep(.account-field-name) {
+    flex: 1 1 10rem;
+  }
+
+  .account-workbench-table.is-embedded :deep(.account-field-status) {
+    flex: 0.85 1 8.5rem;
+  }
+
+  .account-workbench-table.is-embedded :deep(.account-field-usage) {
+    flex: 1.25 1 13.5rem;
+  }
+
+  .account-workbench-table.is-embedded :deep(.account-field-pool-record) {
+    flex: 1.3 1 13.5rem;
+  }
+
+  .account-workbench-table.is-embedded :deep(.account-field-actions) {
+    flex: 0 0 5.75rem;
+    justify-content: flex-end;
+    padding-right: 6px;
+    padding-left: 0;
+  }
+
+  .account-workbench-table.is-embedded :deep(.account-row-actions) {
+    margin-left: auto;
+    gap: 2px;
   }
 
   .account-workbench-table.is-embedded :deep(.table-body tr:not([data-row-id])) {
@@ -5151,24 +5185,6 @@ onUnmounted(() => {
   .dark .account-workbench-table.is-embedded :deep(.table-body tr[data-row-id]) {
     border-color: rgb(71 85 105 / 0.7);
     background: rgb(30 41 59 / 0.78);
-  }
-}
-
-@media (min-width: 768px) and (max-width: 1439px) {
-  .account-workbench-table.is-embedded :deep(.table-body tr[data-row-id]) {
-    grid-template-columns: minmax(2.75rem, 0.24fr) repeat(auto-fit, minmax(min(100%, 7.5rem), 1fr));
-  }
-}
-
-@media (min-width: 1180px) and (max-width: 1365px) {
-  .account-workbench-table.is-embedded :deep(.table-body tr[data-row-id]) {
-    grid-template-columns: repeat(auto-fit, minmax(min(100%, 7.5rem), 1fr));
-  }
-}
-
-@media (min-width: 1440px) {
-  .account-workbench-table.is-embedded :deep(.table-body tr[data-row-id]) {
-    grid-template-columns: minmax(2.75rem, 0.2fr) repeat(auto-fit, minmax(min(100%, 9.5rem), 1fr));
   }
 }
 
