@@ -4957,6 +4957,7 @@ onUnmounted(() => {
     z-index: 61;
     display: flex;
     width: clamp(18rem, 82vw, 56rem);
+    max-width: calc(100vw - 24px);
     height: auto;
     max-height: calc(100dvh - max(24px, env(safe-area-inset-top) + env(safe-area-inset-bottom)));
     min-height: 0;
@@ -5047,6 +5048,11 @@ onUnmounted(() => {
 
 .account-workbench-table.is-embedded :deep(.table-wrapper) {
   overflow-x: clip;
+}
+
+.account-workbench-table.is-embedded {
+  container-name: account-workbench;
+  container-type: inline-size;
 }
 
 .account-workbench-table.is-embedded :deep(.table-wrapper table) {
@@ -5205,6 +5211,7 @@ onUnmounted(() => {
 
   .account-workbench-table.is-embedded :deep(.table-body tr[data-row-id] .account-field-select),
   .account-workbench-table.is-embedded :deep(.table-body tr[data-row-id] .account-field-name),
+  .account-workbench-table.is-embedded :deep(.table-body tr[data-row-id] .account-field-status),
   .account-workbench-table.is-embedded :deep(.table-body tr[data-row-id] .account-field-actions) {
     align-items: center;
   }
@@ -5230,7 +5237,7 @@ onUnmounted(() => {
   }
 }
 
-@media (min-width: 768px) and (max-width: 1179px) {
+@container account-workbench (max-width: 1080px) {
   .account-workbench-table.is-embedded :deep(.table-body tr[data-row-id]) {
     flex-wrap: wrap;
   }
@@ -5297,28 +5304,111 @@ onUnmounted(() => {
     display: inline-flex;
   }
 
-  .account-workbench-table.is-embedded :deep(.space-y-3 > .rounded-lg > .space-y-3) {
-    display: flex;
+  .workbench-header {
+    gap: 8px;
+    padding: 12px;
+  }
+
+  .workbench-header-controls {
+    width: 100%;
     min-width: 0;
-    flex-direction: column;
-    gap: 12px;
+    flex-wrap: nowrap;
+    margin-left: 0;
+  }
+
+  .workbench-sort-control {
+    min-width: 0;
+    flex: 1 1 7rem;
+  }
+
+  .workbench-sort-control select {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .workbench-view-switch {
+    min-width: 0;
+    flex: 1 1 auto;
+  }
+
+  .workbench-view-option {
+    min-width: 0;
+    flex: 1 1 0;
+    padding-inline: 8px;
+  }
+
+  .account-operation-actions :deep([data-test='account-tools'] > span.hidden) {
+    display: inline;
+  }
+
+  .account-operation-actions :deep([data-test='account-tools'] > svg) {
+    margin-right: 6px;
+  }
+
+  .account-workbench-table.is-embedded :deep(.space-y-3 > .rounded-lg:has(> .space-y-3)) {
+    padding: 12px;
+  }
+
+  .account-workbench-table.is-embedded :deep(.space-y-3 > .rounded-lg > .space-y-3) {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    min-width: 0;
+    gap: 8px;
+  }
+
+  .account-workbench-table.is-embedded :deep(.space-y-3 > .rounded-lg > .space-y-3 > *) {
+    margin-top: 0;
+    margin-bottom: 0;
+  }
+
+  .account-workbench-table.is-embedded :deep([data-field='select']) {
+    grid-row: 1;
+    grid-column: 2;
+    align-self: start;
+  }
+
+  .account-workbench-table.is-embedded :deep([data-field='select'] > span) {
+    display: none;
+  }
+
+  .account-workbench-table.is-embedded :deep([data-field='select'] > div) {
+    display: flex;
+    min-width: 44px;
+    min-height: 44px;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .account-workbench-table.is-embedded :deep([data-field='name']) {
+    grid-row: 1;
+    grid-column: 1;
   }
 
   .account-workbench-table.is-embedded :deep([data-field='name']),
   .account-workbench-table.is-embedded :deep([data-field='usage']),
-  .account-workbench-table.is-embedded :deep([data-field='status']) {
+  .account-workbench-table.is-embedded :deep([data-field='status']),
+  .account-workbench-table.is-embedded :deep([data-field='pool_record']) {
     display: block;
+  }
+
+  .account-workbench-table.is-embedded :deep([data-field='status']),
+  .account-workbench-table.is-embedded :deep([data-field='usage']),
+  .account-workbench-table.is-embedded :deep([data-field='pool_record']),
+  .account-workbench-table.is-embedded :deep(.space-y-3 > .rounded-lg > .space-y-3 > .border-t) {
+    grid-column: 1 / -1;
   }
 
   .account-workbench-table.is-embedded :deep([data-field='name'] > span),
   .account-workbench-table.is-embedded :deep([data-field='usage'] > span),
-  .account-workbench-table.is-embedded :deep([data-field='status'] > span) {
+  .account-workbench-table.is-embedded :deep([data-field='status'] > span),
+  .account-workbench-table.is-embedded :deep([data-field='pool_record'] > span) {
     display: none;
   }
 
   .account-workbench-table.is-embedded :deep([data-field='name'] > div),
   .account-workbench-table.is-embedded :deep([data-field='usage'] > div),
-  .account-workbench-table.is-embedded :deep([data-field='status'] > div) {
+  .account-workbench-table.is-embedded :deep([data-field='status'] > div),
+  .account-workbench-table.is-embedded :deep([data-field='pool_record'] > div) {
     width: 100%;
     max-width: none;
     text-align: left;
@@ -5326,6 +5416,7 @@ onUnmounted(() => {
 
   .account-workbench-table.is-embedded :deep(.account-row-actions) {
     width: 100%;
+    flex-wrap: wrap;
     justify-content: flex-end;
     gap: 8px;
   }
