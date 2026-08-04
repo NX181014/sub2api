@@ -386,7 +386,7 @@ describe('admin AccountsView bulk edit scope', () => {
     expect(defaultColumnKeys).not.toContain('id')
     expect(wrapper.text()).toContain('#7')
 
-    await wrapper.get('[data-test="workbench-uploader-toggle"]').trigger('click')
+    await wrapper.get('[data-test="workbench-uploader"]').trigger('click')
     await wrapper.get('[data-test="workbench-batch"] .workbench-batch-main').trigger('click')
     expect(wrapper.emitted('workbench-context')).toBeUndefined()
     await wrapper.get('[data-test="workbench-batch-scope"]').trigger('click')
@@ -436,7 +436,7 @@ describe('admin AccountsView bulk edit scope', () => {
       'common.unknown'
     ])
 
-    const firstToggle = wrapper.findAll('[data-test="workbench-uploader-toggle"]')[0]!
+    const firstToggle = wrapper.findAll('[data-test="workbench-uploader"]')[0]!
     expect(firstToggle.attributes('aria-expanded')).toBe('false')
     await firstToggle.trigger('click')
     expect(firstToggle.attributes('aria-expanded')).toBe('true')
@@ -462,7 +462,7 @@ describe('admin AccountsView bulk edit scope', () => {
     await wrapper.findAll('[data-test="workbench-uploader"]')[1].trigger('click')
     await flushPromises()
     expect(wrapper.emitted('workbench-context')?.at(-1)?.[0]).toMatchObject({ uploader_user_id: 7 })
-    const toggles = wrapper.findAll('[data-test="workbench-uploader-toggle"]')
+    const toggles = wrapper.findAll('[data-test="workbench-uploader"]')
     expect(toggles[0].attributes('aria-expanded')).toBe('false')
     expect(toggles[1].attributes('aria-expanded')).toBe('true')
     expect(wrapper.findAll('[data-test="workbench-batch"]')).toHaveLength(1)
@@ -600,7 +600,7 @@ describe('admin AccountsView bulk edit scope', () => {
       expect(document.activeElement).toBe(search.element)
       expect(document.body.classList).toContain('modal-open')
 
-      await dialog.get('[data-test="workbench-uploader-toggle"]').trigger('click')
+      await dialog.get('[data-test="workbench-uploader"]').trigger('click')
       expect(wrapper.find('.workbench-sidebar[role="dialog"]').exists()).toBe(true)
       expect(wrapper.get('[data-test="workbench-batch"]').exists()).toBe(true)
 

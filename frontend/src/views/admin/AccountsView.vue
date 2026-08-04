@@ -173,8 +173,14 @@
                       data-test="workbench-uploader"
                       class="workbench-uploader-main"
                       :aria-expanded="isWorkbenchUploaderExpanded(group)"
-                      @click="focusWorkbenchUploader(group)"
+                      @click="toggleWorkbenchUploader(group.id)"
                     >
+                      <span
+                        class="workbench-tree-affordance"
+                        aria-hidden="true"
+                      >
+                        <Icon :name="isWorkbenchUploaderExpanded(group) ? 'chevronDown' : 'chevronRight'" size="sm" />
+                      </span>
                       <span class="workbench-uploader-avatar" aria-hidden="true">
                         <img v-if="group.avatarUrl" :src="group.avatarUrl" alt="" />
                         <span v-else>{{ workbenchUploaderInitial(group.label) }}</span>
@@ -202,17 +208,7 @@
                       :aria-label="group.label"
                       @click="selectWorkbenchUploader(group)"
                     >
-                      <Icon :name="isWorkbenchUploaderScoped(group) ? 'check' : 'plus'" size="sm" />
-                    </button>
-                    <button
-                      type="button"
-                      data-test="workbench-uploader-toggle"
-                      class="workbench-tree-toggle"
-                      :aria-expanded="isWorkbenchUploaderExpanded(group)"
-                      :aria-label="isWorkbenchUploaderExpanded(group) ? t('admin.accounts.collapseImportBatch') : t('admin.accounts.expandImportBatch')"
-                      @click="toggleWorkbenchUploader(group.id)"
-                    >
-                      <Icon :name="isWorkbenchUploaderExpanded(group) ? 'chevronDown' : 'chevronRight'" size="sm" />
+                      <Icon name="check" size="sm" />
                     </button>
                   </div>
                   <div v-if="isWorkbenchUploaderExpanded(group) || workbenchNavigatorSearch" class="workbench-focus-panel">
@@ -338,8 +334,8 @@
           </aside>
 
           <section class="flex min-h-0 min-w-0 flex-1 flex-col">
-            <header v-if="embedded" class="workbench-header flex flex-wrap items-start justify-between gap-3 border-b border-gray-200 px-4 py-3 dark:border-dark-700">
-              <div class="flex min-w-0 items-start gap-2">
+            <header v-if="embedded" class="workbench-header flex flex-wrap items-center gap-3 border-b border-gray-200 px-4 py-3 dark:border-dark-700">
+              <div class="workbench-header-title flex min-w-0 items-start gap-2">
                 <button
                   type="button"
                   class="workbench-navigator-open min-h-11 min-w-11 items-center justify-center rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 dark:border-dark-700 dark:text-gray-300 dark:hover:bg-dark-800"
@@ -355,7 +351,7 @@
                   <p class="mt-0.5 truncate text-xs text-gray-500 dark:text-gray-400" :title="workbenchSubtitle">{{ workbenchSubtitle }}</p>
                 </div>
               </div>
-              <div class="flex max-w-full flex-wrap items-center justify-end gap-2">
+              <div class="workbench-header-controls flex max-w-full flex-wrap items-center justify-end gap-2">
                 <label class="workbench-sort-control">
                   <Icon name="sort" size="sm" aria-hidden="true" />
                   <span class="sr-only">{{ t('admin.accounts.workbenchSortLabel') }}</span>
@@ -398,7 +394,7 @@
                 </span>
                 </template>
               </div>
-              <div v-if="workbenchFilterChips.length" data-test="workbench-filter-chips" class="flex basis-full flex-wrap items-center gap-2">
+              <div v-if="workbenchFilterChips.length" data-test="workbench-filter-chips" class="workbench-filter-chips flex min-w-0 flex-wrap items-center gap-2">
                 <button
                   v-for="chip in workbenchFilterChips"
                   :key="chip.axis"
@@ -507,7 +503,7 @@
               v-else-if="!embedded || isWorkbenchModuleEnabled('identity')"
               data-test="account-workbench-identity"
               :data-account-id="embedded ? row.id : undefined"
-              class="flex min-w-0 flex-col"
+              class="account-identity-cell flex min-w-0 flex-col justify-center"
               :class="isImportBatchChild(row) ? 'border-l-2 border-gray-200 pl-4 dark:border-dark-600' : ''"
             >
               <button
@@ -633,20 +629,7 @@
             </div>
             <div v-else-if="embedded && isWorkbenchModuleEnabled('runtime')" data-test="account-workbench-runtime" class="flex min-w-0 flex-col gap-2">
               <AccountStatusIndicator :account="row" @show-temp-unsched="handleShowTempUnsched" />
-              <div class="flex flex-wrap items-center gap-3">
-                <button
-                  @click="handleToggleSchedulable(row)"
-                  :disabled="togglingSchedulable === row.id"
-                  class="inline-flex min-h-11 items-center gap-2 rounded-md px-1 text-xs font-medium text-gray-600 focus:outline-none focus:ring-2 focus:ring-primary-500 disabled:cursor-not-allowed disabled:opacity-50 dark:text-gray-300"
-                  :title="row.schedulable ? t('admin.accounts.schedulableEnabled') : t('admin.accounts.schedulableDisabled')"
-                >
-                  <span class="relative inline-flex h-5 w-9 rounded-full border-2 border-transparent transition-colors" :class="row.schedulable ? 'bg-primary-500' : 'bg-gray-200 dark:bg-dark-600'">
-                    <span class="pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow transition" :class="row.schedulable ? 'translate-x-4' : 'translate-x-0'" />
-                  </span>
-                  <span>{{ t('admin.accounts.columns.schedulable') }}</span>
-                </button>
-                <AccountCapacityCell :account="row" />
-              </div>
+              <AccountCapacityCell :account="row" />
             </div>
             <div v-else class="flex items-center gap-1.5">
               <AccountStatusIndicator :account="row" @show-temp-unsched="handleShowTempUnsched" />
@@ -903,12 +886,30 @@
               <Icon :name="expandedImportBatches.has(row.batchID) ? 'chevronDown' : 'chevronRight'" size="sm" />
               {{ expandedImportBatches.has(row.batchID) ? t('admin.accounts.collapseImportBatch') : t('admin.accounts.expandImportBatch') }}
             </button>
-            <div v-else-if="!embedded || isWorkbenchModuleEnabled('actions')" data-test="account-workbench-actions" class="account-row-actions flex items-center justify-end gap-1">
-              <button :title="t('common.edit')" :aria-label="t('common.edit')" @click="handleEdit(row)" class="flex min-h-11 min-w-11 items-center justify-center rounded-md text-gray-500 transition-colors hover:bg-gray-100 hover:text-primary-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 dark:hover:bg-dark-700 dark:hover:text-primary-400">
-                <Icon name="edit" size="sm" />
+            <div v-else-if="!embedded || isWorkbenchModuleEnabled('actions')" data-test="account-workbench-actions" class="account-row-actions flex items-center justify-end gap-2">
+              <button
+                v-if="embedded"
+                type="button"
+                data-test="account-workbench-schedulable"
+                :title="row.schedulable ? t('admin.accounts.schedulableEnabled') : t('admin.accounts.schedulableDisabled')"
+                :aria-label="row.schedulable ? t('admin.accounts.schedulableEnabled') : t('admin.accounts.schedulableDisabled')"
+                :aria-pressed="row.schedulable"
+                :disabled="togglingSchedulable === row.id"
+                class="account-schedule-action"
+                @click="handleToggleSchedulable(row)"
+              >
+                <span class="relative inline-flex h-5 w-9 rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out" :class="row.schedulable ? 'bg-primary-500 hover:bg-primary-600' : 'bg-gray-200 hover:bg-gray-300 dark:bg-dark-600 dark:hover:bg-dark-500'">
+                  <span class="pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow transition duration-200 ease-in-out" :class="row.schedulable ? 'translate-x-4' : 'translate-x-0'" />
+                </span>
+                <span>{{ t('admin.accounts.columns.schedulable') }}</span>
               </button>
-              <button :title="t('common.more')" :aria-label="t('common.more')" @click="openMenu(row)" class="flex min-h-11 min-w-11 items-center justify-center rounded-md text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 dark:hover:bg-dark-700 dark:hover:text-white">
+              <button type="button" :title="t('common.edit')" :aria-label="t('common.edit')" @click="handleEdit(row)" class="account-row-action">
+                <Icon name="edit" size="sm" />
+                <span>{{ t('common.edit') }}</span>
+              </button>
+              <button type="button" :title="t('common.more')" :aria-label="t('common.more')" @click="openMenu(row)" class="account-row-action">
                 <Icon name="more" size="sm" />
+                <span>{{ t('common.more') }}</span>
               </button>
             </div>
           </template>
@@ -4664,6 +4665,22 @@ onUnmounted(() => {
   display: none;
 }
 
+.workbench-header-title {
+  order: 1;
+  flex: 0 1 auto;
+}
+
+.workbench-filter-chips {
+  order: 2;
+  flex: 1 1 12rem;
+}
+
+.workbench-header-controls {
+  order: 3;
+  flex: 0 0 auto;
+  margin-left: auto;
+}
+
 .account-operation-band {
   display: flex;
   width: 100%;
@@ -4740,7 +4757,7 @@ onUnmounted(() => {
 }
 
 .workbench-scope-active {
-  @apply text-primary-700 dark:text-primary-300;
+  @apply bg-primary-50 font-semibold text-primary-700 dark:bg-primary-900/25 dark:text-primary-300;
 }
 
 .workbench-nav-count {
@@ -4780,7 +4797,7 @@ onUnmounted(() => {
 .workbench-uploader-main,
 .workbench-attention-main,
 .workbench-operational-main {
-  @apply flex min-h-11 min-w-0 flex-1 items-center gap-2 px-2 py-1.5 text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary-500;
+  @apply flex min-h-11 min-w-0 flex-1 items-center gap-1.5 px-2 py-1.5 text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary-500;
 }
 
 .workbench-scope-toggle {
@@ -4792,7 +4809,7 @@ onUnmounted(() => {
 }
 
 .workbench-uploader-avatar {
-  @apply flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full bg-gray-200 text-xs font-semibold text-gray-600 dark:bg-dark-700 dark:text-gray-200;
+  @apply flex h-7 w-7 shrink-0 items-center justify-center overflow-hidden rounded-full bg-gray-200 text-xs font-semibold text-gray-600 dark:bg-dark-700 dark:text-gray-200;
 }
 
 .workbench-uploader-avatar img {
@@ -4815,8 +4832,8 @@ onUnmounted(() => {
   @apply mt-0.5 block truncate text-xs text-gray-500 dark:text-gray-400;
 }
 
-.workbench-tree-toggle {
-  @apply inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-md text-gray-400 hover:bg-gray-200 hover:text-gray-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary-500 dark:hover:bg-dark-700 dark:hover:text-gray-200;
+.workbench-tree-affordance {
+  @apply inline-flex h-5 w-5 shrink-0 items-center justify-center text-gray-400 transition-colors dark:text-gray-500;
 }
 
 .workbench-uploader-batches,
@@ -4833,7 +4850,7 @@ onUnmounted(() => {
 }
 
 .workbench-focus-panel {
-  @apply min-w-0 pb-2 pl-10 pr-1;
+  @apply min-w-0 pb-2 pl-8 pr-1;
 }
 
 .workbench-focus-actions {
@@ -4978,7 +4995,7 @@ onUnmounted(() => {
 @media (min-width: 1180px) {
   .workbench-layout {
     display: grid;
-    grid-template-columns: minmax(14rem, 22%) minmax(0, 1fr);
+    grid-template-columns: clamp(176px, 15vw, 196px) minmax(0, 1fr);
   }
 
   .workbench-sidebar {
@@ -5006,6 +5023,12 @@ onUnmounted(() => {
     min-width: 0;
   }
 
+}
+
+@media (min-width: 1440px) {
+  .workbench-layout {
+    grid-template-columns: clamp(190px, 14vw, 212px) minmax(0, 1fr);
+  }
 }
 
 .account-usage-card {
@@ -5046,6 +5069,16 @@ onUnmounted(() => {
 .account-pool-cell > dl {
   max-width: 100%;
   flex-wrap: wrap;
+}
+
+.account-schedule-action,
+.account-row-action {
+  @apply inline-flex min-h-11 shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-md px-2 text-xs font-medium text-gray-600 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 disabled:cursor-not-allowed disabled:opacity-50 dark:text-gray-300;
+}
+
+.account-schedule-action:hover,
+.account-row-action:hover {
+  @apply bg-gray-100 text-primary-700 dark:bg-dark-700 dark:text-primary-300;
 }
 
 .account-workbench-table.is-embedded :deep(.openai-usage-window > div > div:last-child) {
@@ -5122,7 +5155,7 @@ onUnmounted(() => {
     display: flex;
     min-width: 0;
     align-items: flex-start;
-    padding-block: 12px;
+    padding-block: 10px;
     white-space: normal;
     overflow-wrap: anywhere;
     background: transparent;
@@ -5136,16 +5169,18 @@ onUnmounted(() => {
   .account-workbench-table.is-embedded :deep(.account-field-actions) {
     min-width: 0;
     max-width: none;
-    padding-inline: 10px;
+    padding-inline: 8px;
   }
 
   .account-workbench-table.is-embedded :deep(.account-field-select) {
     flex: 0 0 3rem;
+    align-items: center;
     justify-content: center;
   }
 
   .account-workbench-table.is-embedded :deep(.account-field-name) {
     flex: 1 1 10rem;
+    align-items: center;
   }
 
   .account-workbench-table.is-embedded :deep(.account-field-status) {
@@ -5161,15 +5196,16 @@ onUnmounted(() => {
   }
 
   .account-workbench-table.is-embedded :deep(.account-field-actions) {
-    flex: 0 0 5.75rem;
+    flex: 0 0 auto;
+    align-items: center;
     justify-content: flex-end;
-    padding-right: 6px;
+    padding-right: 8px;
     padding-left: 0;
   }
 
   .account-workbench-table.is-embedded :deep(.account-row-actions) {
     margin-left: auto;
-    gap: 2px;
+    gap: 8px;
   }
 
   .account-workbench-table.is-embedded :deep(.table-body tr:not([data-row-id])) {
@@ -5185,6 +5221,53 @@ onUnmounted(() => {
   .dark .account-workbench-table.is-embedded :deep(.table-body tr[data-row-id]) {
     border-color: rgb(71 85 105 / 0.7);
     background: rgb(30 41 59 / 0.78);
+  }
+}
+
+@media (min-width: 768px) and (max-width: 1179px) {
+  .account-workbench-table.is-embedded :deep(.table-body tr[data-row-id]) {
+    flex-wrap: wrap;
+  }
+
+  .account-workbench-table.is-embedded :deep(.table-body tr[data-row-id])::before {
+    order: 5;
+    flex: 0 0 100%;
+    height: 0;
+    content: '';
+  }
+
+  .account-workbench-table.is-embedded :deep(.account-field-select) {
+    order: 1;
+  }
+
+  .account-workbench-table.is-embedded :deep(.account-field-name) {
+    order: 2;
+    flex: 1 1 11rem;
+  }
+
+  .account-workbench-table.is-embedded :deep(.account-field-status) {
+    order: 3;
+    flex: 0.75 1 8rem;
+  }
+
+  .account-workbench-table.is-embedded :deep(.account-field-actions) {
+    order: 4;
+  }
+
+  .account-workbench-table.is-embedded :deep(.account-field-usage),
+  .account-workbench-table.is-embedded :deep(.account-field-pool-record) {
+    order: 6;
+    flex: 1 1 50%;
+    border-top: 1px solid rgb(226 232 240 / 0.75);
+  }
+
+  .account-workbench-table.is-embedded :deep(.account-field-pool-record) {
+    order: 7;
+  }
+
+  .dark .account-workbench-table.is-embedded :deep(.account-field-usage),
+  .dark .account-workbench-table.is-embedded :deep(.account-field-pool-record) {
+    border-top-color: rgb(71 85 105 / 0.55);
   }
 }
 
@@ -5233,6 +5316,12 @@ onUnmounted(() => {
     width: 100%;
     max-width: none;
     text-align: left;
+  }
+
+  .account-workbench-table.is-embedded :deep(.account-row-actions) {
+    width: 100%;
+    justify-content: flex-end;
+    gap: 8px;
   }
 }
 
