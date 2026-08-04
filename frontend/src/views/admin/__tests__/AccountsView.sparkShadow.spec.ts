@@ -40,6 +40,7 @@ vi.mock('@/api/admin', () => ({
       listRows,
       listWithEtag,
       getBatchTodayStats,
+      getSelectionSummary: vi.fn().mockResolvedValue({ total: 0, platforms: [], types: [], type_counts: {}, usage_status_counts: {} }),
       duplicate: duplicateAccount,
       getUpstreamBillingProbeSettings: vi.fn().mockResolvedValue({ enabled: true, interval_minutes: 30 }),
       createSparkShadow,

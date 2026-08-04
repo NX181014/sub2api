@@ -61,5 +61,7 @@ describe('ProxiesView tabs', () => {
     expect(approvalApplied).toContain('if (!routesWereLoaded) await loadProxies()')
     expect(source).toContain('线路已移除')
     expect(source).toContain('(!row.managed_source || isRemovedManagedRoute(row))')
+    expect(source).toContain('@view-proxy-accounts="openManagedProxyAccounts"')
+    expect(source).toContain("router.push({ path: '/admin/accounts', query: { tab: 'accounts' } })")
   })
 })

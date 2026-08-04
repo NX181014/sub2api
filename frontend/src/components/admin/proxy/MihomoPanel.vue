@@ -204,7 +204,8 @@
                 <button type="button" class="btn btn-secondary min-h-11 px-3" @click="testOneRoute(route)"><Icon name="play" size="sm" class="mr-1.5" />测试</button>
                 <button type="button" class="btn btn-secondary min-h-11 px-3" @click="openRouteForm(route)"><Icon name="edit" size="sm" class="mr-1.5" />编辑</button>
                 <button type="button" class="btn btn-secondary min-h-11 px-3" @click="confirmRouteToggle(route)">{{ route.enabled ? '停用' : '启用' }}</button>
-                <button type="button" class="btn btn-secondary min-h-11 px-3 text-red-600" @click="confirmDeleteRoute(route)"><Icon name="trash" size="sm" class="mr-1.5" />删除</button>
+                <button v-if="route.account_count > 0" type="button" class="btn btn-secondary min-h-11 px-3" @click="emit('view-proxy-accounts', route.proxy_id)"><Icon name="users" size="sm" class="mr-1.5" />查看/迁移账号</button>
+                <button type="button" class="btn btn-secondary min-h-11 px-3 text-red-600" :disabled="route.account_count > 0" :title="route.account_count > 0 ? '请先查看并迁移绑定账号' : '删除线路'" @click="confirmDeleteRoute(route)"><Icon name="trash" size="sm" class="mr-1.5" />删除</button>
               </div>
             </article>
           </div>
@@ -316,6 +317,7 @@ type ConfirmAction =
 const emit = defineEmits<{
   'approval-submitted': []
   'routes-loaded': [routes: MihomoRoute[]]
+  'view-proxy-accounts': [proxyID: number]
 }>()
 const appStore = useAppStore()
 const authStore = useAuthStore()

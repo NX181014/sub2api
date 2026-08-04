@@ -449,6 +449,7 @@
         ref="mihomoPanelRef"
         @approval-submitted="handleApprovalSubmitted"
         @routes-loaded="handleMihomoRoutesLoaded"
+        @view-proxy-accounts="openManagedProxyAccounts"
       />
     </div>
 
@@ -1065,7 +1066,10 @@
         </table>
       </div>
       <template #footer>
-        <div class="flex justify-end">
+        <div class="flex flex-wrap justify-end gap-2">
+          <button v-if="proxyAccounts.length" @click="migrateProxyAccounts" class="btn btn-primary">
+            {{ t('admin.proxies.migrateAccounts') }}
+          </button>
           <button @click="closeAccountsModal" class="btn btn-secondary">
             {{ t('common.close') }}
           </button>
@@ -1078,6 +1082,7 @@
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRouter } from 'vue-router'
 import { useAppStore } from '@/stores/app'
 import { useAuthStore } from '@/stores/auth'
 import { adminAPI } from '@/api/admin'
@@ -1107,6 +1112,7 @@ import { formatDateTime } from '@/utils/format'
 import { proxyExpiryBadgeClass, proxyExpiryLabelKey } from '@/utils/proxyExpiry'
 
 const { t } = useI18n()
+const router = useRouter()
 const appStore = useAppStore()
 const authStore = useAuthStore()
 const isPrimaryAdmin = computed(() => authStore.user?.is_primary_admin === true)
@@ -1759,6 +1765,13 @@ const openManagedProxy = (proxy: Proxy) => {
   activeTab.value = 'mihomo'
   mihomoPanelRef.value?.openManagedProxy(proxy.id)
 }
+const openManagedProxyAccounts = async (proxyID: number) => {
+  try {
+    await openAccountsModal(proxies.value.find(proxy => proxy.id === proxyID) || await adminAPI.proxies.getById(proxyID))
+  } catch (error: any) {
+    appStore.showError(error.response?.data?.detail || t('admin.proxies.accountsFailed'))
+  }
+}
 const proxyActionLabel = (proxy: Proxy) => proxy.managed_source && !isRemovedManagedRoute(proxy) ? '管理线路' : t('common.view')
 const openProxyAction = (proxy: Proxy) => proxy.managed_source && !isRemovedManagedRoute(proxy) ? openManagedProxy(proxy) : openProxyCredentialRequest(proxy)
 
@@ -2283,6 +2296,13 @@ const closeAccountsModal = () => {
   showAccountsModal.value = false
   accountsProxy.value = null
   proxyAccounts.value = []
+}
+
+const migrateProxyAccounts = () => {
+  const proxyID = accountsProxy.value?.id
+  if (!proxyID) return
+  closeAccountsModal()
+  void router.push({ path: '/admin/accounts', query: { tab: 'accounts' } })
 }
 
 // ── Proxy URL copy ──

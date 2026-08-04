@@ -33,81 +33,25 @@
                 @click="openBulkEditFiltered"
               >
                 <Icon name="edit" size="sm" />
-                <span class="hidden lg:inline">{{ t('admin.accounts.bulkActions.editFiltered', { count: pagination.total }) }}</span>
-                <span class="lg:hidden">{{ pagination.total }}</span>
+                <span class="hidden lg:inline">{{ t('admin.accounts.bulkActions.editFiltered', { count: filteredAccountTotal }) }}</span>
+                <span class="lg:hidden">{{ filteredAccountTotal }}</span>
               </button>
-              <button
-                type="button"
-                class="btn btn-secondary relative px-2 md:px-3"
-                :title="t('admin.sharedPool.approval.title')"
-                :aria-label="t('admin.sharedPool.approval.title')"
-                @click="openApprovalCenter"
-              >
-                <Icon name="shield" size="sm" />
-                <span class="hidden md:inline">{{ t('admin.sharedPool.approval.title') }}</span>
-                <span
-                  v-if="pendingApprovalCount"
-                  class="inline-flex min-w-5 items-center justify-center rounded-full bg-amber-100 px-1.5 text-xs font-semibold tabular-nums text-amber-700 dark:bg-amber-900/40 dark:text-amber-300"
-                >
-                  {{ pendingApprovalCount > 99 ? '99+' : pendingApprovalCount }}
-                </span>
-              </button>
-
-              <!-- Auto Refresh Dropdown -->
-              <div class="relative" ref="autoRefreshDropdownRef">
-                <button
-                  @click="
-                    showAutoRefreshDropdown = !showAutoRefreshDropdown;
-                    showAccountToolsDialog = false
-                  "
-                  class="btn btn-secondary px-2 md:px-3"
-                  :title="t('admin.accounts.autoRefresh')"
-                >
-                  <Icon name="refresh" size="sm" :class="[autoRefreshEnabled ? 'animate-spin' : '']" />
-                  <span class="hidden md:inline">
-                    {{
-                      autoRefreshEnabled
-                        ? t('admin.accounts.autoRefreshCountdown', { seconds: autoRefreshCountdown })
-                        : t('admin.accounts.autoRefresh')
-                    }}
-                  </span>
-                </button>
-                <div
-                  v-if="showAutoRefreshDropdown"
-                  class="absolute right-0 z-50 mt-2 w-56 origin-top-right rounded-lg border border-gray-200 bg-white shadow-lg dark:border-dark-700 dark:bg-dark-800"
-                >
-                  <div class="p-2">
-                    <button
-                      @click="setAutoRefreshEnabled(!autoRefreshEnabled)"
-                      class="flex w-full items-center justify-between rounded-md px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-dark-700"
-                    >
-                      <span>{{ t('admin.accounts.enableAutoRefresh') }}</span>
-                      <Icon v-if="autoRefreshEnabled" name="check" size="sm" class="text-primary-500" />
-                    </button>
-                    <div class="my-1 border-t border-gray-100 dark:border-dark-700"></div>
-                    <button
-                      v-for="sec in autoRefreshIntervals"
-                      :key="sec"
-                      @click="setAutoRefreshInterval(sec)"
-                      class="flex w-full items-center justify-between rounded-md px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-dark-700"
-                    >
-                      <span>{{ autoRefreshIntervalLabel(sec) }}</span>
-                      <Icon v-if="autoRefreshIntervalSeconds === sec" name="check" size="sm" class="text-primary-500" />
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              <!-- More Tools Dropdown -->
               <div>
                 <button
                   @click="openAccountToolsDialog"
-                  class="btn btn-secondary px-2 md:px-3"
+                  data-test="account-tools"
+                  class="btn btn-secondary relative px-2 md:px-3"
                   :title="t('admin.accounts.moreActions')"
                   :aria-expanded="showAccountToolsDialog"
                 >
                   <Icon name="more" size="sm" class="md:mr-1.5" />
                   <span class="hidden md:inline">{{ t('admin.accounts.moreActions') }}</span>
+                  <span
+                    v-if="pendingApprovalCount"
+                    class="inline-flex min-w-5 items-center justify-center rounded-full bg-amber-100 px-1.5 text-xs font-semibold tabular-nums text-amber-700 dark:bg-amber-900/40 dark:text-amber-300"
+                  >
+                    {{ pendingApprovalCount > 99 ? '99+' : pendingApprovalCount }}
+                  </span>
                 </button>
               </div>
             </template>
@@ -165,7 +109,21 @@
                   </button>
                 </span>
               </div>
-              <label class="workbench-navigator-search relative block">
+              <div class="workbench-axis-tabs" role="tablist" :aria-label="t('admin.accounts.workbenchNavigatorTitle')">
+                <button
+                  v-for="axis in workbenchAxes"
+                  :key="axis"
+                  type="button"
+                  role="tab"
+                  :data-test="`workbench-axis-${axis}`"
+                  :aria-selected="activeWorkbenchAxis === axis"
+                  :class="['workbench-axis-tab', activeWorkbenchAxis === axis ? 'workbench-axis-tab-active' : '']"
+                  @click="activeWorkbenchAxis = axis"
+                >
+                  {{ workbenchAxisLabel(axis) }}
+                </button>
+              </div>
+              <label v-if="activeWorkbenchAxis === 'source'" class="workbench-navigator-search relative mt-2 block">
                 <Icon name="search" size="sm" class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
                 <input
                   v-model.trim="workbenchNavigatorSearch"
@@ -178,17 +136,19 @@
               </label>
             </div>
             <div class="workbench-navigator-list">
-              <section class="workbench-axis" aria-labelledby="workbench-source-axis">
+              <section v-show="activeWorkbenchAxis === 'source'" class="workbench-axis" aria-labelledby="workbench-source-axis">
                 <h3 id="workbench-source-axis" class="workbench-axis-title">{{ t('admin.accounts.workbenchSourceAxis') }}</h3>
                 <button type="button" data-test="workbench-all" :aria-current="workbenchScope === 'all' ? 'page' : undefined" :class="['workbench-nav-item', workbenchScope === 'all' ? 'workbench-nav-item-active' : '']" @click="selectWorkbenchScope('all')">
                   <Icon name="grid" size="sm" class="shrink-0 text-gray-400" />
                   <span class="truncate font-medium">{{ t('admin.sharedPool.ledger.allAccounts') }}</span>
                   <span class="workbench-nav-count">{{ workbenchAccountTotal }}</span>
+                  <Icon v-if="workbenchScope === 'all'" name="check" size="sm" class="workbench-nav-check" />
                 </button>
                 <button type="button" data-test="workbench-standalone" :aria-current="workbenchScope === 'standalone' ? 'page' : undefined" :class="['workbench-nav-item', workbenchScope === 'standalone' ? 'workbench-nav-item-active' : '']" @click="selectWorkbenchScope('standalone')">
                   <Icon name="user" size="sm" class="shrink-0 text-gray-400" />
                   <span class="truncate font-medium">{{ t('admin.accounts.standaloneImport') }}</span>
                   <span class="workbench-nav-count">{{ workbenchStandaloneCount }}</span>
+                  <Icon v-if="workbenchScope === 'standalone'" name="check" size="sm" class="workbench-nav-check" />
                 </button>
 
                 <div v-for="group in filteredWorkbenchUploaderGroups" :key="String(group.id)" class="workbench-uploader-group">
@@ -207,15 +167,19 @@
                       <span class="min-w-0 flex-1">
                         <span class="flex min-w-0 items-center gap-1.5">
                           <span class="truncate font-medium" :title="group.label">{{ group.label }}</span>
-                          <span v-if="group.uploaderStatus && group.uploaderStatus !== 'active'" class="workbench-uploader-disabled">{{ t('admin.accounts.workbenchUploaderDisabled') }}</span>
+                          <span :class="['workbench-uploader-state', group.uploaderStatus === 'active' ? 'workbench-uploader-state-active' : 'workbench-uploader-state-disabled']">
+                            {{ workbenchUploaderStatusLabel(group.uploaderStatus) }}
+                          </span>
                         </span>
                         <span class="workbench-uploader-stats">
                           {{ t('admin.accounts.workbenchSchedulableCount', { current: group.schedulableCount, total: group.count }) }}
                           <span v-if="workbenchUploaderAttentionCount(group)"> · {{ t('admin.accounts.workbenchAttentionCount', { count: workbenchUploaderAttentionCount(group) }) }}</span>
+                          · {{ t('admin.accounts.workbenchBatchCount', { count: group.batches.length }) }}
                         </span>
                       </span>
                     </button>
                     <span class="workbench-nav-count">{{ group.count }}</span>
+                    <Icon v-if="workbenchScope === 'uploader' && String(selectedWorkbenchUploaderID) === String(group.id)" name="check" size="sm" class="workbench-nav-check" />
                     <button
                       type="button"
                       data-test="workbench-uploader-toggle"
@@ -249,6 +213,7 @@
                           </span>
                         </span>
                       </span>
+                      <Icon v-if="selectedWorkbenchBatchID === batch.id" name="check" size="sm" class="workbench-nav-check" />
                     </button>
                   </div>
                 </div>
@@ -268,7 +233,7 @@
                 </button>
               </section>
 
-              <section class="workbench-axis" aria-labelledby="workbench-usage-axis">
+              <section v-show="activeWorkbenchAxis === 'usage'" class="workbench-axis" aria-labelledby="workbench-usage-axis">
                 <h3 id="workbench-usage-axis" class="workbench-axis-title">{{ t('admin.accounts.workbenchUsageAxis') }}</h3>
                 <button
                   v-for="status in workbenchPrimaryUsageStatuses"
@@ -281,6 +246,7 @@
                 >
                   <span class="truncate font-medium">{{ workbenchUsageStatusLabel(status) }}</span>
                   <span class="workbench-nav-count">{{ workbenchUsageStatusCount(status) }}</span>
+                  <Icon v-if="selectedWorkbenchUsageStatus === status" name="check" size="sm" class="workbench-nav-check" />
                 </button>
                 <div class="workbench-attention-group">
                   <div :class="['workbench-attention-row', selectedWorkbenchUsageStatus === 'attention' ? 'workbench-nav-item-active' : '']">
@@ -288,6 +254,7 @@
                       <span class="truncate font-medium">{{ workbenchUsageStatusLabel('attention') }}</span>
                     </button>
                     <span class="workbench-nav-count">{{ workbenchUsageStatusCount('attention') }}</span>
+                    <Icon v-if="selectedWorkbenchUsageStatus === 'attention'" name="check" size="sm" class="workbench-nav-check" />
                     <button type="button" data-test="workbench-attention-toggle" class="workbench-tree-toggle" :aria-expanded="workbenchAttentionExpanded" :aria-label="workbenchAttentionExpanded ? t('admin.accounts.collapseImportBatch') : t('admin.accounts.expandImportBatch')" @click="workbenchAttentionExpanded = !workbenchAttentionExpanded">
                       <Icon :name="workbenchAttentionExpanded ? 'chevronDown' : 'chevronRight'" size="sm" />
                     </button>
@@ -304,12 +271,13 @@
                     >
                       <span class="truncate font-medium">{{ workbenchUsageStatusLabel(status) }}</span>
                       <span class="workbench-nav-count">{{ workbenchUsageStatusCount(status) }}</span>
+                      <Icon v-if="selectedWorkbenchUsageStatus === status" name="check" size="sm" class="workbench-nav-check" />
                     </button>
                   </div>
                 </div>
               </section>
 
-              <section class="workbench-axis" aria-labelledby="workbench-type-axis">
+              <section v-show="activeWorkbenchAxis === 'type'" class="workbench-axis" aria-labelledby="workbench-type-axis">
                 <h3 id="workbench-type-axis" class="workbench-axis-title">{{ t('admin.accounts.workbenchTypeAxis') }}</h3>
                 <button
                   v-for="option in workbenchTypeOptions"
@@ -322,6 +290,7 @@
                 >
                   <span class="truncate font-medium" :title="option.label">{{ option.label }}</span>
                   <span class="workbench-nav-count">{{ option.count }}</span>
+                  <Icon v-if="String(params.type || '') === option.value" name="check" size="sm" class="workbench-nav-check" />
                 </button>
               </section>
               <LoadingSpinner v-if="workbenchNavigatorLoading" class="m-3" />
@@ -341,7 +310,7 @@
                 >
                   <Icon name="grid" size="sm" />
                 </button>
-                <div v-if="!embedded || workbenchView !== 'finance'" class="min-w-0">
+                <div class="min-w-0">
                   <h2 class="truncate text-base font-semibold text-gray-900 dark:text-white" :title="workbenchTitle">{{ workbenchTitle }}</h2>
                   <p class="mt-0.5 truncate text-xs text-gray-500 dark:text-gray-400" :title="workbenchSubtitle">{{ workbenchSubtitle }}</p>
                 </div>
@@ -389,23 +358,35 @@
                 </span>
                 </template>
               </div>
+              <div v-if="workbenchFilterChips.length" data-test="workbench-filter-chips" class="flex basis-full flex-wrap items-center gap-2">
+                <button
+                  v-for="chip in workbenchFilterChips"
+                  :key="chip.axis"
+                  type="button"
+                  :data-test="`workbench-filter-chip-${chip.axis}`"
+                  class="inline-flex min-h-8 max-w-full items-center gap-1 rounded-full bg-primary-50 px-2.5 py-1 text-xs font-medium text-primary-700 hover:bg-primary-100 dark:bg-primary-900/30 dark:text-primary-300"
+                  @click="clearWorkbenchFilterChip(chip.axis)"
+                >
+                  <span class="truncate">{{ chip.label }}: {{ chip.value }}</span>
+                  <Icon name="x" size="xs" class="shrink-0" aria-hidden="true" />
+                </button>
+              </div>
             </header>
         <AccountBulkActionsBar
-          v-if="embedded || selIds.length > 0 || hasEffectiveFilters"
+          v-if="selIds.length > 0"
           :selected-ids="selIds"
           :selected-batch-count="selectedBatchCount"
-          :filtered-count="pagination.total"
-          :has-active-filters="hasEffectiveFilters"
+          :filtered-count="filteredAccountTotal"
           :hidden-selected-count="hiddenSelectedCount"
           :all-page-selected="allVisibleSelected"
           :page-selected-count="visibleSelectedCount"
+          :current-page-count="currentPageAccountCount"
           :busy="loading || pageBatchLoading || bulkActionInProgress"
           @delete="handleBulkDelete"
           @reset-status="handleBulkResetStatus"
           @refresh-token="handleBulkRefreshToken"
           @probe-upstream-billing="handleBulkProbeUpstreamBilling"
           @edit-selected="openBulkEditSelected"
-          @edit-filtered="openBulkEditFiltered"
           @clear="clearSelection"
           @toggle-page="togglePageSelection"
           @toggle-schedulable="handleBulkToggleSchedulable"
@@ -414,8 +395,8 @@
           ref="accountTableRef"
           class="account-workbench-table flex min-h-0 flex-1 flex-col overflow-hidden"
           :class="[
-            { 'is-embedded': embedded, 'is-compact': embedded && workbenchDensity === 'compact', 'is-finance-first': embedded && workbenchModuleOrder === 'finance' },
-            embedded ? `workbench-view-${workbenchView}` : ''
+            { 'is-embedded': embedded, 'is-compact': embedded && workbenchDensity === 'compact' },
+            embedded && workbenchView ? `workbench-view-${workbenchView}` : ''
           ]"
         >
         <DataTable
@@ -435,7 +416,7 @@
           :overscan="5"
           :virtualize-threshold="50"
           :mobile-column-keys="embedded
-            ? ['select', 'name', 'status', 'usage', 'actions']
+            ? embeddedMobileColumnKeys
             : ['select', 'uploader', 'usage', 'pool_record', 'status']"
         >
           <template #header-select>
@@ -483,7 +464,7 @@
               </span>
             </button>
             <div
-              v-else
+              v-else-if="!embedded || isWorkbenchModuleEnabled('identity')"
               data-test="account-workbench-identity"
               :data-account-id="embedded ? row.id : undefined"
               class="flex min-w-0 flex-col"
@@ -493,7 +474,7 @@
                 v-if="embedded"
                 type="button"
                 data-test="account-workbench-card"
-                class="min-h-11 w-full max-w-[220px] truncate text-left font-semibold text-gray-900 hover:text-primary-600 dark:text-white dark:hover:text-primary-400"
+                class="min-h-11 w-full min-w-0 truncate text-left font-semibold text-gray-900 hover:text-primary-600 dark:text-white dark:hover:text-primary-400"
                 :title="value"
                 @click="emit('trace-account', row.id)"
               >
@@ -518,12 +499,12 @@
               </HelpTooltip>
               <span v-else class="font-medium text-gray-900 dark:text-white">{{ value }}</span>
               <span
-                class="max-w-[220px] truncate text-xs text-gray-500 dark:text-gray-400"
+                class="min-w-0 truncate text-xs text-gray-500 dark:text-gray-400"
                 :title="accountIdentitySubtitle(row)"
               >
                 {{ accountIdentitySubtitle(row) }}
               </span>
-              <div v-if="embedded" class="mt-2 flex max-w-[220px] flex-wrap items-center gap-1">
+              <div v-if="embedded" class="mt-2 flex min-w-0 flex-wrap items-center gap-1">
                 <PlatformTypeBadge :platform="row.platform" :type="row.type"
                   :auth-mode="getOpenAIAuthMode(row)"
                   :plan-type="getAccountPlanType(row)"
@@ -610,7 +591,7 @@
                 {{ t('admin.accounts.status.notChecked') }}
               </span>
             </div>
-            <div v-else-if="embedded" data-test="account-workbench-runtime" class="flex min-w-0 flex-col gap-2">
+            <div v-else-if="embedded && isWorkbenchModuleEnabled('runtime')" data-test="account-workbench-runtime" class="flex min-w-0 flex-col gap-2">
               <AccountStatusIndicator :account="row" @show-temp-unsched="handleShowTempUnsched" />
               <div class="flex flex-wrap items-center gap-3">
                 <button
@@ -660,13 +641,13 @@
           </template>
           <template #cell-usage="{ row }">
             <div
-              v-if="!isImportBatchRow(row)"
+              v-if="!isImportBatchRow(row) && (!embedded || hasWorkbenchCompositeModules)"
               data-test="account-workbench-usage"
               :class="embedded ? 'w-full min-w-0' : 'account-usage-card'"
             >
               <div :class="embedded ? 'account-usage-finance' : ''">
-                <div class="min-w-0">
-                  <div v-if="embedded && workbenchView !== 'finance'" class="mb-2 flex items-center gap-1 text-xs font-semibold text-gray-500 dark:text-gray-400">
+                <div v-if="!embedded || isWorkbenchModuleEnabled('usage')" class="min-w-0" :style="embedded ? workbenchModuleStyle('usage') : undefined">
+                  <div v-if="embedded" class="mb-2 flex items-center gap-1 text-xs font-semibold text-gray-500 dark:text-gray-400">
                     <span>{{ t('admin.accounts.columns.usageWindows') }}</span>
                     <HelpTooltip :content="t('admin.accounts.usageWindowsHint')" width-class="w-72" />
                   </div>
@@ -688,10 +669,11 @@
                 </div>
 
                 <button
-                  v-if="embedded && workbenchView !== 'runtime'"
+                  v-if="embedded && isWorkbenchModuleEnabled('finance')"
                   type="button"
                   data-test="account-workbench-finance"
                   class="account-finance-summary min-h-11 min-w-0 text-left"
+                  :style="workbenchModuleStyle('finance')"
                   :title="t('admin.sharedPool.actions.poolRecord')"
                   @click="emit('pool-record', row)"
                 >
@@ -759,19 +741,23 @@
                     </span>
                   </div>
                 </button>
-              </div>
-              <div
-                v-if="embedded && showWorkbenchSecondary"
-                data-test="account-workbench-secondary"
-                class="mt-3 flex min-w-0 flex-wrap items-center gap-x-4 gap-y-2 border-t border-gray-200 pt-3 text-[11px] text-gray-500 dark:border-dark-700 dark:text-gray-400"
-              >
-                <span class="min-w-0 truncate" :title="accountUploader(row)">
-                  {{ t('admin.sharedPool.columns.uploader') }}: {{ accountUploader(row) }}
-                </span>
-                <span v-if="importBatchID(row)" class="min-w-0 truncate" :title="importBatchID(row)">
-                  {{ t('admin.accounts.importBatchGroup') }}: {{ importBatchID(row) }}
-                </span>
-                <AccountGroupsCell v-if="!authStore.isSimpleMode" :groups="row.groups" :max-display="2" />
+                <div
+                  v-if="embedded && isWorkbenchModuleEnabled('source')"
+                  data-test="account-workbench-secondary"
+                  class="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-2 border-t border-gray-200 pt-3 text-[11px] text-gray-500 dark:border-dark-700 dark:text-gray-400"
+                  :style="workbenchModuleStyle('source')"
+                >
+                  <span class="min-w-0 truncate" :title="accountUploader(row)">
+                    {{ t('admin.sharedPool.columns.uploader') }}: {{ accountUploader(row) }}
+                  </span>
+                  <span v-if="importBatchID(row)" class="min-w-0 truncate" :title="importBatchID(row)">
+                    {{ t('admin.accounts.importBatchGroup') }}: {{ importBatchID(row) }}
+                  </span>
+                  <AccountGroupsCell v-if="!authStore.isSimpleMode" :groups="row.groups" :max-display="2" />
+                  <span class="min-w-0 truncate" :title="row.proxy?.name || ''">
+                    {{ t('admin.accounts.columns.proxy') }}: {{ row.proxy?.name || '-' }}
+                  </span>
+                </div>
               </div>
             </div>
           </template>
@@ -902,7 +888,7 @@
               <Icon :name="expandedImportBatches.has(row.batchID) ? 'chevronDown' : 'chevronRight'" size="sm" />
               {{ expandedImportBatches.has(row.batchID) ? t('admin.accounts.collapseImportBatch') : t('admin.accounts.expandImportBatch') }}
             </button>
-            <div v-else data-test="account-workbench-actions" class="flex items-center gap-1">
+            <div v-else-if="!embedded || isWorkbenchModuleEnabled('actions')" data-test="account-workbench-actions" class="flex items-center gap-1">
               <button @click="handleEdit(row)" class="flex min-h-11 min-w-11 flex-col items-center justify-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-primary-600 dark:hover:bg-dark-700 dark:hover:text-primary-400">
                 <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10" /></svg>
                 <span class="text-xs">{{ t('common.edit') }}</span>
@@ -936,6 +922,36 @@
     >
       <div class="space-y-6">
         <section>
+          <h4 class="dialog-section-title">{{ t('admin.accounts.workbenchOperations') }}</h4>
+          <div class="dialog-action-grid">
+            <button class="dialog-action-button" :disabled="loading" @click="handleManualRefresh(); showAccountToolsDialog = false">
+              <Icon name="refresh" size="md" :class="loading ? 'animate-spin text-primary-600' : 'text-primary-600'" />
+              {{ t('common.refresh') }}
+            </button>
+            <button class="dialog-action-button" @click="openApprovalCenter">
+              <Icon name="shield" size="md" class="text-amber-600" />
+              {{ t('admin.sharedPool.approval.title') }}
+              <span v-if="pendingApprovalCount" class="ml-auto rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-700 dark:bg-amber-900/40 dark:text-amber-300">{{ pendingApprovalCount }}</span>
+            </button>
+            <button class="dialog-action-button" @click="setAutoRefreshEnabled(!autoRefreshEnabled)">
+              <Icon name="refresh" size="md" :class="autoRefreshEnabled ? 'animate-spin text-emerald-600' : 'text-gray-500'" />
+              {{ autoRefreshEnabled ? t('admin.accounts.autoRefreshCountdown', { seconds: autoRefreshCountdown }) : t('admin.accounts.enableAutoRefresh') }}
+              <Icon v-if="autoRefreshEnabled" name="check" size="sm" class="ml-auto text-primary-500" />
+            </button>
+          </div>
+          <div v-if="autoRefreshEnabled" class="mt-2 flex flex-wrap gap-2">
+            <button
+              v-for="sec in autoRefreshIntervals"
+              :key="sec"
+              type="button"
+              :class="['display-choice px-2 py-1 text-xs', autoRefreshIntervalSeconds === sec ? 'display-choice-active' : '']"
+              @click="setAutoRefreshInterval(sec)"
+            >
+              {{ autoRefreshIntervalLabel(sec) }}
+            </button>
+          </div>
+        </section>
+        <section>
           <h4 class="dialog-section-title">{{ t('admin.accounts.dataActions') }}</h4>
           <div class="dialog-action-grid">
             <button class="dialog-action-button" @click="openSyncFromCrs"><Icon name="sync" size="md" class="text-blue-600" />{{ t('admin.accounts.syncFromCrs') }}</button>
@@ -958,29 +974,39 @@
           <h4 class="dialog-section-title">{{ t('admin.accounts.display.title') }}</h4>
           <div>
             <p class="mb-2 text-sm font-medium text-gray-700 dark:text-gray-200">{{ t('admin.accounts.display.view') }}</p>
-            <div class="grid grid-cols-1 gap-2 sm:grid-cols-3">
+            <div class="grid grid-cols-2 gap-2 sm:grid-cols-4">
               <button v-for="view in workbenchViews" :key="view" type="button" :class="['display-choice', workbenchView === view ? 'display-choice-active' : '']" @click="setWorkbenchView(view)">
                 {{ t(`admin.accounts.display.${view}`) }}
               </button>
             </div>
           </div>
-          <div class="grid gap-4 sm:grid-cols-2">
-            <label class="display-setting-row">
-              <span>{{ t('admin.accounts.display.secondary') }}</span>
-              <input v-model="showWorkbenchSecondary" type="checkbox" class="h-5 w-5 rounded border-gray-300 text-primary-600 focus:ring-primary-500" @change="saveWorkbenchDisplay" />
-            </label>
+          <div class="space-y-2">
+            <p class="text-sm font-medium text-gray-700 dark:text-gray-200">{{ t('admin.accounts.display.modules') }}</p>
+            <div v-for="module in workbenchModuleOrder" :key="module" :data-test="`display-module-${module}`" class="display-module-row">
+              <label class="flex min-h-11 min-w-0 flex-1 items-center gap-3">
+                <input
+                  type="checkbox"
+                  class="h-5 w-5 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                  :checked="isWorkbenchModuleEnabled(module)"
+                  :disabled="isWorkbenchModuleLocked(module)"
+                  @change="toggleWorkbenchModule(module)"
+                />
+                <span class="truncate">{{ t(`admin.accounts.display.module.${module}`) }}</span>
+              </label>
+              <button type="button" data-test="display-module-up" class="display-module-move" :disabled="!canMoveWorkbenchModule(module, -1)" :aria-label="t('admin.accounts.display.moveUp')" @click="moveWorkbenchModule(module, -1)">
+                <Icon name="arrowUp" size="sm" />
+              </button>
+              <button type="button" data-test="display-module-down" class="display-module-move" :disabled="!canMoveWorkbenchModule(module, 1)" :aria-label="t('admin.accounts.display.moveDown')" @click="moveWorkbenchModule(module, 1)">
+                <Icon name="arrowDown" size="sm" />
+              </button>
+            </div>
+          </div>
+          <div>
             <label class="display-setting-row">
               <span>{{ t('admin.accounts.display.density') }}</span>
               <select v-model="workbenchDensity" class="input min-h-11 w-36" @change="saveWorkbenchDisplay">
                 <option value="comfortable">{{ t('admin.accounts.display.comfortable') }}</option>
                 <option value="compact">{{ t('admin.accounts.display.compact') }}</option>
-              </select>
-            </label>
-            <label class="display-setting-row sm:col-span-2">
-              <span>{{ t('admin.accounts.display.order') }}</span>
-              <select v-model="workbenchModuleOrder" class="input min-h-11 w-44" @change="saveWorkbenchDisplay">
-                <option value="usage">{{ t('admin.accounts.display.usageFirst') }}</option>
-                <option value="finance">{{ t('admin.accounts.display.financeFirst') }}</option>
               </select>
             </label>
           </div>
@@ -1353,6 +1379,7 @@ import type { AccountBatchStatusSummary, AccountImportBatchSummary, AccountListF
 import type { PoolApproval, PoolApprovalBusinessChange, PoolApprovalBusinessSummary, PoolApprovalScope, PoolApprovalStatus, PoolCredentialReveal, SharedPoolAccountCost } from '@/api/admin/sharedPool'
 
 type AccountWorkbenchScope = 'all' | 'standalone' | 'uploader' | 'batch'
+type WorkbenchAxis = 'source' | 'usage' | 'type'
 type WorkbenchUsageStatus = NonNullable<AccountListFilters['usage_status']>
 type AccountWorkbenchContext = {
   scope: AccountWorkbenchScope
@@ -1415,6 +1442,8 @@ const selectedWorkbenchUploaderID = ref<number | string>(
   props.initialWorkbenchContext.uploader_user_id ?? props.initialUploaderUserId
 )
 const workbenchBatches = ref<AccountImportBatchSummary[]>([])
+const workbenchAxes: WorkbenchAxis[] = ['source', 'usage', 'type']
+const activeWorkbenchAxis = ref<WorkbenchAxis>('source')
 const workbenchNavigatorSearch = ref('')
 const expandedWorkbenchUploaders = ref(new Set<string>(
   selectedWorkbenchUploaderID.value === '' ? [] : [String(selectedWorkbenchUploaderID.value)]
@@ -1681,15 +1710,27 @@ const approvalBusinessChangeValue = (change: PoolApprovalBusinessChange, side: '
 const approvalBusinessChangeImpact = (change: PoolApprovalBusinessChange) => t(`admin.sharedPool.approval.effects.${change.impact}`)
 
 const showAccountToolsDialog = ref(false)
-type WorkbenchView = 'runtime' | 'finance' | 'full'
+type WorkbenchView = 'runtime' | 'usage' | 'finance' | 'full'
 type WorkbenchDensity = 'comfortable' | 'compact'
-type WorkbenchModuleOrder = 'usage' | 'finance'
+type WorkbenchModule = 'identity' | 'runtime' | 'usage' | 'finance' | 'source' | 'actions'
 const WORKBENCH_DISPLAY_STORAGE_KEY = 'account-workbench-display-v1'
-const workbenchViews: WorkbenchView[] = ['runtime', 'finance', 'full']
-const workbenchView = ref<WorkbenchView>('runtime')
+const workbenchViews: WorkbenchView[] = ['runtime', 'usage', 'finance', 'full']
+const WORKBENCH_DEFAULT_MODULE_ORDER: WorkbenchModule[] = ['identity', 'runtime', 'usage', 'finance', 'source', 'actions']
+const WORKBENCH_LOCKED_MODULES = new Set<WorkbenchModule>(['identity', 'actions'])
+const WORKBENCH_VIEW_MODULES: Record<WorkbenchView, WorkbenchModule[]> = {
+  runtime: ['identity', 'runtime', 'actions'],
+  usage: ['identity', 'runtime', 'usage', 'actions'],
+  finance: ['identity', 'runtime', 'finance', 'actions'],
+  full: [...WORKBENCH_DEFAULT_MODULE_ORDER]
+}
+const workbenchView = ref<WorkbenchView | ''>('runtime')
 const workbenchDensity = ref<WorkbenchDensity>('compact')
-const workbenchModuleOrder = ref<WorkbenchModuleOrder>('usage')
-const showWorkbenchSecondary = ref(false)
+const workbenchModuleOrder = ref<WorkbenchModule[]>([...WORKBENCH_DEFAULT_MODULE_ORDER])
+const workbenchEnabledModules = ref<WorkbenchModule[]>([...WORKBENCH_VIEW_MODULES.runtime])
+const isWorkbenchModuleEnabled = (module: WorkbenchModule) => workbenchEnabledModules.value.includes(module)
+const isWorkbenchModuleLocked = (module: WorkbenchModule) => WORKBENCH_LOCKED_MODULES.has(module)
+const hasWorkbenchCompositeModules = computed(() => ['usage', 'finance', 'source'].some(module => isWorkbenchModuleEnabled(module as WorkbenchModule)))
+const workbenchModuleStyle = (module: WorkbenchModule) => ({ order: workbenchModuleOrder.value.indexOf(module) })
 
 const saveWorkbenchDisplay = () => {
   try {
@@ -1697,7 +1738,7 @@ const saveWorkbenchDisplay = () => {
       view: workbenchView.value,
       density: workbenchDensity.value,
       moduleOrder: workbenchModuleOrder.value,
-      showSecondary: showWorkbenchSecondary.value
+      enabledModules: workbenchEnabledModules.value
     }))
   } catch (error) {
     console.error('Failed to save account workbench display:', error)
@@ -1708,11 +1749,22 @@ const loadWorkbenchDisplay = () => {
   try {
     const saved = localStorage.getItem(WORKBENCH_DISPLAY_STORAGE_KEY)
     if (!saved) return
-    const value = JSON.parse(saved) as { view?: string; density?: string; moduleOrder?: string; showSecondary?: boolean }
+    const value = JSON.parse(saved) as { view?: string; density?: string; moduleOrder?: string | string[]; enabledModules?: string[]; showSecondary?: boolean }
     if (workbenchViews.includes(value.view as WorkbenchView)) workbenchView.value = value.view as WorkbenchView
     if (value.density === 'comfortable' || value.density === 'compact') workbenchDensity.value = value.density
-    if (value.moduleOrder === 'usage' || value.moduleOrder === 'finance') workbenchModuleOrder.value = value.moduleOrder
-    if (typeof value.showSecondary === 'boolean') showWorkbenchSecondary.value = value.showSecondary
+    if (Array.isArray(value.moduleOrder)) {
+      const savedOrder = value.moduleOrder.filter((module): module is WorkbenchModule => WORKBENCH_DEFAULT_MODULE_ORDER.includes(module as WorkbenchModule))
+      workbenchModuleOrder.value = [...savedOrder, ...WORKBENCH_DEFAULT_MODULE_ORDER.filter(module => !savedOrder.includes(module))]
+    } else if (value.moduleOrder === 'finance') {
+      workbenchModuleOrder.value = ['identity', 'runtime', 'finance', 'usage', 'source', 'actions']
+    }
+    if (Array.isArray(value.enabledModules)) {
+      const enabled = value.enabledModules.filter((module): module is WorkbenchModule => WORKBENCH_DEFAULT_MODULE_ORDER.includes(module as WorkbenchModule))
+      workbenchEnabledModules.value = [...new Set([...enabled, ...WORKBENCH_LOCKED_MODULES])]
+    } else if (workbenchView.value) {
+      workbenchEnabledModules.value = [...WORKBENCH_VIEW_MODULES[workbenchView.value]]
+      if (value.showSecondary) workbenchEnabledModules.value.push('source')
+    }
   } catch (error) {
     console.error('Failed to load account workbench display:', error)
   }
@@ -1720,14 +1772,44 @@ const loadWorkbenchDisplay = () => {
 
 const setWorkbenchView = (view: WorkbenchView) => {
   workbenchView.value = view
+  workbenchEnabledModules.value = [...WORKBENCH_VIEW_MODULES[view]]
+  saveWorkbenchDisplay()
+  if (isWorkbenchModuleEnabled('usage')) void refreshTodayStatsBatch()
+}
+
+const toggleWorkbenchModule = (module: WorkbenchModule) => {
+  if (isWorkbenchModuleLocked(module)) return
+  workbenchEnabledModules.value = isWorkbenchModuleEnabled(module)
+    ? workbenchEnabledModules.value.filter(item => item !== module)
+    : [...workbenchEnabledModules.value, module]
+  workbenchView.value = ''
+  saveWorkbenchDisplay()
+  if (module === 'usage' && isWorkbenchModuleEnabled('usage')) void refreshTodayStatsBatch()
+}
+
+const canMoveWorkbenchModule = (module: WorkbenchModule, direction: -1 | 1) => {
+  if (isWorkbenchModuleLocked(module)) return false
+  const target = workbenchModuleOrder.value[workbenchModuleOrder.value.indexOf(module) + direction]
+  return Boolean(target && !isWorkbenchModuleLocked(target))
+}
+
+const moveWorkbenchModule = (module: WorkbenchModule, direction: -1 | 1) => {
+  if (!canMoveWorkbenchModule(module, direction)) return
+  const from = workbenchModuleOrder.value.indexOf(module)
+  const to = from + direction
+  if (from < 0 || to < 0 || to >= workbenchModuleOrder.value.length) return
+  const next = [...workbenchModuleOrder.value]
+  ;[next[from], next[to]] = [next[to]!, next[from]!]
+  workbenchModuleOrder.value = next
+  workbenchView.value = ''
   saveWorkbenchDisplay()
 }
 
 const resetWorkbenchDisplay = () => {
   workbenchView.value = 'runtime'
   workbenchDensity.value = 'compact'
-  workbenchModuleOrder.value = 'usage'
-  showWorkbenchSecondary.value = false
+  workbenchModuleOrder.value = [...WORKBENCH_DEFAULT_MODULE_ORDER]
+  workbenchEnabledModules.value = [...WORKBENCH_VIEW_MODULES.runtime]
   saveWorkbenchDisplay()
 }
 const hiddenColumns = reactive<Set<string>>(new Set())
@@ -1781,8 +1863,6 @@ const loadInitialAccountSortState = (): AccountSortState => {
 const sortState = reactive<AccountSortState>(loadInitialAccountSortState())
 
 // Auto refresh settings
-const showAutoRefreshDropdown = ref(false)
-const autoRefreshDropdownRef = ref<HTMLElement | null>(null)
 const AUTO_REFRESH_STORAGE_KEY = 'account-auto-refresh'
 const autoRefreshIntervals = [5, 10, 15, 30] as const
 const autoRefreshEnabled = ref(false)
@@ -1809,6 +1889,11 @@ const buildDefaultTodayStats = (): WindowStats => ({
 })
 
 const refreshTodayStatsBatch = async () => {
+  if (embedded && !isWorkbenchModuleEnabled('usage')) {
+    todayStatsLoading.value = false
+    todayStatsError.value = null
+    return
+  }
   // Why this checks both columns:
   // - today_stats column shows dedicated today's metrics.
   // - usage column also embeds today's stats for Key/Bedrock rows.
@@ -2096,10 +2181,12 @@ if (embedded) {
 }
 
 const accounts = ref<Account[]>([])
-const visibleResultAccountCount = computed(() => embedded ? pagination.total : accountListRows.value.reduce(
-  (total, row) => total + (row.kind === 'account' ? 1 : row.batch.matched_count),
-  0
+const nonEmbeddedFilteredAccountTotal = ref(0)
+const filteredAccountTotal = computed(() => Math.max(
+  embedded ? workbenchFacetSummary.value.total : nonEmbeddedFilteredAccountTotal.value,
+  currentPageAccountCount.value
 ))
+const visibleResultAccountCount = filteredAccountTotal
 const visibleResultBatchCount = computed(() => accountListRows.value.filter(row => row.kind === 'import_batch').length)
 const accountUploader = (account: Account): string => account.uploader_username || account.uploader_email || '-'
 const importBatchID = (account: Account): string => {
@@ -2326,6 +2413,7 @@ watch(selectedWorkbenchUsageStatus, status => {
   if (workbenchAttentionUsageStatuses.includes(status)) workbenchAttentionExpanded.value = true
 }, { immediate: true })
 const workbenchUsageStatusLabel = (status: WorkbenchUsageStatus) => t(`admin.accounts.workbenchUsageStatus.${status}`)
+const workbenchAxisLabel = (axis: WorkbenchAxis) => t(`admin.accounts.workbench${axis[0]!.toUpperCase()}${axis.slice(1)}Axis`)
 const workbenchUsageStatusCount = (status: WorkbenchUsageStatus) =>
   workbenchFacetSummary.value.usage_status_counts?.[status] ?? (status === 'all' ? workbenchFacetSummary.value.total : 0)
 const workbenchAccountTypeLabel = (accountType: string) => {
@@ -2345,6 +2433,11 @@ const workbenchTypeOptions = computed(() => {
   return [{ value: '', count: total, label: t('admin.accounts.allTypes') }, ...entries]
 })
 const workbenchUploaderInitial = (label: string) => label.trim().charAt(0).toLocaleUpperCase() || '?'
+const workbenchUploaderStatusLabel = (status: string) => status === 'active'
+  ? t('admin.accounts.status.active')
+  : status
+    ? t('admin.accounts.workbenchUploaderDisabled')
+    : t('common.unknown')
 const workbenchUploaderAttentionCount = (group: WorkbenchUploaderGroup) => Math.max(0, group.count - group.status.normal)
 const isWorkbenchUploaderExpanded = (group: WorkbenchUploaderGroup) =>
   expandedWorkbenchUploaders.value.has(String(group.id))
@@ -2365,6 +2458,24 @@ const selectedWorkbenchBatch = computed(() =>
 const selectedWorkbenchUploader = computed(() =>
   workbenchUploaderGroups.value.find(group => String(group.id) === String(selectedWorkbenchUploaderID.value))
 )
+const workbenchFilterChips = computed<Array<{ axis: WorkbenchAxis; label: string; value: string }>>(() => {
+  const chips: Array<{ axis: WorkbenchAxis; label: string; value: string }> = []
+  if (workbenchScope.value !== 'all') {
+    const source = workbenchScope.value === 'standalone'
+      ? t('admin.accounts.standaloneImport')
+      : workbenchScope.value === 'uploader'
+        ? selectedWorkbenchUploader.value?.label || String(selectedWorkbenchUploaderID.value)
+        : selectedWorkbenchBatch.value?.names.join('、') || selectedWorkbenchBatchID.value
+    chips.push({ axis: 'source', label: workbenchAxisLabel('source'), value: source })
+  }
+  if (selectedWorkbenchUsageStatus.value !== 'all') {
+    chips.push({ axis: 'usage', label: workbenchAxisLabel('usage'), value: workbenchUsageStatusLabel(selectedWorkbenchUsageStatus.value) })
+  }
+  if (params.type) {
+    chips.push({ axis: 'type', label: workbenchAxisLabel('type'), value: workbenchAccountTypeLabel(String(params.type)) })
+  }
+  return chips
+})
 const workbenchTitle = computed(() => {
   if (workbenchScope.value === 'standalone') return t('admin.accounts.standaloneImport')
   if (workbenchScope.value === 'uploader') return selectedWorkbenchUploader.value?.label || t('admin.sharedPool.ledger.allUploaders')
@@ -2378,7 +2489,7 @@ const workbenchSubtitle = computed(() => {
     return `${uploader} · ${formatDateTime(batch.created_at)} · ${batch.id}`
   }
   return t('admin.accounts.resultSummary', {
-    accounts: pagination.total,
+    accounts: filteredAccountTotal.value,
     batches: workbenchScope.value === 'all' ? workbenchBatchTotal.value : 0
   })
 })
@@ -2622,7 +2733,7 @@ const selectWorkbenchUploader = (group: WorkbenchUploaderGroup) => {
   workbenchScope.value = 'uploader'
   selectedWorkbenchBatchID.value = ''
   selectedWorkbenchUploaderID.value = group.id
-  expandedWorkbenchUploaders.value = new Set(expandedWorkbenchUploaders.value).add(String(group.id))
+  expandedWorkbenchUploaders.value = new Set([String(group.id)])
   clearSelection()
   pagination.page = 1
   closeMobileWorkbenchNavigator()
@@ -2633,12 +2744,17 @@ const selectWorkbenchBatch = (batch: AccountImportBatchSummary) => {
   workbenchScope.value = 'batch'
   selectedWorkbenchBatchID.value = batch.id
   selectedWorkbenchUploaderID.value = batch.uploader_user_id ?? 'unassigned'
-  expandedWorkbenchUploaders.value = new Set(expandedWorkbenchUploaders.value).add(String(selectedWorkbenchUploaderID.value))
+  expandedWorkbenchUploaders.value = new Set([String(selectedWorkbenchUploaderID.value)])
   clearSelection()
   pagination.page = 1
   closeMobileWorkbenchNavigator()
   emitWorkbenchContext()
   void reload()
+}
+const clearWorkbenchFilterChip = (axis: WorkbenchAxis) => {
+  if (axis === 'source') selectWorkbenchScope('all')
+  else if (axis === 'usage') selectWorkbenchUsageStatus('all')
+  else selectWorkbenchType('')
 }
 const toggleImportBatch = async (id: string) => {
   const next = new Set(expandedImportBatches.value)
@@ -2706,6 +2822,10 @@ const visibleSelectedCount = computed(() => {
   }
   return visibleIDs.size
 })
+const currentPageAccountCount = computed(() => accountListRows.value.reduce(
+  (count, row) => count + (row.kind === 'account' ? 1 : row.batch.matched_count),
+  0
+))
 const someVisibleSelected = computed(() => visibleSelectedCount.value > 0 && !allVisibleSelected.value)
 const hiddenSelectedCount = computed(() => selIds.value.length - visibleSelectedCount.value)
 const loadCurrentPageAccounts = async () => {
@@ -2774,6 +2894,42 @@ const resetAutoRefreshCache = () => {
 }
 
 const isFirstLoad = ref(true)
+let filteredAccountTotalRevision = 0
+let filteredSummaryKey = ''
+let filteredSummaryValue: AccountSelectionSummary | null = null
+let filteredSummaryPromise: Promise<AccountSelectionSummary> | null = null
+
+const getFilteredAccountSummary = (filters: ReturnType<typeof buildBulkEditFilterSnapshot>) => {
+  const key = JSON.stringify(filters)
+  if (key === filteredSummaryKey && filteredSummaryValue) return Promise.resolve(filteredSummaryValue)
+  if (key === filteredSummaryKey && filteredSummaryPromise) return filteredSummaryPromise
+  const { uploader_unassigned: uploaderUnassigned, ...summaryFilters } = filters
+  filteredSummaryKey = key
+  filteredSummaryValue = null
+  const request = adminAPI.accounts.getSelectionSummary({
+    ...summaryFilters,
+    uploader_user_id: uploaderUnassigned ? 'unassigned' : filters.uploader_user_id
+  }).then(summary => {
+    if (filteredSummaryKey === key) filteredSummaryValue = summary
+    return summary
+  }).finally(() => {
+    if (filteredSummaryPromise === request) filteredSummaryPromise = null
+  })
+  filteredSummaryPromise = request
+  return request
+}
+
+const loadFilteredAccountTotal = async () => {
+  if (embedded) return
+  const revision = ++filteredAccountTotalRevision
+  const filters = buildBulkEditFilterSnapshot()
+  try {
+    const summary = await getFilteredAccountSummary(filters)
+    if (revision === filteredAccountTotalRevision) nonEmbeddedFilteredAccountTotal.value = summary.total
+  } catch (error) {
+    console.error('Failed to load filtered account total:', error)
+  }
+}
 
 function markUpstreamBillingSortRefresh() {
   if (sortState.sort_by === 'upstream_billing_rate') {
@@ -2791,7 +2947,7 @@ const load = async () => {
   if (isFirstLoad.value) {
     requestParams.lite = '1'
   }
-  await Promise.all([baseLoad(), loadWorkbenchNavigator()])
+  await Promise.all([baseLoad(), loadWorkbenchNavigator(), loadFilteredAccountTotal()])
   if (isFirstLoad.value) {
     isFirstLoad.value = false
     delete requestParams.lite
@@ -2808,7 +2964,8 @@ const reload = async (resetPage = true) => {
   pendingTodayStatsRefresh.value = false
   await Promise.all([
     resetPage ? baseReload() : baseLoad(),
-    loadWorkbenchNavigator()
+    loadWorkbenchNavigator(),
+    loadFilteredAccountTotal()
   ])
   await refreshTodayStatsBatch()
 }
@@ -3088,7 +3245,7 @@ const refreshAccountsIncrementally = async () => {
       }
     }))
 
-    await Promise.all([refreshTodayStatsBatch(), loadWorkbenchNavigator()])
+    await Promise.all([refreshTodayStatsBatch(), loadWorkbenchNavigator(), loadFilteredAccountTotal()])
     emit('refreshed')
   } catch (error) {
     console.error('Auto refresh failed:', error)
@@ -3118,7 +3275,6 @@ const closeAccountToolsDialog = () => {
 }
 
 const openAccountToolsDialog = () => {
-  showAutoRefreshDropdown.value = false
   showAccountToolsDialog.value = true
 }
 
@@ -3176,7 +3332,7 @@ const { pause: pauseAutoRefresh, resume: resumeAutoRefresh } = useIntervalFn(
     if (document.hidden) return
     if (loading.value || autoRefreshFetching.value || pageBatchLoading.value) return
     if (isAnyModalOpen.value) return
-    if (menu.show || showAccountToolsDialog.value || showAutoRefreshDropdown.value) return
+    if (menu.show || showAccountToolsDialog.value) return
     if (inAutoRefreshSilentWindow()) {
       autoRefreshCountdown.value = Math.max(
         0,
@@ -3328,11 +3484,11 @@ function getAntigravityTierClass(row: any): string {
 // All available columns
 const allColumns = computed(() => {
   const c = [
-    { key: 'select', label: '', sortable: false },
-    { key: 'name', label: t('admin.accounts.columns.name'), sortable: true, class: 'min-w-[180px] max-w-[220px]' },
+    { key: 'select', label: '', sortable: false, class: 'account-field-select' },
+    { key: 'name', label: t('admin.accounts.columns.name'), sortable: true, class: 'account-field-name min-w-[180px]' },
     { key: 'id', label: t('admin.accounts.columns.id'), sortable: false },
-    { key: 'status', label: t('admin.accounts.columns.status'), sortable: true, class: 'min-w-[128px]' },
-    { key: 'usage', label: t('admin.accounts.columns.usageWindows'), sortable: false, class: 'min-w-[260px]' },
+    { key: 'status', label: t('admin.accounts.columns.status'), sortable: true, class: 'account-field-status min-w-[128px]' },
+    { key: 'usage', label: t('admin.accounts.columns.usageWindows'), sortable: false, class: 'account-field-usage min-w-[260px]' },
     { key: 'capacity', label: t('admin.accounts.columns.capacity'), sortable: false, class: 'min-w-[100px]' },
     { key: 'schedulable', label: t('admin.accounts.columns.schedulable'), sortable: true, class: 'min-w-[92px]' },
     { key: 'platform_type', label: t('admin.accounts.columns.platformType'), sortable: false }
@@ -3353,7 +3509,7 @@ const allColumns = computed(() => {
     { key: 'created_at', label: t('admin.accounts.columns.createdAt'), sortable: true },
     { key: 'expires_at', label: t('admin.accounts.columns.expiresAt'), sortable: false },
     { key: 'notes', label: t('admin.accounts.columns.notes'), sortable: false },
-    { key: 'actions', label: t('admin.accounts.columns.actions'), sortable: false }
+    { key: 'actions', label: t('admin.accounts.columns.actions'), sortable: false, class: 'account-field-actions' }
   )
   return c
 })
@@ -3365,7 +3521,22 @@ const toggleableColumns = computed(() =>
 // Filtered columns based on visibility
 const cols = computed(() => {
   if (embedded) {
-    return ['select', 'name', 'usage', 'status', 'actions'].flatMap(key => {
+    const moduleByColumn: Record<string, WorkbenchModule> = {
+      name: 'identity',
+      status: 'runtime',
+      actions: 'actions'
+    }
+    const keys = ['name', 'status', 'usage', 'actions']
+      .filter(key => key === 'usage' ? hasWorkbenchCompositeModules.value : isWorkbenchModuleEnabled(moduleByColumn[key]!))
+      .sort((left, right) => {
+        const position = (key: string) => key === 'usage'
+          ? Math.min(...(['usage', 'finance', 'source'] as WorkbenchModule[])
+            .filter(isWorkbenchModuleEnabled)
+            .map(module => workbenchModuleOrder.value.indexOf(module)))
+          : workbenchModuleOrder.value.indexOf(moduleByColumn[key]!)
+        return position(left) - position(right)
+      })
+    return ['select', ...keys].flatMap(key => {
       const column = allColumns.value.find(col => col.key === key)
       return column ? [column] : []
     })
@@ -3374,6 +3545,7 @@ const cols = computed(() => {
     ['select', 'name', 'actions'].includes(col.key) || !hiddenColumns.has(col.key)
   )
 })
+const embeddedMobileColumnKeys = computed(() => cols.value.map(column => column.key))
 
 const handleEdit = (a: Account) => { edAcc.value = a; showEdit.value = true }
 const poolRecordFor = (accountID: number) => props.poolRecords[accountID]
@@ -3550,6 +3722,7 @@ const loadApprovals = async () => {
 }
 
 const openApprovalCenter = () => {
+  closeAccountToolsDialog()
   showApprovalCenter.value = true
   selectedApproval.value = null
   approvalDecisionReason.value = ''
@@ -3990,13 +4163,9 @@ const openBulkEditFiltered = async () => {
   if (bulkActionInProgress.value || !hasEffectiveFilters.value || selIds.value.length > 0) return
   const filters = buildBulkEditFilterSnapshot()
   const filterKey = JSON.stringify(filters)
-  const { uploader_unassigned: uploaderUnassigned, ...summaryFilters } = filters
   bulkActionInProgress.value = true
   try {
-    const summary = await adminAPI.accounts.getSelectionSummary({
-      ...summaryFilters,
-      uploader_user_id: uploaderUnassigned ? 'unassigned' : filters.uploader_user_id
-    })
+    const summary = await getFilteredAccountSummary(filters)
     if (!hasEffectiveFilters.value || selIds.value.length > 0 || JSON.stringify(buildBulkEditFilterSnapshot()) !== filterKey) return
     bulkEditTarget.value = {
       mode: 'filtered',
@@ -4322,14 +4491,6 @@ const proxyExpiryText = (p: AccountProxy): string => {
   return params ? t(key, params) : t(key)
 }
 
-// 点击外部关闭自动刷新选项。
-const handleClickOutside = (event: MouseEvent) => {
-  const target = event.target as HTMLElement
-  if (autoRefreshDropdownRef.value && !autoRefreshDropdownRef.value.contains(target)) {
-    showAutoRefreshDropdown.value = false
-  }
-}
-
 onMounted(async () => {
   workbenchNavigatorMobileMedia = window.matchMedia('(max-width: 1179px)')
   workbenchNavigatorMobileMedia.addEventListener('change', handleWorkbenchNavigatorMediaChange)
@@ -4352,7 +4513,6 @@ onMounted(async () => {
   } catch (error) {
     console.error('Failed to load account uploader options:', error)
   }
-  document.addEventListener('click', handleClickOutside)
   document.addEventListener('keydown', handleWorkbenchNavigatorKeydown)
 
   if (autoRefreshEnabled.value) {
@@ -4366,7 +4526,6 @@ onMounted(async () => {
 onUnmounted(() => {
   if (credentialClearTimer) clearTimeout(credentialClearTimer)
   credentialReveal.value = null
-  document.removeEventListener('click', handleClickOutside)
   document.removeEventListener('keydown', handleWorkbenchNavigatorKeydown)
   workbenchNavigatorMobileMedia?.removeEventListener('change', handleWorkbenchNavigatorMediaChange)
   workbenchNavigatorMobileMedia = null
@@ -4400,6 +4559,14 @@ onUnmounted(() => {
   @apply flex min-h-11 items-center justify-between gap-3 rounded-lg border border-gray-200 px-3 py-2 text-sm font-medium text-gray-700 dark:border-dark-700 dark:text-gray-200;
 }
 
+.display-module-row {
+  @apply flex min-w-0 items-center gap-2 rounded-lg border border-gray-200 px-3 py-1 text-sm font-medium text-gray-700 dark:border-dark-700 dark:text-gray-200;
+}
+
+.display-module-move {
+  @apply inline-flex min-h-11 min-w-11 items-center justify-center rounded-md text-gray-500 hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-30 dark:text-gray-300 dark:hover:bg-dark-700;
+}
+
 .workbench-view-switch {
   @apply inline-flex min-h-11 items-center rounded-lg border border-gray-200 bg-gray-50 p-1 dark:border-dark-700 dark:bg-dark-800;
 }
@@ -4424,7 +4591,7 @@ onUnmounted(() => {
   align-items: flex-start;
   gap: 12px;
   padding: 12px;
-  overflow: hidden;
+  overflow: visible;
   border: 1px solid rgb(226 232 240);
   border-radius: 8px;
   background: rgb(255 255 255);
@@ -4464,20 +4631,40 @@ onUnmounted(() => {
   box-shadow: none;
 }
 
+.account-operation-actions :deep(> button:first-of-type) {
+  display: none;
+}
+
 .workbench-sidebar-header {
   @apply shrink-0 border-b border-gray-200 bg-white/90 p-3 dark:border-dark-700 dark:bg-dark-900/80;
 }
 
+.workbench-axis-tabs {
+  @apply grid grid-cols-3 gap-1 rounded-lg bg-gray-100 p-1 dark:bg-dark-800;
+}
+
+.workbench-axis-tab {
+  @apply min-h-11 min-w-0 rounded-md px-2 text-xs font-medium text-gray-600 hover:text-gray-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 dark:text-gray-300 dark:hover:text-white;
+}
+
+.workbench-axis-tab-active {
+  @apply bg-white text-primary-700 shadow-sm dark:bg-dark-700 dark:text-primary-300;
+}
+
 .workbench-nav-item {
-  @apply relative flex min-h-11 w-full min-w-0 items-center gap-2 rounded-md border-l-[3px] border-transparent px-2.5 py-2 text-left text-sm text-gray-700 transition-colors hover:bg-gray-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary-500 dark:text-gray-200 dark:hover:bg-dark-800;
+  @apply relative flex min-h-11 w-full min-w-0 items-center gap-2 rounded-md px-2.5 py-2 text-left text-sm text-gray-700 transition-colors hover:bg-gray-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary-500 dark:text-gray-200 dark:hover:bg-dark-800;
 }
 
 .workbench-nav-item-active {
-  @apply border-primary-500 bg-primary-50 text-primary-700 dark:border-primary-400 dark:bg-primary-900/20 dark:text-primary-300;
+  @apply bg-primary-50 font-semibold text-primary-700 dark:bg-primary-900/20 dark:text-primary-300;
 }
 
 .workbench-nav-count {
   @apply ml-auto min-w-5 shrink-0 text-right text-xs tabular-nums text-gray-500 dark:text-gray-400;
+}
+
+.workbench-nav-check {
+  @apply shrink-0 text-primary-600 dark:text-primary-300;
 }
 
 .workbench-navigator-list {
@@ -4500,7 +4687,7 @@ onUnmounted(() => {
 
 .workbench-uploader-row,
 .workbench-attention-row {
-  @apply flex min-h-11 min-w-0 items-center rounded-md border-l-[3px] border-transparent text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-dark-800;
+  @apply flex min-h-11 min-w-0 items-center rounded-md text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-dark-800;
 }
 
 .workbench-uploader-main,
@@ -4516,8 +4703,16 @@ onUnmounted(() => {
   @apply h-full w-full object-cover;
 }
 
-.workbench-uploader-disabled {
-  @apply shrink-0 rounded bg-gray-200 px-1.5 py-0.5 text-[11px] font-medium text-gray-600 dark:bg-dark-700 dark:text-gray-300;
+.workbench-uploader-state {
+  @apply shrink-0 rounded px-1.5 py-0.5 text-[11px] font-medium;
+}
+
+.workbench-uploader-state-active {
+  @apply bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300;
+}
+
+.workbench-uploader-state-disabled {
+  @apply bg-gray-200 text-gray-600 dark:bg-dark-700 dark:text-gray-300;
 }
 
 .workbench-uploader-stats {
@@ -4530,15 +4725,15 @@ onUnmounted(() => {
 
 .workbench-uploader-batches,
 .workbench-attention-children {
-  @apply ml-5 border-l border-gray-200 pl-2 dark:border-dark-700;
+  @apply ml-5 pl-2;
 }
 
 .workbench-batch-item-active {
-  @apply border-l-[3px] border-l-primary-500 bg-primary-50/70 text-primary-700 dark:border-l-primary-400 dark:bg-primary-900/20 dark:text-primary-300;
+  @apply bg-primary-50/70 font-semibold text-primary-700 dark:bg-primary-900/20 dark:text-primary-300;
 }
 
 .workbench-batch-main {
-  @apply flex min-h-[60px] w-full min-w-0 items-center gap-2 rounded-md border-l-[3px] border-transparent px-2.5 py-2 text-left text-xs hover:bg-gray-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary-500 dark:hover:bg-dark-800;
+  @apply flex min-h-11 w-full min-w-0 items-center gap-2 rounded-md px-2.5 py-2 text-left text-xs hover:bg-gray-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary-500 dark:hover:bg-dark-800;
 }
 
 .workbench-batch-meta {
@@ -4636,8 +4831,8 @@ onUnmounted(() => {
     left: 50%;
     z-index: 61;
     display: flex;
-    width: min(420px, calc(100vw - 24px));
-    height: min(72dvh, 620px);
+    width: clamp(18rem, 82vw, 56rem);
+    height: auto;
     max-height: calc(100dvh - max(24px, env(safe-area-inset-top) + env(safe-area-inset-bottom)));
     min-height: 0;
     flex-direction: column;
@@ -4675,7 +4870,7 @@ onUnmounted(() => {
 @media (min-width: 1180px) {
   .workbench-layout {
     display: grid;
-    grid-template-columns: 264px minmax(0, 1fr);
+    grid-template-columns: minmax(14rem, 22%) minmax(0, 1fr);
   }
 
   .workbench-sidebar {
@@ -4713,6 +4908,7 @@ onUnmounted(() => {
   display: grid;
   min-width: 0;
   gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr));
 }
 
 .account-finance-summary {
@@ -4721,18 +4917,23 @@ onUnmounted(() => {
   border-top: 1px solid rgb(226 232 240 / 0.9);
 }
 
-.account-workbench-table.is-finance-first .account-finance-summary {
-  order: -1;
-}
-
 .account-workbench-table.is-compact :deep(.table-body tr[data-row-id] td) {
   padding-top: 8px;
   padding-bottom: 8px;
 }
 
 .account-workbench-table.is-compact :deep(.table-body tr[data-row-id]) {
-  margin-top: 4px;
-  margin-bottom: 4px;
+  margin-top: 0;
+  margin-bottom: 0;
+}
+
+.account-workbench-table.is-embedded :deep(.table-wrapper) {
+  overflow-x: clip;
+}
+
+.account-workbench-table.is-embedded :deep(.table-wrapper table) {
+  width: 100%;
+  min-width: 0;
 }
 
 .dark .account-finance-summary {
@@ -4791,12 +4992,14 @@ onUnmounted(() => {
     display: grid;
     width: 100%;
     min-width: 0;
-    margin: 8px 0;
-    overflow: hidden;
-    border: 1px solid rgb(226 232 240 / 0.9);
-    border-radius: 8px;
+    grid-template-columns: minmax(2.75rem, 0.2fr) repeat(auto-fit, minmax(min(100%, 11rem), 1fr));
+    margin: 0;
+    overflow: visible;
+    border: 0;
+    border-bottom: 1px solid rgb(226 232 240 / 0.9);
+    border-radius: 0;
     background: rgb(255 255 255 / 0.96);
-    box-shadow: 0 1px 2px rgb(15 23 42 / 0.05);
+    box-shadow: none;
   }
 
   .account-workbench-table.is-embedded :deep(.table-body tr[data-row-id] td) {
@@ -4806,6 +5009,15 @@ onUnmounted(() => {
     padding: 12px;
     white-space: normal;
     background: transparent;
+  }
+
+  .account-workbench-table.is-embedded :deep(.account-field-select),
+  .account-workbench-table.is-embedded :deep(.account-field-name),
+  .account-workbench-table.is-embedded :deep(.account-field-status),
+  .account-workbench-table.is-embedded :deep(.account-field-usage),
+  .account-workbench-table.is-embedded :deep(.account-field-actions) {
+    min-width: 0;
+    max-width: none;
   }
 
   .account-workbench-table.is-embedded :deep(.table-body tr:not([data-row-id])) {
@@ -4826,73 +5038,17 @@ onUnmounted(() => {
 
 @media (min-width: 768px) and (max-width: 1439px) {
   .account-workbench-table.is-embedded :deep(.table-body tr[data-row-id]) {
-    grid-template-columns: 44px minmax(0, 1fr) minmax(150px, 190px) 104px;
+    grid-template-columns: minmax(2.75rem, 0.2fr) repeat(auto-fit, minmax(min(100%, 10rem), 1fr));
   }
 
-  .account-workbench-table.is-embedded :deep(.table-body tr[data-row-id] td:nth-child(1)) {
-    grid-column: 1;
-    grid-row: 1;
-  }
-
-  .account-workbench-table.is-embedded :deep(.table-body tr[data-row-id] td:nth-child(2)) {
-    grid-column: 2;
-    grid-row: 1;
-  }
-
-  .account-workbench-table.is-embedded :deep(.table-body tr[data-row-id] td:nth-child(3)) {
-    grid-column: 1 / 5;
-    grid-row: 2;
-    border-top: 1px solid rgb(241 245 249);
-  }
-
-  .account-workbench-table.is-embedded :deep(.table-body tr[data-row-id] td:nth-child(4)) {
-    grid-column: 3;
-    grid-row: 1;
-  }
-
-  .account-workbench-table.is-embedded :deep(.table-body tr[data-row-id] td:nth-child(5)) {
-    grid-column: 4;
-    grid-row: 1;
-  }
-
-  .account-usage-finance {
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-    gap: 16px;
-  }
-
-  .account-finance-summary {
-    padding-top: 0;
-    padding-left: 16px;
-    border-top: 0;
-    border-left: 1px solid rgb(226 232 240 / 0.9);
-  }
-
-  .dark .account-workbench-table.is-embedded :deep(.table-body tr[data-row-id] td:nth-child(3)),
-  .dark .account-finance-summary {
-    border-color: rgb(51 65 85 / 0.8);
+  .account-workbench-table.is-embedded :deep(.account-field-usage) {
+    grid-column: span 2;
   }
 }
 
 @media (min-width: 1440px) {
   .account-workbench-table.is-embedded :deep(.table-body tr[data-row-id]) {
-    grid-template-columns: 44px minmax(180px, 210px) minmax(300px, 1fr) minmax(190px, 220px) 104px;
-  }
-
-  .account-usage-finance {
-    grid-template-columns: minmax(0, 1fr) minmax(0, 0.85fr);
-    gap: 16px;
-  }
-
-  .account-finance-summary {
-    padding-top: 0;
-    padding-left: 16px;
-    border-top: 0;
-    border-left: 1px solid rgb(226 232 240 / 0.9);
-  }
-
-  .dark .account-finance-summary {
-    border-top-color: transparent;
-    border-left-color: rgb(51 65 85 / 0.8);
+    grid-template-columns: minmax(2.75rem, 0.15fr) repeat(auto-fit, minmax(min(100%, 12rem), 1fr));
   }
 }
 
@@ -4923,26 +5079,6 @@ onUnmounted(() => {
     gap: 12px;
   }
 
-  .account-workbench-table.is-embedded :deep(.space-y-3 > .rounded-lg > .space-y-3 > *) {
-    order: 3;
-  }
-
-  .account-workbench-table.is-embedded :deep([data-field='select']) {
-    order: 0;
-  }
-
-  .account-workbench-table.is-embedded :deep([data-field='name']) {
-    order: 1;
-  }
-
-  .account-workbench-table.is-embedded :deep([data-field='status']) {
-    order: 2;
-  }
-
-  .account-workbench-table.is-embedded :deep([data-field='usage']) {
-    order: 4;
-  }
-
   .account-workbench-table.is-embedded :deep([data-field='name']),
   .account-workbench-table.is-embedded :deep([data-field='usage']),
   .account-workbench-table.is-embedded :deep([data-field='status']) {
@@ -4964,15 +5100,4 @@ onUnmounted(() => {
   }
 }
 
-.account-workbench-table.workbench-view-runtime .account-usage-finance,
-.account-workbench-table.workbench-view-finance .account-usage-finance {
-  grid-template-columns: minmax(0, 1fr);
-}
-
-@media (min-width: 768px) {
-  .account-workbench-table.workbench-view-finance .account-finance-summary {
-    padding-left: 0;
-    border-left: 0;
-  }
-}
 </style>

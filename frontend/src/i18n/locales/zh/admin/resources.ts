@@ -152,6 +152,7 @@ export default {
       deleteBlockedInUse: '该代理已有账号使用，无法删除',
       accountsTitle: '使用该IP的账号',
       accountsEmpty: '暂无账号使用此代理',
+      migrateAccounts: '前往账号工作台迁移',
       accountsFailed: '获取账号列表失败',
       accountName: '账号名称',
       accountPlatform: '所属平台',

@@ -84,18 +84,37 @@ const OAuthAuthorizationFlowStub = defineComponent({
   `,
 })
 
-function mountModal() {
+const ConfirmDialogStub = defineComponent({
+  name: 'ConfirmDialog',
+  props: { show: Boolean, message: String },
+  emits: ['confirm', 'cancel'],
+  template: `
+    <div v-if="show" data-testid="proxyless-confirm" :data-message="message">
+      <button type="button" data-testid="proxyless-cancel" @click="$emit('cancel')">cancel</button>
+      <button type="button" data-testid="proxyless-continue" @click="$emit('confirm')">continue</button>
+    </div>
+  `,
+})
+
+const ProxySelectorStub = defineComponent({
+  name: 'ProxySelector',
+  props: ['modelValue'],
+  emits: ['update:modelValue'],
+  template: '<select data-testid="proxy-selector" :value="modelValue ?? \'\'" @change="$emit(\'update:modelValue\', $event.target.value ? Number($event.target.value) : null)"><option value="">none</option><option value="7">Proxy 7</option></select>',
+})
+
+function mountModal(props: Record<string, unknown> = {}) {
   return mount(CreateAccountModal, {
-    props: { show: true, proxies: [], groups: [] },
+    props: { show: true, proxies: [{ id: 7, name: 'Proxy 7' }], groups: [], ...props },
     global: {
       stubs: {
         BaseDialog: BaseDialogStub,
         OAuthAuthorizationFlow: OAuthAuthorizationFlowStub,
-        ConfirmDialog: true,
+        ConfirmDialog: ConfirmDialogStub,
         Select: true,
         Icon: true,
         PlatformIcon: true,
-        ProxySelector: true,
+        ProxySelector: ProxySelectorStub,
         ProxyAdBanner: true,
         GroupSelector: true,
         ModelWhitelistSelector: true,
@@ -103,6 +122,11 @@ function mountModal() {
       },
     },
   })
+}
+
+async function continueWithoutProxy(wrapper: ReturnType<typeof mountModal>) {
+  await wrapper.get('[data-testid="proxyless-continue"]').trigger('click')
+  await flushPromises()
 }
 
 async function selectButtonByText(wrapper: ReturnType<typeof mountModal>, text: string) {
@@ -131,6 +155,7 @@ async function submitApiKeyAccount(
   }
   await wrapper.get('form#create-account-form').trigger('submit.prevent')
   await flushPromises()
+  await continueWithoutProxy(wrapper)
   return wrapper
 }
 
@@ -142,6 +167,7 @@ async function openCodexImportStep(toggleClicks = 0) {
   }
   await wrapper.get('form#create-account-form input[type="text"]').setValue('Codex import')
   await wrapper.get('form#create-account-form').trigger('submit.prevent')
+  await continueWithoutProxy(wrapper)
   return wrapper
 }
 
@@ -205,6 +231,7 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
     await selectButtonByText(wrapper, 'OpenAI')
     await wrapper.get('form#create-account-form input[type="text"]').setValue('OpenAI account')
     await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    await continueWithoutProxy(wrapper)
 
     const flow = wrapper.getComponent(OAuthAuthorizationFlowStub)
     expect(flow.props('showManualOption')).toBe(true)
@@ -224,6 +251,7 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
 
     flow.vm.$emit('import-codex-session', JSON.stringify(content))
     await flushPromises()
+    await continueWithoutProxy(wrapper)
 
     expect(importCodexSessionMock).toHaveBeenCalledTimes(1)
   })
@@ -247,6 +275,7 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
     const wrapper = await openCodexImportStep()
     await wrapper.get('[data-testid="import-codex-session"]').trigger('click')
     await flushPromises()
+    await continueWithoutProxy(wrapper)
 
     expect(importCodexSessionMock).toHaveBeenCalledTimes(1)
     expect(importCodexSessionMock.mock.calls[0]?.[0]?.extra?.openai_long_context_billing_enabled).toBeUndefined()
@@ -256,6 +285,7 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
     const wrapper = await openCodexImportStep()
     await wrapper.get('[data-testid="import-codex-pat"]').trigger('click')
     await flushPromises()
+    await continueWithoutProxy(wrapper)
 
     expect(createOpenAICodexPATMock).toHaveBeenCalledTimes(1)
     expect(createOpenAICodexPATMock.mock.calls[0]?.[0]?.extra?.openai_long_context_billing_enabled).toBeUndefined()
@@ -265,6 +295,7 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
     const wrapper = await openCodexImportStep(1)
     await wrapper.get('[data-testid="import-codex-session"]').trigger('click')
     await flushPromises()
+    await continueWithoutProxy(wrapper)
 
     expect(importCodexSessionMock.mock.calls[0]?.[0]?.extra?.openai_long_context_billing_enabled).toBe(true)
   })
@@ -273,6 +304,7 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
     const wrapper = await openCodexImportStep(2)
     await wrapper.get('[data-testid="import-codex-session"]').trigger('click')
     await flushPromises()
+    await continueWithoutProxy(wrapper)
 
     expect(importCodexSessionMock.mock.calls[0]?.[0]?.extra?.openai_long_context_billing_enabled).toBe(false)
   })
@@ -281,6 +313,7 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
     const wrapper = await openCodexImportStep(1)
     await wrapper.get('[data-testid="import-codex-pat"]').trigger('click')
     await flushPromises()
+    await continueWithoutProxy(wrapper)
 
     expect(createOpenAICodexPATMock.mock.calls[0]?.[0]?.extra?.openai_long_context_billing_enabled).toBe(true)
   })
@@ -289,7 +322,34 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
     const wrapper = await openCodexImportStep(2)
     await wrapper.get('[data-testid="import-codex-pat"]').trigger('click')
     await flushPromises()
+    await continueWithoutProxy(wrapper)
 
     expect(createOpenAICodexPATMock.mock.calls[0]?.[0]?.extra?.openai_long_context_billing_enabled).toBe(false)
+  })
+
+  it('confirms once per proxyless action and keeps the form when cancelled', async () => {
+    const wrapper = mountModal()
+    await selectButtonByText(wrapper, 'OpenAI')
+    await selectButtonByText(wrapper, 'API Key')
+    const textInput = wrapper.get('form#create-account-form input[type="text"]')
+    await textInput.setValue('keep this account')
+    await wrapper.get('form#create-account-form input[type="password"]').setValue('test-api-key')
+
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(createAccountMock).not.toHaveBeenCalled()
+
+    await wrapper.get('[data-testid="proxyless-cancel"]').trigger('click')
+    expect((textInput.element as HTMLInputElement).value).toBe('keep this account')
+
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    await flushPromises()
+    await wrapper.get('[data-testid="proxy-selector"]').setValue('7')
+    expect(wrapper.find('[data-testid="proxyless-confirm"]').exists()).toBe(false)
+
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(createAccountMock).toHaveBeenCalledTimes(1)
+    expect(createAccountMock.mock.calls[0]?.[0]?.proxy_id).toBe(7)
   })
 })

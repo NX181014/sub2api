@@ -135,6 +135,7 @@ export default {
       deleteBlockedInUse: 'This proxy is in use and cannot be deleted',
       accountsTitle: 'Accounts using this IP',
       accountsEmpty: 'No accounts are using this proxy',
+      migrateAccounts: 'Migrate in account workbench',
       accountsFailed: 'Failed to load accounts list',
       accountName: 'Account',
       accountPlatform: 'Platform',

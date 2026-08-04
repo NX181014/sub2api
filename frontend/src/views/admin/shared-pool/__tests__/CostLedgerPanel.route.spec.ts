@@ -91,4 +91,44 @@ describe('CostLedgerPanel route state', () => {
 
     expect(listLedgerEntries).toHaveBeenLastCalledWith(expect.objectContaining({ account_id: 9, page: 3 }))
   })
+
+  it('loads uploader account details in a dialog', async () => {
+    listCostUploaderSummaries.mockResolvedValueOnce({
+      items: [{ uploader_user_id: 3, uploader_username: 'Uploader A', account_count: 1, net_cost_minor: 1000, recognized_cost_minor: 400, remaining_cost_minor: 600 }],
+      total: 1,
+      page: 1,
+      page_size: 20,
+      pages: 1
+    })
+    listCostSummaries.mockResolvedValueOnce({ items: [], total: 0, page: 1, page_size: 10, pages: 0 })
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [{ path: '/', component: { template: '<div />' } }]
+    })
+    await router.push('/?ledger_view=summary')
+    await router.isReady()
+    const wrapper = mount(CostLedgerPanel, {
+      global: {
+        plugins: [router],
+        stubs: {
+          BaseDialog: { props: ['show'], template: '<div v-if="show" data-test="uploader-dialog"><slot /></div>' },
+          DataTable: true,
+          EmptyState: true,
+          LoadingSpinner: true,
+          Pagination: true,
+          SearchInput: true,
+          Select: true,
+          StatusBadge: true,
+          Icon: true
+        }
+      }
+    })
+    await flushPromises()
+
+    await wrapper.findAll('button').find((button) => button.text().includes('Uploader A'))!.trigger('click')
+    await flushPromises()
+
+    expect(listCostSummaries).toHaveBeenLastCalledWith(expect.objectContaining({ uploader_user_id: 3, page: 1 }))
+    expect(wrapper.find('[data-test="uploader-dialog"]').exists()).toBe(true)
+  })
 })

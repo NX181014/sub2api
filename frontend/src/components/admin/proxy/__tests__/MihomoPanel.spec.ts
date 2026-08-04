@@ -78,6 +78,10 @@ describe('MihomoPanel', () => {
     expect(wrapper.text()).toContain('HK-01')
     expect(wrapper.text()).toContain('198.51.100.8')
     expect(wrapper.text()).toContain('绑定账号')
+    const migrate = wrapper.findAll('button').find(button => button.text().includes('查看/迁移账号'))!
+    await migrate.trigger('click')
+    expect(wrapper.emitted('view-proxy-accounts')?.[0]).toEqual([92])
+    expect(wrapper.findAll('button').find(button => button.text() === '删除')!.attributes('disabled')).toBeDefined()
     expect(wrapper.emitted('routes-loaded')?.[0]).toEqual([workbench.routes])
   })
 

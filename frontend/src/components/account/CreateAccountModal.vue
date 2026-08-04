@@ -38,6 +38,28 @@
       </div>
     </div>
 
+    <div
+      class="mb-5 space-y-2 rounded-lg bg-gray-50 px-3 py-2 text-sm dark:bg-dark-800"
+      data-testid="account-binding-summary"
+    >
+      <div class="flex items-start justify-between gap-3">
+        <span class="text-gray-500 dark:text-dark-400">{{ t('admin.accounts.bindingProxy') }}</span>
+        <span class="text-right font-medium text-gray-900 dark:text-white">{{ selectedProxyName }}</span>
+      </div>
+      <div class="flex items-start justify-between gap-3">
+        <span class="text-gray-500 dark:text-dark-400">{{ t('admin.accounts.bindingGroups') }}</span>
+        <span
+          v-if="selectedGroupNames"
+          class="text-right font-medium text-gray-900 dark:text-white"
+        >
+          {{ selectedGroupNames }}
+        </span>
+        <span v-else class="font-medium text-amber-700 dark:text-amber-300">
+          {{ t('admin.accounts.bindingUngroupedWarning') }}
+        </span>
+      </div>
+    </div>
+
     <!-- Step 1: Basic Info -->
     <form
       v-if="step === 1"
@@ -3484,6 +3506,16 @@
 
   <!-- Mixed Channel Warning Dialog -->
   <ConfirmDialog
+    :show="showProxylessWarning"
+    :title="t('admin.accounts.noProxyConfirmTitle')"
+    :message="t('admin.accounts.noProxyCreateConfirmMessage')"
+    :confirm-text="t('admin.accounts.continueWithoutProxy')"
+    :cancel-text="t('admin.accounts.returnToProxySelection')"
+    @confirm="handleProxylessConfirm"
+    @cancel="handleProxylessCancel"
+  />
+
+  <ConfirmDialog
     :show="showMixedChannelWarning"
     :title="t('admin.accounts.mixedChannelWarningTitle')"
     :message="mixedChannelWarningMessageText"
@@ -3920,12 +3952,16 @@ const buildOpenAICompactModelMapping = () =>
   buildModelMappingObject('mapping', [], openAICompactModelMappings.value)
 
 const showMixedChannelWarning = ref(false)
+const showProxylessWarning = ref(false)
 const mixedChannelWarningDetails = ref<{ groupName: string; currentPlatform: string; otherPlatform: string } | null>(
   null
 )
 const mixedChannelWarningRawMessage = ref('')
 const mixedChannelWarningAction = ref<(() => Promise<void>) | null>(null)
 const antigravityMixedChannelConfirmed = ref(false)
+let pendingProxylessAction: (() => Promise<void>) | null = null
+let proxyBindingRevision = 0
+let proxylessActionRunning = false
 const showAdvancedOAuth = ref(false)
 const showGeminiHelpDialog = ref(false)
 
@@ -4073,6 +4109,53 @@ const form = reactive({
   expires_at: null as number | null
 })
 
+const selectedProxyName = computed(() =>
+  props.proxies.find((proxy) => proxy.id === form.proxy_id)?.name ||
+  t('admin.accounts.bindingNoProxy')
+)
+const selectedGroupNames = computed(() => {
+  if (!form.group_ids.length) return ''
+  const names = form.group_ids
+    .map((id) => props.groups.find((group) => group.id === id)?.name)
+    .filter((name): name is string => !!name)
+  return names.join(', ') || t('admin.accounts.bindingGroupsSelected', { count: form.group_ids.length })
+})
+
+const clearProxylessDialog = () => {
+  pendingProxylessAction = null
+  showProxylessWarning.value = false
+}
+
+const runWithProxyConfirmation = async (action: () => Promise<void>): Promise<boolean> => {
+  if (form.proxy_id !== null || proxylessActionRunning) {
+    await action()
+    return true
+  }
+
+  const revision = proxyBindingRevision
+  pendingProxylessAction = async () => {
+    if (revision !== proxyBindingRevision || form.proxy_id !== null) return
+    proxylessActionRunning = true
+    try {
+      await action()
+    } finally {
+      proxylessActionRunning = false
+    }
+  }
+  showProxylessWarning.value = true
+  return false
+}
+
+const handleProxylessConfirm = async () => {
+  const action = pendingProxylessAction
+  clearProxylessDialog()
+  await action?.()
+}
+
+const handleProxylessCancel = () => {
+  clearProxylessDialog()
+}
+
 // Helper to check if current type needs OAuth flow
 const isOAuthFlow = computed(() => {
   // Antigravity upstream 类型不需要 OAuth 流程
@@ -4142,6 +4225,14 @@ watch(
     } else {
       resetForm()
     }
+  }
+)
+
+watch(
+  [() => form.platform, () => form.proxy_id],
+  () => {
+    proxyBindingRevision += 1
+    clearProxylessDialog()
   }
 )
 
@@ -4711,11 +4802,13 @@ const resetForm = () => {
   grokOAuth.resetState()
   oauthFlowRef.value?.reset()
   antigravityMixedChannelConfirmed.value = false
+  clearProxylessDialog()
   clearMixedChannelDialog()
 }
 
 const handleClose = () => {
   antigravityMixedChannelConfirmed.value = false
+  clearProxylessDialog()
   clearMixedChannelDialog()
   emit('close')
 }
@@ -4816,13 +4909,15 @@ const buildAnthropicExtra = (base?: Record<string, unknown>): Record<string, unk
 
 // Helper function to create account with mixed channel warning handling
 const doCreateAccount = async (payload: CreateAccountRequest) => {
-  const canContinue = await ensureAntigravityMixedChannelConfirmed(async () => {
+  await runWithProxyConfirmation(async () => {
+    const canContinue = await ensureAntigravityMixedChannelConfirmed(async () => {
+      await submitCreateAccount(payload)
+    })
+    if (!canContinue) {
+      return
+    }
     await submitCreateAccount(payload)
   })
-  if (!canContinue) {
-    return
-  }
-  await submitCreateAccount(payload)
 }
 
 // Handle mixed channel warning confirmation
@@ -4912,13 +5007,12 @@ const handleSubmit = async () => {
       appStore.showError(t('admin.accounts.pleaseEnterAccountName'))
       return
     }
-    const canContinue = await ensureAntigravityMixedChannelConfirmed(async () => {
-      step.value = 2
+    await runWithProxyConfirmation(async () => {
+      const canContinue = await ensureAntigravityMixedChannelConfirmed(async () => {
+        step.value = 2
+      })
+      if (canContinue) step.value = 2
     })
-    if (!canContinue) {
-      return
-    }
-    step.value = 2
     return
   }
 
@@ -5141,7 +5235,7 @@ const goBackToBasicInfo = () => {
   oauthFlowRef.value?.reset()
 }
 
-const handleGenerateUrl = async () => {
+const generateUrl = async () => {
   if (form.platform === 'openai') {
     await openaiOAuth.generateAuthUrl(form.proxy_id)
   } else if (form.platform === 'gemini') {
@@ -5160,15 +5254,20 @@ const handleGenerateUrl = async () => {
   }
 }
 
-const handleValidateRefreshToken = (rt: string) => {
+const handleGenerateUrl = () => runWithProxyConfirmation(generateUrl)
+
+const validateRefreshToken = async (rt: string) => {
   if (form.platform === 'openai') {
-    handleOpenAIValidateRT(rt)
+    await handleOpenAIValidateRT(rt)
   } else if (form.platform === 'antigravity') {
-    handleAntigravityValidateRT(rt)
+    await handleAntigravityValidateRT(rt)
   } else if (form.platform === 'grok') {
-    handleGrokValidateRT(rt)
+    await handleGrokValidateRT(rt)
   }
 }
+
+const handleValidateRefreshToken = (rt: string) =>
+  runWithProxyConfirmation(() => validateRefreshToken(rt))
 
 const handleValidateSessionToken = (_sessionToken: string) => {
   // Session token validation removed
@@ -5354,7 +5453,7 @@ const handleGrokValidateRT = async (refreshTokenInput: string) => {
   }
 }
 
-const handleGrokImportSSO = async (ssoInput: string) => {
+const importGrokSSO = async (ssoInput: string) => {
   // Align with OpenAI/Grok RT batch import: one token per line, no client-side dedupe.
   const ssoTokens = ssoInput
     .split('\n')
@@ -5563,7 +5662,7 @@ const isAgentIdentityImportContent = (content: string) => {
   }
 }
 
-const handleOpenAIImportCodexSession = async (content: string) => {
+const importOpenAICodexSession = async (content: string) => {
   const oauthClient = openaiOAuth
   const trimmed = content.trim()
   if (!trimmed) {
@@ -5649,7 +5748,7 @@ const handleOpenAIImportCodexSession = async (content: string) => {
   }
 }
 
-const handleOpenAIImportCodexPAT = async (accessToken: string) => {
+const importOpenAICodexPAT = async (accessToken: string) => {
   const oauthClient = openaiOAuth
   const trimmed = accessToken.trim()
   if (!trimmed) {
@@ -5820,7 +5919,8 @@ const handleOpenAIBatchRT = async (refreshTokenInput: string, clientId?: string)
 const handleOpenAIValidateRT = (rt: string) => handleOpenAIBatchRT(rt)
 
 // 手动输入 Mobile RT
-const handleOpenAIValidateMobileRT = (rt: string) => handleOpenAIBatchRT(rt, OPENAI_MOBILE_RT_CLIENT_ID)
+const handleOpenAIValidateMobileRT = (rt: string) =>
+  runWithProxyConfirmation(() => handleOpenAIBatchRT(rt, OPENAI_MOBILE_RT_CLIENT_ID))
 
 // Antigravity 手动 RT 批量验证和创建
 const handleAntigravityValidateRT = async (refreshTokenInput: string) => {
@@ -6128,7 +6228,7 @@ const handleAnthropicExchange = async (authCode: string) => {
 }
 
 // 主入口：根据平台路由到对应处理函数
-const handleExchangeCode = async () => {
+const exchangeCode = async () => {
   const authCode = oauthFlowRef.value?.authCode || ''
 
   switch (form.platform) {
@@ -6145,7 +6245,7 @@ const handleExchangeCode = async () => {
   }
 }
 
-const handleCookieAuth = async (sessionKey: string) => {
+const authenticateCookie = async (sessionKey: string) => {
   oauth.loading.value = true
   oauth.error.value = ''
 
@@ -6302,4 +6402,14 @@ const handleCookieAuth = async (sessionKey: string) => {
     oauth.loading.value = false
   }
 }
+
+const handleGrokImportSSO = (ssoInput: string) =>
+  runWithProxyConfirmation(() => importGrokSSO(ssoInput))
+const handleOpenAIImportCodexSession = (content: string) =>
+  runWithProxyConfirmation(() => importOpenAICodexSession(content))
+const handleOpenAIImportCodexPAT = (accessToken: string) =>
+  runWithProxyConfirmation(() => importOpenAICodexPAT(accessToken))
+const handleExchangeCode = () => runWithProxyConfirmation(exchangeCode)
+const handleCookieAuth = (sessionKey: string) =>
+  runWithProxyConfirmation(() => authenticateCookie(sessionKey))
 </script>

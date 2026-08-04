@@ -1,3 +1,4 @@
+import { defineComponent } from 'vue'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import ImportDataModal from '@/components/admin/account/ImportDataModal.vue'
@@ -24,9 +25,24 @@ vi.mock('@/api/admin', () => ({
 
 vi.mock('vue-i18n', () => ({
   useI18n: () => ({
-    t: (key: string) => key
+    t: (key: string, params?: Record<string, unknown>) =>
+      key === 'admin.accounts.dataImportNoProxyConfirmMessage'
+        ? `${key}:${params?.count}`
+        : key
   })
 }))
+
+const ConfirmDialogStub = defineComponent({
+  name: 'ConfirmDialog',
+  props: { show: Boolean, message: String },
+  emits: ['confirm', 'cancel'],
+  template: `
+    <div v-if="show" data-test="proxyless-confirm" :data-message="message">
+      <button type="button" data-test="proxyless-cancel" @click="$emit('cancel')">cancel</button>
+      <button type="button" data-test="proxyless-continue" @click="$emit('confirm')">continue</button>
+    </div>
+  `
+})
 
 const mountModal = (props: Record<string, unknown> = {}) =>
   mount(ImportDataModal, {
@@ -34,6 +50,7 @@ const mountModal = (props: Record<string, unknown> = {}) =>
     global: {
       stubs: {
         BaseDialog: { template: '<div><slot /><slot name="footer" /></div>' },
+        ConfirmDialog: ConfirmDialogStub,
         ProxySelector: {
           props: ['modelValue'],
           emits: ['update:modelValue'],
@@ -47,6 +64,11 @@ const mountModal = (props: Record<string, unknown> = {}) =>
       }
     }
   })
+
+const continueWithoutProxy = async (wrapper: ReturnType<typeof mountModal>) => {
+  await wrapper.get('[data-test="proxyless-continue"]').trigger('click')
+  await flushPromises()
+}
 
 const makeJsonFile = (name: string, content: string, type = 'application/json') => {
   const file = new File([content], name, { type })
@@ -152,6 +174,7 @@ describe('ImportDataModal', () => {
 
     await wrapper.find('form').trigger('submit')
     await flushPromises()
+    await continueWithoutProxy(wrapper)
 
     expect(adminAPI.accounts.importData).toHaveBeenCalledWith({
       data: expect.objectContaining({
@@ -191,6 +214,7 @@ describe('ImportDataModal', () => {
     await input.trigger('change')
     await wrapper.find('form').trigger('submit')
     await flushPromises()
+    await continueWithoutProxy(wrapper)
 
     expect(adminAPI.accounts.importData).toHaveBeenCalledWith({
       data: expect.objectContaining({
@@ -288,6 +312,7 @@ describe('ImportDataModal', () => {
     resolveText(content)
     await submit
     await flushPromises()
+    await continueWithoutProxy(wrapper)
 
     expect(adminAPI.accounts.importData).toHaveBeenCalledWith({
       data: expect.objectContaining({ accounts: [{ name: 'a', platform: 'openai' }] }),
@@ -321,6 +346,7 @@ describe('ImportDataModal', () => {
     await input.trigger('change')
     await wrapper.find('form').trigger('submit')
     await flushPromises()
+    await continueWithoutProxy(wrapper)
 
     expect(showError).toHaveBeenCalledWith('admin.accounts.dataImportCompletedWithErrors')
     expect(wrapper.emitted('imported')).toBeUndefined()
@@ -330,5 +356,85 @@ describe('ImportDataModal', () => {
 
     expect(wrapper.emitted('imported')).toHaveLength(1)
     expect(wrapper.emitted('close')).toHaveLength(1)
+  })
+
+  it('parses first and confirms only accounts without a file or default proxy', async () => {
+    const { adminAPI } = await import('@/api/admin')
+    vi.mocked(adminAPI.accounts.importData).mockResolvedValue({
+      proxy_created: 0,
+      proxy_reused: 1,
+      proxy_failed: 0,
+      account_created: 2,
+      account_failed: 0
+    })
+    const wrapper = mountModal()
+    const input = wrapper.find('input[type="file"]')
+    setInputFiles(input.element, [makeJsonFile(
+      'proxy-priority.json',
+      JSON.stringify({
+        proxies: [{ proxy_key: 'file-proxy' }],
+        accounts: [
+          { name: 'mapped', proxy_key: 'file-proxy' },
+          { name: 'direct' }
+        ]
+      })
+    )])
+
+    await input.trigger('change')
+    await flushPromises()
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+
+    expect(adminAPI.accounts.importData).not.toHaveBeenCalled()
+    expect(wrapper.get('[data-test="proxyless-confirm"]').attributes('data-message'))
+      .toBe('admin.accounts.dataImportNoProxyConfirmMessage:1')
+
+    await continueWithoutProxy(wrapper)
+    expect(adminAPI.accounts.importData).toHaveBeenCalledTimes(1)
+  })
+
+  it('cancels without losing the form and invalidates confirmation when the proxy changes', async () => {
+    const { adminAPI } = await import('@/api/admin')
+    vi.mocked(adminAPI.accounts.importData).mockResolvedValue({
+      proxy_created: 0,
+      proxy_reused: 0,
+      proxy_failed: 0,
+      account_created: 1,
+      account_failed: 0
+    })
+    const wrapper = mountModal({ proxies: [{ id: 7, name: 'Proxy 7' }] })
+    const input = wrapper.find('input[type="file"]')
+    setInputFiles(input.element, [makeJsonFile(
+      'keep-form.json',
+      JSON.stringify({ proxies: [], accounts: [{ name: 'direct' }] })
+    )])
+
+    await input.trigger('change')
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+    setInputFiles(input.element, [makeJsonFile(
+      'replacement.json',
+      JSON.stringify({ proxies: [], accounts: [{ name: 'replacement' }] })
+    )])
+    await input.trigger('change')
+    expect(wrapper.find('[data-test="proxyless-confirm"]').exists()).toBe(false)
+
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+    await wrapper.get('[data-test="proxyless-cancel"]').trigger('click')
+
+    expect(adminAPI.accounts.importData).not.toHaveBeenCalled()
+    expect(wrapper.get('input[type="file"]').exists()).toBe(true)
+
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+    await wrapper.get('[data-test="import-default-proxy"]').setValue('7')
+    expect(wrapper.find('[data-test="proxyless-confirm"]').exists()).toBe(false)
+
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+    expect(adminAPI.accounts.importData).toHaveBeenCalledWith(expect.objectContaining({
+      default_proxy_id: 7
+    }))
   })
 })

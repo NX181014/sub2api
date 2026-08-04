@@ -65,6 +65,33 @@
           <GroupSelector v-model="groupIds" :groups="compatibleGroups" searchable="auto" />
           <p class="mt-1 text-xs text-gray-500 dark:text-dark-400">{{ t('admin.accounts.dataImportGroupsHint') }}</p>
         </div>
+        <div
+          class="space-y-2 rounded-lg bg-gray-50 px-3 py-2 text-sm dark:bg-dark-800"
+          data-testid="import-binding-summary"
+        >
+          <div class="flex items-start justify-between gap-3">
+            <span class="text-gray-500 dark:text-dark-400">{{ t('admin.accounts.bindingProxy') }}</span>
+            <span class="text-right font-medium text-gray-900 dark:text-white">{{ selectedProxyName }}</span>
+          </div>
+          <div v-if="files.length" class="text-xs text-gray-500 dark:text-dark-400">
+            {{ t('admin.accounts.dataImportProxySummary', {
+              mapped: detectedFileMappedCount,
+              unmapped: detectedUnmappedCount
+            }) }}
+          </div>
+          <div class="flex items-start justify-between gap-3">
+            <span class="text-gray-500 dark:text-dark-400">{{ t('admin.accounts.bindingGroups') }}</span>
+            <span
+              v-if="selectedGroupNames"
+              class="text-right font-medium text-gray-900 dark:text-white"
+            >
+              {{ selectedGroupNames }}
+            </span>
+            <span v-else class="font-medium text-amber-700 dark:text-amber-300">
+              {{ t('admin.accounts.bindingUngroupedWarning') }}
+            </span>
+          </div>
+        </div>
       </section>
 
       <div
@@ -109,12 +136,23 @@
       </div>
     </template>
   </BaseDialog>
+
+  <ConfirmDialog
+    :show="showProxylessConfirm"
+    :title="t('admin.accounts.noProxyConfirmTitle')"
+    :message="t('admin.accounts.dataImportNoProxyConfirmMessage', { count: pendingProxylessCount })"
+    :cancel-text="t('admin.accounts.returnToProxySelection')"
+    :confirm-text="t('admin.accounts.continueWithoutProxy')"
+    @cancel="handleProxylessCancel"
+    @confirm="handleProxylessConfirm"
+  />
 </template>
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import BaseDialog from '@/components/common/BaseDialog.vue'
+import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import GroupSelector from '@/components/common/GroupSelector.vue'
 import ProxySelector from '@/components/common/ProxySelector.vue'
 import { adminAPI } from '@/api/admin'
@@ -152,6 +190,11 @@ const defaultProxyId = ref<number | null>(null)
 const groupIds = ref<number[]>([])
 const detectedPlatforms = ref<AccountPlatform[]>([])
 const detectingPlatforms = ref(false)
+const detectedFileMappedCount = ref(0)
+const detectedUnmappedCount = ref(0)
+const showProxylessConfirm = ref(false)
+const pendingProxylessCount = ref(0)
+let pendingImport: { revision: number; payload: AdminDataPayload } | null = null
 let fileSelectionRevision = 0
 let platformDetection = Promise.resolve()
 
@@ -170,8 +213,25 @@ const selectedFilesLabel = computed(() => {
   return t('admin.accounts.selectedCount', { count: files.value.length })
 })
 const fileListTitle = computed(() => files.value.map((item) => item.name).join(', '))
+const selectedProxyName = computed(() =>
+  props.proxies.find((proxy) => proxy.id === defaultProxyId.value)?.name ||
+  t('admin.accounts.bindingNoProxy')
+)
+const selectedGroupNames = computed(() => {
+  if (!groupIds.value.length) return ''
+  const names = groupIds.value
+    .map((id) => props.groups.find((group) => group.id === id)?.name)
+    .filter((name): name is string => !!name)
+  return names.join(', ') || t('admin.accounts.bindingGroupsSelected', { count: groupIds.value.length })
+})
 
 const errorItems = computed(() => result.value?.errors || [])
+
+const clearPendingImport = () => {
+  pendingImport = null
+  pendingProxylessCount.value = 0
+  showProxylessConfirm.value = false
+}
 
 watch(
   () => props.show,
@@ -186,6 +246,9 @@ watch(
       groupIds.value = []
       detectedPlatforms.value = []
       detectingPlatforms.value = false
+      detectedFileMappedCount.value = 0
+      detectedUnmappedCount.value = 0
+      clearPendingImport()
       fileSelectionRevision += 1
       if (fileInput.value) {
         fileInput.value.value = ''
@@ -193,6 +256,8 @@ watch(
     }
   }
 )
+
+watch(defaultProxyId, clearPendingImport)
 
 const openFilePicker = () => {
   fileInput.value?.click()
@@ -206,6 +271,7 @@ const handleFileChange = (event: Event) => {
 
 const handleClose = () => {
   if (importing.value) return
+  clearPendingImport()
   if (hasCreatedData.value) {
     hasCreatedData.value = false
     emit('imported', createdAccounts.value)
@@ -233,12 +299,17 @@ const setSelectedFiles = (sourceFiles: FileList | File[] | null | undefined) => 
   }
   files.value = picked
   result.value = null
+  detectedFileMappedCount.value = 0
+  detectedUnmappedCount.value = 0
+  clearPendingImport()
   const revision = ++fileSelectionRevision
   detectingPlatforms.value = true
-  platformDetection = detectImportPlatforms(picked)
-    .then((platforms) => {
+  platformDetection = detectImportSummary(picked)
+    .then((summary) => {
       if (revision !== fileSelectionRevision) return
-      detectedPlatforms.value = platforms
+      detectedPlatforms.value = summary.platforms
+      detectedFileMappedCount.value = summary.fileMappedCount
+      detectedUnmappedCount.value = summary.unmappedCount
       detectingPlatforms.value = false
       const compatibleIDs = new Set(compatibleGroups.value.map((group) => group.id))
       groupIds.value = groupIds.value.filter((groupID) => compatibleIDs.has(groupID))
@@ -281,8 +352,10 @@ const readFileAsText = async (sourceFile: File): Promise<string> => {
   })
 }
 
-const detectImportPlatforms = async (sourceFiles: File[]): Promise<AccountPlatform[]> => {
+const detectImportSummary = async (sourceFiles: File[]) => {
   const platforms = new Set<AccountPlatform>()
+  let fileMappedCount = 0
+  let unmappedCount = 0
   for (const sourceFile of sourceFiles) {
     try {
       const payload = JSON.parse(await readFileAsText(sourceFile)) as Partial<AdminDataPayload>
@@ -290,12 +363,14 @@ const detectImportPlatforms = async (sourceFiles: File[]): Promise<AccountPlatfo
         if (SUPPORTED_ACCOUNT_PLATFORMS.has(account.platform)) {
           platforms.add(account.platform)
         }
+        if (account.proxy_key) fileMappedCount += 1
+        else unmappedCount += 1
       }
     } catch {
-      return []
+      return { platforms: [], fileMappedCount: 0, unmappedCount: 0 }
     }
   }
-  return [...platforms]
+  return { platforms: [...platforms], fileMappedCount, unmappedCount }
 }
 
 const SUPPORTED_DATA_TYPES = ['sub2api-data', 'sub2api-bundle']
@@ -352,34 +427,7 @@ const mergeDataPayloads = (payloads: AdminDataPayload[]): AdminDataPayload => {
   }
 }
 
-const handleImport = async () => {
-  if (files.value.length === 0) {
-    appStore.showError(t('admin.accounts.dataImportSelectFile'))
-    return
-  }
-
-  importing.value = true
-  try {
-    await platformDetection
-    const dataPayloads: AdminDataPayload[] = []
-    for (const sourceFile of files.value) {
-      let parsed: unknown
-      try {
-        parsed = JSON.parse(await readFileAsText(sourceFile))
-      } catch {
-        appStore.showError(
-          t('admin.accounts.dataImportParseFailedFile', { name: sourceFile.name })
-        )
-        return
-      }
-      if (!isValidDataPayload(parsed)) {
-        appStore.showError(t('admin.accounts.dataImportInvalidFile', { name: sourceFile.name }))
-        return
-      }
-      dataPayloads.push(parsed)
-    }
-    const dataPayload = mergeDataPayloads(dataPayloads)
-
+const executeImport = async (dataPayload: AdminDataPayload) => {
     const importOptions = {
       ...(defaultProxyId.value !== null ? { default_proxy_id: defaultProxyId.value } : {}),
       ...(groupIds.value.length ? { group_ids: [...groupIds.value] } : {})
@@ -410,6 +458,65 @@ const handleImport = async () => {
       appStore.showSuccess(t('admin.accounts.dataImportSuccess', msgParams))
       emit('imported', createdAccounts.value)
     }
+}
+
+const handleImport = async () => {
+  if (files.value.length === 0) {
+    appStore.showError(t('admin.accounts.dataImportSelectFile'))
+    return
+  }
+
+  importing.value = true
+  try {
+    await platformDetection
+    const dataPayloads: AdminDataPayload[] = []
+    for (const sourceFile of files.value) {
+      let parsed: unknown
+      try {
+        parsed = JSON.parse(await readFileAsText(sourceFile))
+      } catch {
+        appStore.showError(
+          t('admin.accounts.dataImportParseFailedFile', { name: sourceFile.name })
+        )
+        return
+      }
+      if (!isValidDataPayload(parsed)) {
+        appStore.showError(t('admin.accounts.dataImportInvalidFile', { name: sourceFile.name }))
+        return
+      }
+      dataPayloads.push(parsed)
+    }
+    const dataPayload = mergeDataPayloads(dataPayloads)
+    const proxylessCount = defaultProxyId.value === null
+      ? dataPayload.accounts.filter((account) => !account.proxy_key).length
+      : 0
+    if (proxylessCount > 0) {
+      pendingImport = { revision: fileSelectionRevision, payload: dataPayload }
+      pendingProxylessCount.value = proxylessCount
+      showProxylessConfirm.value = true
+      return
+    }
+
+    await executeImport(dataPayload)
+  } catch (error: any) {
+    appStore.showError(error?.message || t('admin.accounts.dataImportFailed'))
+  } finally {
+    importing.value = false
+  }
+}
+
+const handleProxylessCancel = () => {
+  clearPendingImport()
+}
+
+const handleProxylessConfirm = async () => {
+  const pending = pendingImport
+  clearPendingImport()
+  if (!pending || pending.revision !== fileSelectionRevision || defaultProxyId.value !== null) return
+
+  importing.value = true
+  try {
+    await executeImport(pending.payload)
   } catch (error: any) {
     appStore.showError(error?.message || t('admin.accounts.dataImportFailed'))
   } finally {

@@ -24,6 +24,9 @@
       <span class="text-sm text-gray-600 dark:text-gray-300">
         {{ t('admin.accounts.bulkActions.filtered', { count: filteredCount }) }}
       </span>
+      <span class="text-sm text-gray-600 dark:text-gray-300">
+        {{ t('admin.accounts.bulkActions.currentPage', { count: currentPageCount }) }}
+      </span>
       <span v-if="selectedIds.length" class="text-sm font-medium text-primary-700 dark:text-primary-300">
         {{ selectedBatchCount > 0
           ? t('admin.accounts.bulkActions.selectedScope', { count: selectedIds.length, batches: selectedBatchCount })
@@ -70,24 +73,23 @@ withDefaults(defineProps<{
   selectedIds: number[]
   selectedBatchCount?: number
   filteredCount?: number
-  hasActiveFilters?: boolean
   hiddenSelectedCount?: number
   allPageSelected?: boolean
   pageSelectedCount?: number
+  currentPageCount?: number
   busy?: boolean
 }>(), {
   filteredCount: 0,
   selectedBatchCount: 0,
-  hasActiveFilters: false,
   hiddenSelectedCount: 0,
   allPageSelected: false,
   pageSelectedCount: 0,
+  currentPageCount: 0,
   busy: false
 })
 defineEmits([
   'delete',
   'edit-selected',
-  'edit-filtered',
   'clear',
   'toggle-page',
   'toggle-schedulable',
