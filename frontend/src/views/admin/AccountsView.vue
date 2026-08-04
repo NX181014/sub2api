@@ -709,10 +709,10 @@
                 data-test="account-workbench-usage-source"
                 class="account-source-cell"
               >
-                <span class="min-w-0 shrink-0 truncate" :title="accountUploader(row)">
+                <span class="min-w-0 truncate" :title="accountUploader(row)">
                   {{ t('admin.sharedPool.columns.uploader') }}: {{ accountUploader(row) }}
                 </span>
-                <span v-if="importBatchID(row)" class="min-w-0 flex-1 truncate" :title="importBatchID(row)">
+                <span v-if="importBatchID(row)" class="min-w-0 truncate" :title="importBatchID(row)">
                   {{ t('admin.accounts.importBatchGroup') }}: {{ importBatchID(row) }}
                 </span>
               </div>
@@ -774,7 +774,7 @@
                 data-test="account-workbench-pool-source"
                 class="account-source-cell"
               >
-                <div v-if="!authStore.isSimpleMode" class="flex min-w-0 flex-1 items-center gap-2">
+                <div v-if="!authStore.isSimpleMode" class="flex min-w-0 items-center gap-2">
                   <span class="shrink-0">{{ t('admin.accounts.columns.groups') }}:</span>
                   <AccountGroupsCell :groups="row.groups" :max-display="2" class="!max-w-none min-w-0" />
                 </div>
@@ -5032,7 +5032,7 @@ onUnmounted(() => {
 }
 
 .account-source-cell {
-  @apply mt-2 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 border-t border-gray-200 pt-2 text-[11px] text-gray-500 dark:border-dark-700 dark:text-gray-400;
+  @apply mt-2 flex min-w-0 flex-col items-stretch gap-1 border-t border-gray-200 pt-2 text-[11px] text-gray-500 dark:border-dark-700 dark:text-gray-400;
 }
 
 .account-pool-cell {
