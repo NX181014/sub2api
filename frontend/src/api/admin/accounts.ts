@@ -30,6 +30,7 @@ import type {
 export interface AccountListFilters {
   platform?: string
   type?: string
+  subscription_tier?: string
   status?: string
   usage_status?: 'all' | 'in_use' | 'ready' | 'unused' | 'attention' | 'error' | 'restricted' | 'disabled'
   group?: string
@@ -50,6 +51,7 @@ export interface AccountSelectionSummary {
   platforms: string[]
   types: string[]
   type_counts: Record<string, number>
+  subscription_tier_counts: Record<string, number>
   usage_status_counts: Record<'all' | 'in_use' | 'ready' | 'unused' | 'attention' | 'error' | 'restricted' | 'disabled', number>
 }
 

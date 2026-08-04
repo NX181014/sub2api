@@ -281,6 +281,7 @@ func parseAccountFilterQuery(c *gin.Context) (accountFilterQuery, error) {
 		AccountSelectionFilters: service.AccountSelectionFilters{
 			Platform:         c.Query("platform"),
 			Type:             c.Query("type"),
+			SubscriptionTier: strings.TrimSpace(c.Query("subscription_tier")),
 			Status:           c.Query("status"),
 			UsageStatus:      strings.TrimSpace(c.Query("usage_status")),
 			Search:           strings.TrimSpace(c.Query("search")),
@@ -330,6 +331,9 @@ func parseAccountFilterQuery(c *gin.Context) (accountFilterQuery, error) {
 	}
 	if filters.ImportBatchID != "" && filters.ImportBatchScope != "" {
 		return accountFilterQuery{}, infraerrors.BadRequest("CONFLICTING_IMPORT_BATCH_FILTER", "import batch id and scope cannot be combined")
+	}
+	if filters.SubscriptionTier != "" {
+		filters.SubscriptionTier = service.NormalizeAccountSubscriptionTierName(filters.SubscriptionTier)
 	}
 	var valid bool
 	filters.UsageStatus, valid = normalizeAccountUsageStatus(filters.UsageStatus)
@@ -401,7 +405,7 @@ func (h *AccountHandler) resolveAccountUsageRuntime(ctx context.Context, filters
 }
 
 func (h *AccountHandler) listAccountPage(ctx context.Context, page, pageSize int, filters accountFilterQuery, includePoolMetrics bool) ([]service.Account, int64, error) {
-	if filters.ImportBatchID != "" || filters.ImportBatchScope != "" || filters.UploaderUnassigned || filters.UsageStatus != "" {
+	if filters.ImportBatchID != "" || filters.ImportBatchScope != "" || filters.UploaderUnassigned || filters.UsageStatus != "" || filters.SubscriptionTier != "" {
 		selectionService, ok := h.adminService.(accountSelectionListService)
 		if !ok {
 			return nil, 0, infraerrors.InternalServer("ACCOUNT_SELECTION_FILTER_UNAVAILABLE", "account selection filter is unavailable")

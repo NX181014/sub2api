@@ -92,7 +92,18 @@
           >
             <div data-test="workbench-sidebar-header" class="workbench-sidebar-header">
               <div class="mb-2 flex items-center justify-between gap-3">
-                <h2 id="workbench-navigator-title" class="text-sm font-semibold text-gray-900 dark:text-white">{{ t('admin.accounts.workbenchNavigatorTitle') }}</h2>
+                <div class="min-w-0">
+                  <h2 id="workbench-navigator-title" class="text-sm font-semibold text-gray-900 dark:text-white">{{ t('admin.accounts.workbenchNavigatorTitle') }}</h2>
+                  <button
+                    type="button"
+                    class="mt-1 flex min-h-11 max-w-full items-center gap-1.5 text-left text-xs text-gray-500 hover:text-primary-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 dark:text-gray-400 dark:hover:text-primary-300"
+                    @click="focusWorkbenchUsageStatus('attention')"
+                  >
+                    <Icon name="exclamationTriangle" size="sm" class="shrink-0 text-amber-500" />
+                    <span class="truncate">{{ t('admin.accounts.workbenchAttentionCount', { count: workbenchUsageStatusCount('attention') }) }}</span>
+                    <Icon name="arrowRight" size="xs" class="shrink-0" />
+                  </button>
+                </div>
                 <span class="flex items-center gap-2">
                   <span class="text-xs tabular-nums text-gray-500 dark:text-gray-400">
                     {{ t('admin.accounts.workbenchBatchCount', { count: workbenchBatchTotal }) }}
@@ -152,13 +163,17 @@
                 </button>
 
                 <div v-for="group in filteredWorkbenchUploaderGroups" :key="String(group.id)" class="workbench-uploader-group">
-                  <div :class="['workbench-uploader-row', workbenchScope === 'uploader' && String(selectedWorkbenchUploaderID) === String(group.id) ? 'workbench-nav-item-active' : '']">
+                  <div :class="[
+                    'workbench-uploader-row',
+                    isWorkbenchUploaderFocused(group) ? 'workbench-focus-active' : '',
+                    isWorkbenchUploaderScoped(group) ? 'workbench-scope-active' : ''
+                  ]">
                     <button
                       type="button"
                       data-test="workbench-uploader"
                       class="workbench-uploader-main"
-                      :aria-current="workbenchScope === 'uploader' && String(selectedWorkbenchUploaderID) === String(group.id) ? 'page' : undefined"
-                      @click="selectWorkbenchUploader(group)"
+                      :aria-expanded="isWorkbenchUploaderExpanded(group)"
+                      @click="focusWorkbenchUploader(group)"
                     >
                       <span class="workbench-uploader-avatar" aria-hidden="true">
                         <img v-if="group.avatarUrl" :src="group.avatarUrl" alt="" />
@@ -178,8 +193,17 @@
                         </span>
                       </span>
                     </button>
-                    <span class="workbench-nav-count">{{ group.count }}</span>
-                    <Icon v-if="workbenchScope === 'uploader' && String(selectedWorkbenchUploaderID) === String(group.id)" name="check" size="sm" class="workbench-nav-check" />
+                    <button
+                      type="button"
+                      data-test="workbench-uploader-scope"
+                      class="workbench-scope-toggle"
+                      :class="isWorkbenchUploaderScoped(group) ? 'workbench-scope-toggle-active' : ''"
+                      :aria-pressed="isWorkbenchUploaderScoped(group)"
+                      :aria-label="group.label"
+                      @click="selectWorkbenchUploader(group)"
+                    >
+                      <Icon :name="isWorkbenchUploaderScoped(group) ? 'check' : 'plus'" size="sm" />
+                    </button>
                     <button
                       type="button"
                       data-test="workbench-uploader-toggle"
@@ -191,18 +215,31 @@
                       <Icon :name="isWorkbenchUploaderExpanded(group) ? 'chevronDown' : 'chevronRight'" size="sm" />
                     </button>
                   </div>
-                  <div v-if="isWorkbenchUploaderExpanded(group) || workbenchNavigatorSearch" class="workbench-uploader-batches">
-                    <button
+                  <div v-if="isWorkbenchUploaderExpanded(group) || workbenchNavigatorSearch" class="workbench-focus-panel">
+                    <div class="workbench-focus-actions">
+                      <button type="button" :title="t('common.refresh')" @click="handleManualRefresh">
+                        <Icon name="refresh" size="sm" :class="loading ? 'animate-spin' : ''" />
+                        <span>{{ t('common.refresh') }}</span>
+                      </button>
+                      <button type="button" :title="t('admin.accounts.dataImport')" @click="openImportData">
+                        <Icon name="upload" size="sm" />
+                        <span>{{ t('admin.accounts.dataImport') }}</span>
+                      </button>
+                      <button type="button" :title="workbenchUsageStatusLabel('attention')" @click="focusWorkbenchUsageStatus('attention')">
+                        <Icon name="exclamationTriangle" size="sm" />
+                        <span>{{ workbenchUploaderAttentionCount(group) }}</span>
+                      </button>
+                    </div>
+                    <div class="workbench-uploader-batches">
+                    <div
                       v-for="batch in group.batches"
                       :key="batch.id"
-                      type="button"
                       data-test="workbench-batch"
-                      :aria-current="selectedWorkbenchBatchID === batch.id ? 'page' : undefined"
-                      :class="['workbench-batch-main', selectedWorkbenchBatchID === batch.id ? 'workbench-batch-item-active' : '']"
+                      :class="['workbench-batch-row', focusedWorkbenchBatchID === batch.id ? 'workbench-focus-active' : '', selectedWorkbenchBatchID === batch.id ? 'workbench-scope-active' : '']"
                       :title="workbenchBatchTitle(batch)"
-                      @click="selectWorkbenchBatch(batch)"
                     >
-                      <span class="min-w-0 flex-1">
+                      <button type="button" class="workbench-batch-main" @click="focusWorkbenchBatch(batch)">
+                        <span class="min-w-0 flex-1">
                         <span class="block truncate font-medium text-gray-800 dark:text-gray-100">{{ batch.names.join('、') || t('admin.accounts.importBatchGroup') }}</span>
                         <span class="workbench-batch-meta">
                           {{ formatWorkbenchDate(batch.created_at) }} · {{ t('admin.accounts.importBatchCount', { count: batch.matched_count }) }}
@@ -212,9 +249,21 @@
                             {{ item.label }} {{ item.count }}
                           </span>
                         </span>
-                      </span>
-                      <Icon v-if="selectedWorkbenchBatchID === batch.id" name="check" size="sm" class="workbench-nav-check" />
-                    </button>
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        data-test="workbench-batch-scope"
+                        class="workbench-scope-toggle"
+                        :class="selectedWorkbenchBatchID === batch.id ? 'workbench-scope-toggle-active' : ''"
+                        :aria-pressed="selectedWorkbenchBatchID === batch.id"
+                        :aria-label="batch.names.join('、') || batch.id"
+                        @click="selectWorkbenchBatch(batch)"
+                      >
+                        <Icon :name="selectedWorkbenchBatchID === batch.id ? 'check' : 'plus'" size="sm" />
+                      </button>
+                    </div>
+                    </div>
                   </div>
                 </div>
                 <p v-if="!workbenchNavigatorLoading && workbenchNavigatorResultCount === 0" class="workbench-navigator-empty">
@@ -235,63 +284,54 @@
 
               <section v-show="activeWorkbenchAxis === 'usage'" class="workbench-axis" aria-labelledby="workbench-usage-axis">
                 <h3 id="workbench-usage-axis" class="workbench-axis-title">{{ t('admin.accounts.workbenchUsageAxis') }}</h3>
-                <button
-                  v-for="status in workbenchPrimaryUsageStatuses"
+                <div
+                  v-for="status in workbenchOperationalUsageStatuses"
                   :key="status"
-                  type="button"
                   :data-test="`workbench-usage-${status}`"
-                  :aria-current="selectedWorkbenchUsageStatus === status ? 'page' : undefined"
-                  :class="['workbench-nav-item', selectedWorkbenchUsageStatus === status ? 'workbench-nav-item-active' : '']"
-                  @click="selectWorkbenchUsageStatus(status)"
+                  :class="['workbench-operational-row', focusedWorkbenchUsageStatus === status ? 'workbench-focus-active' : '', selectedWorkbenchUsageStatus === status ? 'workbench-scope-active' : '']"
                 >
-                  <span class="truncate font-medium">{{ workbenchUsageStatusLabel(status) }}</span>
+                  <button type="button" class="workbench-operational-main" @click="focusWorkbenchUsageStatus(status)">
+                    <Icon :name="workbenchUsageStatusIcon(status)" size="sm" :class="workbenchUsageStatusIconClass(status)" />
+                    <span class="min-w-0 flex-1 truncate font-medium">{{ workbenchUsageStatusLabel(status) }}</span>
+                  </button>
                   <span class="workbench-nav-count">{{ workbenchUsageStatusCount(status) }}</span>
-                  <Icon v-if="selectedWorkbenchUsageStatus === status" name="check" size="sm" class="workbench-nav-check" />
-                </button>
-                <div class="workbench-attention-group">
-                  <div :class="['workbench-attention-row', selectedWorkbenchUsageStatus === 'attention' ? 'workbench-nav-item-active' : '']">
-                    <button type="button" data-test="workbench-usage-attention" class="workbench-attention-main" :aria-current="selectedWorkbenchUsageStatus === 'attention' ? 'page' : undefined" @click="selectWorkbenchUsageStatus('attention')">
-                      <span class="truncate font-medium">{{ workbenchUsageStatusLabel('attention') }}</span>
-                    </button>
-                    <span class="workbench-nav-count">{{ workbenchUsageStatusCount('attention') }}</span>
-                    <Icon v-if="selectedWorkbenchUsageStatus === 'attention'" name="check" size="sm" class="workbench-nav-check" />
-                    <button type="button" data-test="workbench-attention-toggle" class="workbench-tree-toggle" :aria-expanded="workbenchAttentionExpanded" :aria-label="workbenchAttentionExpanded ? t('admin.accounts.collapseImportBatch') : t('admin.accounts.expandImportBatch')" @click="workbenchAttentionExpanded = !workbenchAttentionExpanded">
-                      <Icon :name="workbenchAttentionExpanded ? 'chevronDown' : 'chevronRight'" size="sm" />
-                    </button>
-                  </div>
-                  <div v-if="workbenchAttentionExpanded" class="workbench-attention-children">
-                    <button
-                      v-for="status in workbenchAttentionUsageStatuses"
-                      :key="status"
-                      type="button"
-                      :data-test="`workbench-usage-${status}`"
-                      :aria-current="selectedWorkbenchUsageStatus === status ? 'page' : undefined"
-                      :class="['workbench-nav-item', selectedWorkbenchUsageStatus === status ? 'workbench-nav-item-active' : '']"
-                      @click="selectWorkbenchUsageStatus(status)"
-                    >
-                      <span class="truncate font-medium">{{ workbenchUsageStatusLabel(status) }}</span>
-                      <span class="workbench-nav-count">{{ workbenchUsageStatusCount(status) }}</span>
-                      <Icon v-if="selectedWorkbenchUsageStatus === status" name="check" size="sm" class="workbench-nav-check" />
-                    </button>
-                  </div>
+                  <button
+                    type="button"
+                    class="workbench-scope-toggle"
+                    :class="selectedWorkbenchUsageStatus === status ? 'workbench-scope-toggle-active' : ''"
+                    :aria-pressed="selectedWorkbenchUsageStatus === status"
+                    :aria-label="workbenchUsageStatusLabel(status)"
+                    @click="selectWorkbenchUsageStatus(status)"
+                  >
+                    <Icon :name="selectedWorkbenchUsageStatus === status ? 'check' : 'plus'" size="sm" />
+                  </button>
                 </div>
               </section>
 
-              <section v-show="activeWorkbenchAxis === 'type'" class="workbench-axis" aria-labelledby="workbench-type-axis">
-                <h3 id="workbench-type-axis" class="workbench-axis-title">{{ t('admin.accounts.workbenchTypeAxis') }}</h3>
-                <button
-                  v-for="option in workbenchTypeOptions"
+              <section v-show="activeWorkbenchAxis === 'subscription'" class="workbench-axis" aria-labelledby="workbench-subscription-axis">
+                <h3 id="workbench-subscription-axis" class="workbench-axis-title">{{ t('admin.accounts.workbenchSubscriptionAxis') }}</h3>
+                <div
+                  v-for="option in workbenchSubscriptionOptions"
                   :key="option.value"
-                  type="button"
-                  :data-test="`workbench-type-${option.value || 'all'}`"
-                  :aria-current="String(params.type || '') === option.value ? 'page' : undefined"
-                  :class="['workbench-nav-item', String(params.type || '') === option.value ? 'workbench-nav-item-active' : '']"
-                  @click="selectWorkbenchType(option.value)"
+                  :data-test="`workbench-subscription-${option.value || 'all'}`"
+                  :class="['workbench-operational-row', focusedWorkbenchSubscriptionTier === option.value ? 'workbench-focus-active' : '', String(params.subscription_tier || '') === option.value ? 'workbench-scope-active' : '']"
                 >
-                  <span class="truncate font-medium" :title="option.label">{{ option.label }}</span>
+                  <button type="button" class="workbench-operational-main" @click="focusWorkbenchSubscription(option.value)">
+                    <Icon name="badge" size="sm" class="shrink-0 text-gray-400" />
+                    <span class="min-w-0 flex-1 truncate font-medium" :title="option.label">{{ option.label }}</span>
+                  </button>
                   <span class="workbench-nav-count">{{ option.count }}</span>
-                  <Icon v-if="String(params.type || '') === option.value" name="check" size="sm" class="workbench-nav-check" />
-                </button>
+                  <button
+                    type="button"
+                    class="workbench-scope-toggle"
+                    :class="String(params.subscription_tier || '') === option.value ? 'workbench-scope-toggle-active' : ''"
+                    :aria-pressed="String(params.subscription_tier || '') === option.value"
+                    :aria-label="option.label"
+                    @click="selectWorkbenchSubscription(option.value)"
+                  >
+                    <Icon :name="String(params.subscription_tier || '') === option.value ? 'check' : 'plus'" size="sm" />
+                  </button>
+                </div>
               </section>
               <LoadingSpinner v-if="workbenchNavigatorLoading" class="m-3" />
             </div>
@@ -530,6 +570,18 @@
                 <span class="mt-1 block max-w-56 truncate text-xs text-gray-500 dark:text-gray-400 md:hidden" :title="row.names">{{ row.names }}</span>
               </span>
             </button>
+            <div v-else-if="embedded" data-test="account-workbench-secondary" class="account-source-cell">
+              <span class="min-w-0 truncate font-medium text-gray-800 dark:text-gray-100" :title="accountUploader(row)">
+                {{ accountUploader(row) }}
+              </span>
+              <span v-if="importBatchID(row)" class="min-w-0 truncate text-xs text-gray-500 dark:text-gray-400" :title="importBatchID(row)">
+                {{ t('admin.accounts.importBatchGroup') }}: {{ importBatchID(row) }}
+              </span>
+              <AccountGroupsCell v-if="!authStore.isSimpleMode" :groups="row.groups" :max-display="2" />
+              <span class="min-w-0 truncate text-xs text-gray-500 dark:text-gray-400" :title="row.proxy?.name || ''">
+                {{ t('admin.accounts.columns.proxy') }}: {{ row.proxy?.name || '-' }}
+              </span>
+            </div>
             <div v-else-if="isImportBatchChild(row)" class="min-w-0 border-l-2 border-gray-200 pl-3 dark:border-dark-600 md:border-0 md:pl-0">
               <p class="max-w-52 truncate font-medium text-gray-900 dark:text-white md:hidden" :title="row.name">
                 {{ row.name }} · #{{ row.id }}
@@ -641,144 +693,93 @@
           </template>
           <template #cell-usage="{ row }">
             <div
-              v-if="!isImportBatchRow(row) && (!embedded || hasWorkbenchCompositeModules)"
+              v-if="!isImportBatchRow(row)"
               data-test="account-workbench-usage"
               :class="embedded ? 'w-full min-w-0' : 'account-usage-card'"
             >
-              <div :class="embedded ? 'account-usage-finance' : ''">
-                <div v-if="!embedded || isWorkbenchModuleEnabled('usage')" class="min-w-0" :style="embedded ? workbenchModuleStyle('usage') : undefined">
-                  <div v-if="embedded" class="mb-2 flex items-center gap-1 text-xs font-semibold text-gray-500 dark:text-gray-400">
-                    <span>{{ t('admin.accounts.columns.usageWindows') }}</span>
-                    <HelpTooltip :content="t('admin.accounts.usageWindowsHint')" width-class="w-72" />
-                  </div>
-                  <AccountUsageCell
-                    :account="row"
-                    :today-stats="todayStatsByAccountId[String(row.id)] ?? null"
-                    :today-stats-loading="todayStatsLoading"
-                    :manual-refresh-token="usageManualRefreshToken"
-                  />
-                  <time
-                    v-if="embedded"
-                    data-test="account-workbench-last-used"
-                    class="mt-2 block text-xs text-gray-500 dark:text-gray-400"
-                    :datetime="row.last_used_at || undefined"
-                    :title="row.last_used_at ? formatDateTime(row.last_used_at) : undefined"
-                  >
-                    {{ t('admin.accounts.columns.lastUsed') }}: {{ formatRelativeTime(row.last_used_at) }}
-                  </time>
-                </div>
-
-                <button
-                  v-if="embedded && isWorkbenchModuleEnabled('finance')"
-                  type="button"
-                  data-test="account-workbench-finance"
-                  class="account-finance-summary min-h-11 min-w-0 text-left"
-                  :style="workbenchModuleStyle('finance')"
-                  :title="t('admin.sharedPool.actions.poolRecord')"
-                  @click="emit('pool-record', row)"
-                >
-                  <div class="flex min-w-0 items-start justify-between gap-2">
-                    <div class="min-w-0">
-                      <p class="truncate text-xs font-semibold text-gray-800 dark:text-gray-100" :title="poolWorkbenchRecordFor(row).sourceName">
-                        {{ poolWorkbenchRecordFor(row).sourceName || t('admin.sharedPool.intake.pending') }}
-                      </p>
-                      <p v-if="poolWorkbenchRecordFor(row).sourceCount > 1" class="text-[10px] text-gray-500 dark:text-gray-400">
-                        {{ t('admin.sharedPool.workbench.sourceCount', { count: poolWorkbenchRecordFor(row).sourceCount }) }}
-                      </p>
-                    </div>
-                    <StatusBadge
-                      class="shrink-0"
-                      :status="poolTraceBadgeStatus(poolWorkbenchRecordFor(row).traceQuality)"
-                      :label="t(`admin.sharedPool.workbench.dataQuality.${poolWorkbenchRecordFor(row).traceQuality}`)"
-                    />
-                  </div>
-
-                  <dl class="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-[11px]">
-                    <div>
-                      <dt class="text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.workbench.grossCost') }}</dt>
-                      <dd class="font-medium tabular-nums text-gray-800 dark:text-gray-100">{{ formatPoolCost(poolWorkbenchRecordFor(row).grossCostMinor) }}</dd>
-                    </div>
-                    <div>
-                      <dt class="text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.ledger.netCost') }}</dt>
-                      <dd class="font-medium tabular-nums text-gray-800 dark:text-gray-100">{{ formatPoolCost(poolWorkbenchRecordFor(row).netCostMinor) }}</dd>
-                    </div>
-                    <div class="col-span-2 flex min-w-0 items-center justify-between gap-2">
-                      <dt class="shrink-0 text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.workbench.latestPurchase') }}</dt>
-                      <dd class="truncate text-right font-medium text-gray-700 dark:text-gray-200" :title="poolWorkbenchRecordFor(row).latestPurchaseAt ? formatDateTime(poolWorkbenchRecordFor(row).latestPurchaseAt) : '-'">
-                        {{ poolWorkbenchRecordFor(row).latestPurchaseAt ? formatDateTime(poolWorkbenchRecordFor(row).latestPurchaseAt) : '-' }}
-                      </dd>
-                    </div>
-                  </dl>
-
-                  <div class="mt-2">
-                    <div class="mb-1 flex items-center justify-between gap-2 text-[10px]">
-                      <span class="text-gray-500 dark:text-gray-400">
-                        {{ t('admin.sharedPool.workbench.recovery') }} {{ formatPoolCost(poolWorkbenchRecordFor(row).recognizedCostMinor) }}
-                      </span>
-                      <span class="font-medium tabular-nums text-gray-700 dark:text-gray-200">{{ (poolWorkbenchRecordFor(row).progress * 100).toFixed(1) }}%</span>
-                    </div>
-                    <div class="h-1.5 overflow-hidden rounded-full bg-gray-200 dark:bg-gray-700">
-                      <div
-                        class="h-full bg-emerald-500 transition-all duration-300"
-                        :style="{ width: `${Math.min(1, poolWorkbenchRecordFor(row).progress) * 100}%` }"
-                      ></div>
-                    </div>
-                  </div>
-
-                  <div class="mt-2 flex items-center justify-between gap-2 text-[11px]">
-                    <span class="text-gray-500 dark:text-gray-400">
-                      {{ t(poolWorkbenchRecordFor(row).remainingCostMinor > 0 ? 'admin.sharedPool.columns.remaining' : 'admin.sharedPool.columns.netProfit') }}
-                    </span>
-                    <span
-                      class="font-semibold tabular-nums"
-                      :class="poolWorkbenchRecordFor(row).remainingCostMinor > 0
-                        ? 'text-amber-600 dark:text-amber-400'
-                        : poolWorkbenchRecordFor(row).netGainMinor >= 0
-                          ? 'text-emerald-600 dark:text-emerald-400'
-                          : 'text-red-600 dark:text-red-400'"
-                    >
-                      {{ formatPoolCost(poolWorkbenchRecordFor(row).remainingCostMinor > 0 ? poolWorkbenchRecordFor(row).remainingCostMinor : poolWorkbenchRecordFor(row).netGainMinor) }}
-                    </span>
-                  </div>
-                </button>
-                <div
-                  v-if="embedded && isWorkbenchModuleEnabled('source')"
-                  data-test="account-workbench-secondary"
-                  class="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-2 border-t border-gray-200 pt-3 text-[11px] text-gray-500 dark:border-dark-700 dark:text-gray-400"
-                  :style="workbenchModuleStyle('source')"
-                >
-                  <span class="min-w-0 truncate" :title="accountUploader(row)">
-                    {{ t('admin.sharedPool.columns.uploader') }}: {{ accountUploader(row) }}
-                  </span>
-                  <span v-if="importBatchID(row)" class="min-w-0 truncate" :title="importBatchID(row)">
-                    {{ t('admin.accounts.importBatchGroup') }}: {{ importBatchID(row) }}
-                  </span>
-                  <AccountGroupsCell v-if="!authStore.isSimpleMode" :groups="row.groups" :max-display="2" />
-                  <span class="min-w-0 truncate" :title="row.proxy?.name || ''">
-                    {{ t('admin.accounts.columns.proxy') }}: {{ row.proxy?.name || '-' }}
-                  </span>
-                </div>
+              <div v-if="embedded" class="mb-2 flex items-center gap-1 text-xs font-semibold text-gray-500 dark:text-gray-400">
+                <span>{{ t('admin.accounts.columns.usageWindows') }}</span>
+                <HelpTooltip :content="t('admin.accounts.usageWindowsHint')" width-class="w-72" />
               </div>
+              <AccountUsageCell
+                :account="row"
+                :today-stats="todayStatsByAccountId[String(row.id)] ?? null"
+                :today-stats-loading="todayStatsLoading"
+                :manual-refresh-token="usageManualRefreshToken"
+              />
+              <time
+                v-if="embedded"
+                data-test="account-workbench-last-used"
+                class="mt-2 block text-xs text-gray-500 dark:text-gray-400"
+                :datetime="row.last_used_at || undefined"
+                :title="row.last_used_at ? formatDateTime(row.last_used_at) : undefined"
+              >
+                {{ t('admin.accounts.columns.lastUsed') }}: {{ formatRelativeTime(row.last_used_at) }}
+              </time>
             </div>
           </template>
           <template #cell-pool_record="{ row }">
             <button
-              v-if="!isImportBatchRow(row)"
+              v-if="!isImportBatchRow(row) && embedded"
+              type="button"
+              data-test="account-workbench-finance"
+              class="account-pool-cell min-h-11 w-full min-w-0 text-left"
+              :title="t('admin.sharedPool.actions.poolRecord')"
+              @click="emit('pool-record', row)"
+            >
+              <div class="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+                <span class="min-w-0 truncate text-xs font-semibold text-gray-800 dark:text-gray-100" :title="poolWorkbenchRecordFor(row).sourceName">
+                  {{ poolWorkbenchRecordFor(row).sourceName || t('admin.sharedPool.intake.pending') }}
+                </span>
+                <span v-if="poolWorkbenchRecordFor(row).sourceCount > 1" class="text-[10px] text-gray-500 dark:text-gray-400">
+                  {{ t('admin.sharedPool.workbench.sourceCount', { count: poolWorkbenchRecordFor(row).sourceCount }) }}
+                </span>
+                <StatusBadge
+                  :status="poolTraceBadgeStatus(poolWorkbenchRecordFor(row).traceQuality)"
+                  :label="t(`admin.sharedPool.workbench.dataQuality.${poolWorkbenchRecordFor(row).traceQuality}`)"
+                />
+              </div>
+              <dl class="mt-2 flex min-w-0 flex-wrap gap-x-4 gap-y-1 text-[11px]">
+                <div class="min-w-0">
+                  <dt class="text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.workbench.grossCost') }}</dt>
+                  <dd class="font-medium tabular-nums text-gray-800 dark:text-gray-100">{{ formatPoolCost(poolWorkbenchRecordFor(row).grossCostMinor) }}</dd>
+                </div>
+                <div class="min-w-0">
+                  <dt class="text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.ledger.netCost') }}</dt>
+                  <dd class="font-medium tabular-nums text-gray-800 dark:text-gray-100">{{ formatPoolCost(poolWorkbenchRecordFor(row).netCostMinor) }}</dd>
+                </div>
+                <div class="min-w-0 flex-1">
+                  <dt class="text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.workbench.latestPurchase') }}</dt>
+                  <dd class="truncate font-medium text-gray-700 dark:text-gray-200" :title="poolWorkbenchRecordFor(row).latestPurchaseAt ? formatDateTime(poolWorkbenchRecordFor(row).latestPurchaseAt) : '-'">
+                    {{ poolWorkbenchRecordFor(row).latestPurchaseAt ? formatDateTime(poolWorkbenchRecordFor(row).latestPurchaseAt) : '-' }}
+                  </dd>
+                </div>
+              </dl>
+              <div class="mt-2 flex min-w-0 items-center gap-2 text-[11px]">
+                <span class="shrink-0 text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.workbench.recovery') }}</span>
+                <div class="h-1.5 min-w-12 flex-1 overflow-hidden rounded-full bg-gray-200 dark:bg-gray-700">
+                  <div class="h-full bg-emerald-500" :style="{ width: `${Math.min(1, poolWorkbenchRecordFor(row).progress) * 100}%` }"></div>
+                </div>
+                <span class="shrink-0 font-medium tabular-nums text-gray-700 dark:text-gray-200">{{ formatPoolCost(poolWorkbenchRecordFor(row).recognizedCostMinor) }} · {{ (poolWorkbenchRecordFor(row).progress * 100).toFixed(1) }}%</span>
+              </div>
+              <div class="mt-1 flex min-w-0 items-center justify-between gap-2 text-[11px]">
+                <span class="text-gray-500 dark:text-gray-400">{{ t(poolWorkbenchRecordFor(row).remainingCostMinor > 0 ? 'admin.sharedPool.columns.remaining' : 'admin.sharedPool.columns.netProfit') }}</span>
+                <span class="font-semibold tabular-nums" :class="poolWorkbenchRecordFor(row).remainingCostMinor > 0 ? 'text-amber-600 dark:text-amber-400' : poolWorkbenchRecordFor(row).netGainMinor >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'">
+                  {{ formatPoolCost(poolWorkbenchRecordFor(row).remainingCostMinor > 0 ? poolWorkbenchRecordFor(row).remainingCostMinor : poolWorkbenchRecordFor(row).netGainMinor) }}
+                </span>
+              </div>
+            </button>
+            <button
+              v-else-if="!isImportBatchRow(row)"
               type="button"
               class="min-h-11 rounded-lg px-2 py-1 text-left transition-colors hover:bg-emerald-50 dark:hover:bg-emerald-900/20"
               @click="emit('pool-record', row)"
             >
               <template v-if="hasPoolCost(row)">
-                <span class="block max-w-36 truncate text-xs font-medium text-emerald-700 dark:text-emerald-300">
-                  {{ poolRecordFor(row.id)?.purchase_source_name || t('admin.sharedPool.actions.poolRecord') }}
-                </span>
-                <span class="block text-xs tabular-nums text-gray-500 dark:text-gray-400">
-                  {{ formatPoolCost(row.pool_net_cost_minor) }} · {{ poolRecoveryLabel(row) }}
-                </span>
+                <span class="block max-w-36 truncate text-xs font-medium text-emerald-700 dark:text-emerald-300">{{ poolRecordFor(row.id)?.purchase_source_name || t('admin.sharedPool.actions.poolRecord') }}</span>
+                <span class="block text-xs tabular-nums text-gray-500 dark:text-gray-400">{{ formatPoolCost(row.pool_net_cost_minor) }} · {{ poolRecoveryLabel(row) }}</span>
               </template>
-              <span v-else class="text-xs font-medium text-amber-600 dark:text-amber-300">
-                {{ t('admin.sharedPool.intake.pending') }}
-              </span>
+              <span v-else class="text-xs font-medium text-amber-600 dark:text-amber-300">{{ t('admin.sharedPool.intake.pending') }}</span>
             </button>
           </template>
           <template #cell-proxy="{ row }">
@@ -889,13 +890,11 @@
               {{ expandedImportBatches.has(row.batchID) ? t('admin.accounts.collapseImportBatch') : t('admin.accounts.expandImportBatch') }}
             </button>
             <div v-else-if="!embedded || isWorkbenchModuleEnabled('actions')" data-test="account-workbench-actions" class="flex items-center gap-1">
-              <button @click="handleEdit(row)" class="flex min-h-11 min-w-11 flex-col items-center justify-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-primary-600 dark:hover:bg-dark-700 dark:hover:text-primary-400">
-                <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10" /></svg>
-                <span class="text-xs">{{ t('common.edit') }}</span>
+              <button :title="t('common.edit')" :aria-label="t('common.edit')" @click="handleEdit(row)" class="flex min-h-11 min-w-11 items-center justify-center rounded-md text-gray-500 transition-colors hover:bg-gray-100 hover:text-primary-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 dark:hover:bg-dark-700 dark:hover:text-primary-400">
+                <Icon name="edit" size="sm" />
               </button>
-              <button @click="openMenu(row)" class="flex min-h-11 min-w-11 flex-col items-center justify-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-900 dark:hover:bg-dark-700 dark:hover:text-white">
-                <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M6.75 12a.75.75 0 11-1.5 0 .75.75 0 011.5 0zM12.75 12a.75.75 0 11-1.5 0 .75.75 0 011.5 0zM18.75 12a.75.75 0 11-1.5 0 .75.75 0 011.5 0z" /></svg>
-                <span class="text-xs">{{ t('common.more') }}</span>
+              <button :title="t('common.more')" :aria-label="t('common.more')" @click="openMenu(row)" class="flex min-h-11 min-w-11 items-center justify-center rounded-md text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 dark:hover:bg-dark-700 dark:hover:text-white">
+                <Icon name="more" size="sm" />
               </button>
             </div>
           </template>
@@ -1379,7 +1378,7 @@ import type { AccountBatchStatusSummary, AccountImportBatchSummary, AccountListF
 import type { PoolApproval, PoolApprovalBusinessChange, PoolApprovalBusinessSummary, PoolApprovalScope, PoolApprovalStatus, PoolCredentialReveal, SharedPoolAccountCost } from '@/api/admin/sharedPool'
 
 type AccountWorkbenchScope = 'all' | 'standalone' | 'uploader' | 'batch'
-type WorkbenchAxis = 'source' | 'usage' | 'type'
+type WorkbenchAxis = 'source' | 'usage' | 'subscription'
 type WorkbenchUsageStatus = NonNullable<AccountListFilters['usage_status']>
 type AccountWorkbenchContext = {
   scope: AccountWorkbenchScope
@@ -1390,6 +1389,7 @@ type AccountWorkbenchContext = {
   search: string
   platform: string
   type: string
+  subscription_tier?: string
   status: string
   usage_status?: WorkbenchUsageStatus
   group: string
@@ -1441,19 +1441,23 @@ const selectedWorkbenchBatchID = ref(props.initialWorkbenchContext.import_batch_
 const selectedWorkbenchUploaderID = ref<number | string>(
   props.initialWorkbenchContext.uploader_user_id ?? props.initialUploaderUserId
 )
+const focusedWorkbenchUploaderID = ref<number | string>(selectedWorkbenchUploaderID.value)
+const focusedWorkbenchBatchID = ref(selectedWorkbenchBatchID.value)
 const workbenchBatches = ref<AccountImportBatchSummary[]>([])
-const workbenchAxes: WorkbenchAxis[] = ['source', 'usage', 'type']
+const workbenchAxes: WorkbenchAxis[] = ['source', 'usage', 'subscription']
 const activeWorkbenchAxis = ref<WorkbenchAxis>('source')
+const focusedWorkbenchUsageStatus = ref<WorkbenchUsageStatus>('attention')
+const focusedWorkbenchSubscriptionTier = ref('')
 const workbenchNavigatorSearch = ref('')
 const expandedWorkbenchUploaders = ref(new Set<string>(
   selectedWorkbenchUploaderID.value === '' ? [] : [String(selectedWorkbenchUploaderID.value)]
 ))
-const workbenchAttentionExpanded = ref(false)
 const workbenchFacetSummary = ref<AccountSelectionSummary>({
   total: 0,
   platforms: [],
   types: [],
   type_counts: {},
+  subscription_tier_counts: {},
   usage_status_counts: {
     all: 0,
     in_use: 0,
@@ -1492,6 +1496,7 @@ type AccountBulkEditTarget =
       filters: {
         platform?: string
         type?: string
+        subscription_tier?: string
         status?: string
         usage_status?: WorkbenchUsageStatus
         group?: string
@@ -1717,24 +1722,23 @@ const WORKBENCH_DISPLAY_STORAGE_KEY = 'account-workbench-display-v1'
 const workbenchViews: WorkbenchView[] = ['runtime', 'usage', 'finance', 'full']
 const WORKBENCH_DEFAULT_MODULE_ORDER: WorkbenchModule[] = ['identity', 'runtime', 'usage', 'finance', 'source', 'actions']
 const WORKBENCH_LOCKED_MODULES = new Set<WorkbenchModule>(['identity', 'actions'])
-const WORKBENCH_VIEW_MODULES: Record<WorkbenchView, WorkbenchModule[]> = {
-  runtime: ['identity', 'runtime', 'actions'],
-  usage: ['identity', 'runtime', 'usage', 'actions'],
-  finance: ['identity', 'runtime', 'finance', 'actions'],
+const WORKBENCH_VIEW_ORDER: Record<WorkbenchView, WorkbenchModule[]> = {
+  runtime: ['identity', 'runtime', 'usage', 'finance', 'source', 'actions'],
+  usage: ['identity', 'usage', 'runtime', 'finance', 'source', 'actions'],
+  finance: ['identity', 'finance', 'usage', 'runtime', 'source', 'actions'],
   full: [...WORKBENCH_DEFAULT_MODULE_ORDER]
 }
 const workbenchView = ref<WorkbenchView | ''>('runtime')
 const workbenchDensity = ref<WorkbenchDensity>('compact')
 const workbenchModuleOrder = ref<WorkbenchModule[]>([...WORKBENCH_DEFAULT_MODULE_ORDER])
-const workbenchEnabledModules = ref<WorkbenchModule[]>([...WORKBENCH_VIEW_MODULES.runtime])
+const workbenchEnabledModules = ref<WorkbenchModule[]>([...WORKBENCH_DEFAULT_MODULE_ORDER])
 const isWorkbenchModuleEnabled = (module: WorkbenchModule) => workbenchEnabledModules.value.includes(module)
 const isWorkbenchModuleLocked = (module: WorkbenchModule) => WORKBENCH_LOCKED_MODULES.has(module)
-const hasWorkbenchCompositeModules = computed(() => ['usage', 'finance', 'source'].some(module => isWorkbenchModuleEnabled(module as WorkbenchModule)))
-const workbenchModuleStyle = (module: WorkbenchModule) => ({ order: workbenchModuleOrder.value.indexOf(module) })
 
 const saveWorkbenchDisplay = () => {
   try {
     localStorage.setItem(WORKBENCH_DISPLAY_STORAGE_KEY, JSON.stringify({
+      version: 2,
       view: workbenchView.value,
       density: workbenchDensity.value,
       moduleOrder: workbenchModuleOrder.value,
@@ -1749,7 +1753,7 @@ const loadWorkbenchDisplay = () => {
   try {
     const saved = localStorage.getItem(WORKBENCH_DISPLAY_STORAGE_KEY)
     if (!saved) return
-    const value = JSON.parse(saved) as { view?: string; density?: string; moduleOrder?: string | string[]; enabledModules?: string[]; showSecondary?: boolean }
+    const value = JSON.parse(saved) as { version?: number; view?: string; density?: string; moduleOrder?: string | string[]; enabledModules?: string[]; showSecondary?: boolean }
     if (workbenchViews.includes(value.view as WorkbenchView)) workbenchView.value = value.view as WorkbenchView
     if (value.density === 'comfortable' || value.density === 'compact') workbenchDensity.value = value.density
     if (Array.isArray(value.moduleOrder)) {
@@ -1758,12 +1762,9 @@ const loadWorkbenchDisplay = () => {
     } else if (value.moduleOrder === 'finance') {
       workbenchModuleOrder.value = ['identity', 'runtime', 'finance', 'usage', 'source', 'actions']
     }
-    if (Array.isArray(value.enabledModules)) {
+    if (value.version === 2 && Array.isArray(value.enabledModules)) {
       const enabled = value.enabledModules.filter((module): module is WorkbenchModule => WORKBENCH_DEFAULT_MODULE_ORDER.includes(module as WorkbenchModule))
       workbenchEnabledModules.value = [...new Set([...enabled, ...WORKBENCH_LOCKED_MODULES])]
-    } else if (workbenchView.value) {
-      workbenchEnabledModules.value = [...WORKBENCH_VIEW_MODULES[workbenchView.value]]
-      if (value.showSecondary) workbenchEnabledModules.value.push('source')
     }
   } catch (error) {
     console.error('Failed to load account workbench display:', error)
@@ -1772,7 +1773,8 @@ const loadWorkbenchDisplay = () => {
 
 const setWorkbenchView = (view: WorkbenchView) => {
   workbenchView.value = view
-  workbenchEnabledModules.value = [...WORKBENCH_VIEW_MODULES[view]]
+  workbenchModuleOrder.value = [...WORKBENCH_VIEW_ORDER[view]]
+  workbenchEnabledModules.value = [...WORKBENCH_DEFAULT_MODULE_ORDER]
   saveWorkbenchDisplay()
   if (isWorkbenchModuleEnabled('usage')) void refreshTodayStatsBatch()
 }
@@ -1808,8 +1810,8 @@ const moveWorkbenchModule = (module: WorkbenchModule, direction: -1 | 1) => {
 const resetWorkbenchDisplay = () => {
   workbenchView.value = 'runtime'
   workbenchDensity.value = 'compact'
-  workbenchModuleOrder.value = [...WORKBENCH_DEFAULT_MODULE_ORDER]
-  workbenchEnabledModules.value = [...WORKBENCH_VIEW_MODULES.runtime]
+  workbenchModuleOrder.value = [...WORKBENCH_VIEW_ORDER.runtime]
+  workbenchEnabledModules.value = [...WORKBENCH_DEFAULT_MODULE_ORDER]
   saveWorkbenchDisplay()
 }
 const hiddenColumns = reactive<Set<string>>(new Set())
@@ -2154,6 +2156,7 @@ const {
   initialParams: {
     platform: props.initialWorkbenchContext.platform || '',
     type: props.initialWorkbenchContext.type || '',
+    subscription_tier: props.initialWorkbenchContext.subscription_tier || '',
     status: embedded ? '' : props.initialWorkbenchContext.status || '',
     usage_status: props.initialWorkbenchContext.usage_status || 'all',
     privacy_mode: props.initialWorkbenchContext.privacy_mode || '',
@@ -2207,6 +2210,7 @@ const invalidateImportBatchCache = (collapse = false) => {
 const buildImportBatchFilters = () => ({
   platform: String(params.platform || ''),
   type: String(params.type || ''),
+  subscription_tier: String(params.subscription_tier || ''),
   status: String(params.status || ''),
   usage_status: selectedWorkbenchUsageStatus.value,
   group: String(params.group || ''),
@@ -2407,30 +2411,51 @@ const filteredWorkbenchUploaderGroups = computed<WorkbenchUploaderGroup[]>(() =>
     .filter(group => group.batches.length > 0)
 })
 const workbenchNavigatorResultCount = computed(() => filteredWorkbenchUploaderGroups.value.length)
-const workbenchPrimaryUsageStatuses: WorkbenchUsageStatus[] = ['all', 'in_use', 'ready', 'unused']
 const workbenchAttentionUsageStatuses: WorkbenchUsageStatus[] = ['error', 'restricted', 'disabled']
-watch(selectedWorkbenchUsageStatus, status => {
-  if (workbenchAttentionUsageStatuses.includes(status)) workbenchAttentionExpanded.value = true
-}, { immediate: true })
+const workbenchOperationalUsageStatuses: WorkbenchUsageStatus[] = ['attention', ...workbenchAttentionUsageStatuses, 'ready', 'in_use', 'unused', 'all']
 const workbenchUsageStatusLabel = (status: WorkbenchUsageStatus) => t(`admin.accounts.workbenchUsageStatus.${status}`)
+const workbenchUsageStatusIcon = (status: WorkbenchUsageStatus): 'exclamationTriangle' | 'xCircle' | 'ban' | 'checkCircle' | 'play' | 'clock' | 'grid' => {
+  if (status === 'attention') return 'exclamationTriangle'
+  if (status === 'error') return 'xCircle'
+  if (status === 'restricted' || status === 'disabled') return 'ban'
+  if (status === 'ready') return 'checkCircle'
+  if (status === 'in_use') return 'play'
+  if (status === 'unused') return 'clock'
+  return 'grid'
+}
+const workbenchUsageStatusIconClass = (status: WorkbenchUsageStatus) =>
+  workbenchAttentionUsageStatuses.includes(status) || status === 'attention'
+    ? 'shrink-0 text-amber-500'
+    : status === 'ready'
+      ? 'shrink-0 text-emerald-500'
+      : 'shrink-0 text-gray-400'
 const workbenchAxisLabel = (axis: WorkbenchAxis) => t(`admin.accounts.workbench${axis[0]!.toUpperCase()}${axis.slice(1)}Axis`)
 const workbenchUsageStatusCount = (status: WorkbenchUsageStatus) =>
   workbenchFacetSummary.value.usage_status_counts?.[status] ?? (status === 'all' ? workbenchFacetSummary.value.total : 0)
-const workbenchAccountTypeLabel = (accountType: string) => {
-  const key = APPROVAL_ACCOUNT_TYPE_KEYS[accountType]
-  return key ? t(key) : accountType.replace(/[_-]+/g, ' ')
+const workbenchSubscriptionLabel = (tier: string) => {
+  if (!tier) return t('admin.accounts.workbenchAllSubscriptions')
+  if (tier === 'non_subscription') return t('admin.accounts.workbenchNonSubscription')
+  if (tier === 'unknown') return t('common.unknown')
+  if (tier === 'supergrok') return 'SuperGrok'
+  if (tier === 'supergrokheavy') return 'SuperGrok Heavy'
+  return tier.charAt(0).toLocaleUpperCase() + tier.slice(1)
 }
-const workbenchTypeOptions = computed(() => {
-  const counts = { ...(workbenchFacetSummary.value.type_counts || {}) }
-  const selected = String(params.type || '')
+const workbenchSubscriptionOptions = computed(() => {
+  const counts = { ...(workbenchFacetSummary.value.subscription_tier_counts || {}) }
+  const selected = String(params.subscription_tier || '')
   if (selected && counts[selected] === undefined) counts[selected] = 0
   const entries = Object.entries(counts)
-    .map(([value, count]) => ({ value, count, label: workbenchAccountTypeLabel(value) }))
-    .sort((left, right) => left.label.localeCompare(right.label))
+    .map(([value, count]) => ({ value, count, label: workbenchSubscriptionLabel(value) }))
+    .sort((left, right) => {
+      const order = ['plus', 'pro', 'team', 'business', 'free', 'supergrok', 'supergrokheavy', 'unknown', 'non_subscription']
+      const leftIndex = order.indexOf(left.value)
+      const rightIndex = order.indexOf(right.value)
+      return (leftIndex < 0 ? order.length : leftIndex) - (rightIndex < 0 ? order.length : rightIndex) || left.label.localeCompare(right.label)
+    })
   const total = entries.length
     ? entries.reduce((sum, option) => sum + option.count, 0)
     : workbenchFacetSummary.value.total
-  return [{ value: '', count: total, label: t('admin.accounts.allTypes') }, ...entries]
+  return [{ value: '', count: total, label: t('admin.accounts.workbenchAllSubscriptions') }, ...entries]
 })
 const workbenchUploaderInitial = (label: string) => label.trim().charAt(0).toLocaleUpperCase() || '?'
 const workbenchUploaderStatusLabel = (status: string) => status === 'active'
@@ -2439,13 +2464,18 @@ const workbenchUploaderStatusLabel = (status: string) => status === 'active'
     ? t('admin.accounts.workbenchUploaderDisabled')
     : t('common.unknown')
 const workbenchUploaderAttentionCount = (group: WorkbenchUploaderGroup) => Math.max(0, group.count - group.status.normal)
+const isWorkbenchUploaderFocused = (group: WorkbenchUploaderGroup) =>
+  String(focusedWorkbenchUploaderID.value) === String(group.id)
+const isWorkbenchUploaderScoped = (group: WorkbenchUploaderGroup) =>
+  workbenchScope.value === 'uploader' && String(selectedWorkbenchUploaderID.value) === String(group.id)
 const isWorkbenchUploaderExpanded = (group: WorkbenchUploaderGroup) =>
   expandedWorkbenchUploaders.value.has(String(group.id))
 const toggleWorkbenchUploader = (id: number | string) => {
-  const next = new Set(expandedWorkbenchUploaders.value)
   const key = String(id)
-  next.has(key) ? next.delete(key) : next.add(key)
-  expandedWorkbenchUploaders.value = next
+  const expanded = expandedWorkbenchUploaders.value.has(key)
+  focusedWorkbenchUploaderID.value = expanded ? '' : id
+  focusedWorkbenchBatchID.value = ''
+  expandedWorkbenchUploaders.value = expanded ? new Set() : new Set([key])
 }
 const formatWorkbenchDate = (value: string) => new Date(value).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
 const workbenchBatchTitle = (batch: AccountImportBatchSummary) => {
@@ -2471,8 +2501,8 @@ const workbenchFilterChips = computed<Array<{ axis: WorkbenchAxis; label: string
   if (selectedWorkbenchUsageStatus.value !== 'all') {
     chips.push({ axis: 'usage', label: workbenchAxisLabel('usage'), value: workbenchUsageStatusLabel(selectedWorkbenchUsageStatus.value) })
   }
-  if (params.type) {
-    chips.push({ axis: 'type', label: workbenchAxisLabel('type'), value: workbenchAccountTypeLabel(String(params.type)) })
+  if (params.subscription_tier) {
+    chips.push({ axis: 'subscription', label: workbenchAxisLabel('subscription'), value: workbenchSubscriptionLabel(String(params.subscription_tier)) })
   }
   return chips
 })
@@ -2496,6 +2526,7 @@ const workbenchSubtitle = computed(() => {
 const workbenchNavigatorFilters = () => ({
   platform: String(params.platform || ''),
   type: String(params.type || ''),
+  subscription_tier: String(params.subscription_tier || ''),
   status: String(params.status || ''),
   usage_status: selectedWorkbenchUsageStatus.value,
   group: String(params.group || ''),
@@ -2572,9 +2603,9 @@ const loadWorkbenchNavigator = async () => {
     }
     if (revision !== workbenchNavigatorRevision) return
     workbenchBatches.value = batches
-    workbenchFacetSummary.value = facets
-    workbenchAccountTotal.value = summary.total
-    workbenchStandaloneCount.value = standalone.total
+    workbenchFacetSummary.value = facets || workbenchFacetSummary.value
+    workbenchAccountTotal.value = summary?.total ?? 0
+    workbenchStandaloneCount.value = standalone?.total ?? 0
     workbenchBatchTotal.value = result.total
     workbenchBatchPage.value = result.page
     workbenchBatchPages.value = Math.max(1, result.pages || 1)
@@ -2619,6 +2650,7 @@ const emitWorkbenchContext = () => emit('workbench-context', {
   search: String(params.search || ''),
   platform: String(params.platform || ''),
   type: String(params.type || ''),
+  subscription_tier: String(params.subscription_tier || ''),
   status: String(params.status || ''),
   usage_status: selectedWorkbenchUsageStatus.value,
   group: String(params.group || ''),
@@ -2626,11 +2658,19 @@ const emitWorkbenchContext = () => emit('workbench-context', {
   sort_by: sortState.sort_by,
   sort_order: sortState.sort_order
 })
+const focusWorkbenchUsageStatus = (status: WorkbenchUsageStatus) => {
+  activeWorkbenchAxis.value = 'usage'
+  focusedWorkbenchUsageStatus.value = status
+}
+const focusWorkbenchSubscription = (tier: string) => {
+  focusedWorkbenchSubscriptionTier.value = tier
+}
 const selectWorkbenchUsageStatus = (status: WorkbenchUsageStatus) => {
   if (selectedWorkbenchUsageStatus.value === status) {
-    closeMobileWorkbenchNavigator()
-    return
+    if (status === 'all') return
+    status = 'all'
   }
+  focusWorkbenchUsageStatus(status)
   params.usage_status = status
   clearSelection()
   pagination.page = 1
@@ -2638,12 +2678,13 @@ const selectWorkbenchUsageStatus = (status: WorkbenchUsageStatus) => {
   emitWorkbenchContext()
   void reload()
 }
-const selectWorkbenchType = (accountType: string) => {
-  if (String(params.type || '') === accountType) {
-    closeMobileWorkbenchNavigator()
-    return
+const selectWorkbenchSubscription = (tier: string) => {
+  if (String(params.subscription_tier || '') === tier) {
+    if (!tier) return
+    tier = ''
   }
-  params.type = accountType
+  focusWorkbenchSubscription(tier)
+  params.subscription_tier = tier
   clearSelection()
   pagination.page = 1
   closeMobileWorkbenchNavigator()
@@ -2729,7 +2770,24 @@ const selectWorkbenchScope = (scope: 'all' | 'standalone') => {
   emitWorkbenchContext()
   void reload()
 }
+const focusWorkbenchUploader = (group: WorkbenchUploaderGroup) => {
+  const key = String(group.id)
+  focusedWorkbenchUploaderID.value = group.id
+  focusedWorkbenchBatchID.value = ''
+  expandedWorkbenchUploaders.value = new Set([key])
+}
+const focusWorkbenchBatch = (batch: AccountImportBatchSummary) => {
+  const uploaderID = batch.uploader_user_id ?? 'unassigned'
+  focusedWorkbenchUploaderID.value = uploaderID
+  focusedWorkbenchBatchID.value = batch.id
+  expandedWorkbenchUploaders.value = new Set([String(uploaderID)])
+}
 const selectWorkbenchUploader = (group: WorkbenchUploaderGroup) => {
+  if (isWorkbenchUploaderScoped(group)) {
+    selectWorkbenchScope('all')
+    return
+  }
+  focusWorkbenchUploader(group)
   workbenchScope.value = 'uploader'
   selectedWorkbenchBatchID.value = ''
   selectedWorkbenchUploaderID.value = group.id
@@ -2741,6 +2799,11 @@ const selectWorkbenchUploader = (group: WorkbenchUploaderGroup) => {
   void reload()
 }
 const selectWorkbenchBatch = (batch: AccountImportBatchSummary) => {
+  if (workbenchScope.value === 'batch' && selectedWorkbenchBatchID.value === batch.id) {
+    selectWorkbenchScope('all')
+    return
+  }
+  focusWorkbenchBatch(batch)
   workbenchScope.value = 'batch'
   selectedWorkbenchBatchID.value = batch.id
   selectedWorkbenchUploaderID.value = batch.uploader_user_id ?? 'unassigned'
@@ -2754,7 +2817,7 @@ const selectWorkbenchBatch = (batch: AccountImportBatchSummary) => {
 const clearWorkbenchFilterChip = (axis: WorkbenchAxis) => {
   if (axis === 'source') selectWorkbenchScope('all')
   else if (axis === 'usage') selectWorkbenchUsageStatus('all')
-  else selectWorkbenchType('')
+  else selectWorkbenchSubscription('')
 }
 const toggleImportBatch = async (id: string) => {
   const next = new Set(expandedImportBatches.value)
@@ -2982,6 +3045,7 @@ const applyWorkbenchContext = async (context: Partial<AccountWorkbenchContext>) 
     search: context.search || '',
     platform: context.platform || '',
     type: context.type || '',
+    subscription_tier: context.subscription_tier || '',
     status: '',
     usage_status: context.usage_status || selectedWorkbenchUsageStatus.value,
     group: context.group || '',
@@ -3001,8 +3065,12 @@ const applyWorkbenchContext = async (context: Partial<AccountWorkbenchContext>) 
   workbenchScope.value = nextScope
   selectedWorkbenchBatchID.value = nextBatchID
   selectedWorkbenchUploaderID.value = nextUploaderID
+  focusedWorkbenchBatchID.value = nextBatchID
+  focusedWorkbenchUploaderID.value = nextUploaderID
+  focusedWorkbenchUsageStatus.value = nextFilters.usage_status
+  focusedWorkbenchSubscriptionTier.value = nextFilters.subscription_tier
   if (nextUploaderID !== '') {
-    expandedWorkbenchUploaders.value = new Set(expandedWorkbenchUploaders.value).add(String(nextUploaderID))
+    expandedWorkbenchUploaders.value = new Set([String(nextUploaderID)])
   }
   pagination.page = nextPage
   pagination.page_size = nextPageSize
@@ -3084,6 +3152,7 @@ const clearFilters = () => {
   Object.assign(params, {
     platform: '',
     type: '',
+    subscription_tier: '',
     status: '',
     usage_status: 'all',
     privacy_mode: '',
@@ -3524,18 +3593,14 @@ const cols = computed(() => {
     const moduleByColumn: Record<string, WorkbenchModule> = {
       name: 'identity',
       status: 'runtime',
+      usage: 'usage',
+      pool_record: 'finance',
+      uploader: 'source',
       actions: 'actions'
     }
-    const keys = ['name', 'status', 'usage', 'actions']
-      .filter(key => key === 'usage' ? hasWorkbenchCompositeModules.value : isWorkbenchModuleEnabled(moduleByColumn[key]!))
-      .sort((left, right) => {
-        const position = (key: string) => key === 'usage'
-          ? Math.min(...(['usage', 'finance', 'source'] as WorkbenchModule[])
-            .filter(isWorkbenchModuleEnabled)
-            .map(module => workbenchModuleOrder.value.indexOf(module)))
-          : workbenchModuleOrder.value.indexOf(moduleByColumn[key]!)
-        return position(left) - position(right)
-      })
+    const keys = ['name', 'status', 'usage', 'pool_record', 'uploader', 'actions']
+      .filter(key => isWorkbenchModuleEnabled(moduleByColumn[key]!))
+      .sort((left, right) => workbenchModuleOrder.value.indexOf(moduleByColumn[left]!) - workbenchModuleOrder.value.indexOf(moduleByColumn[right]!))
     return ['select', ...keys].flatMap(key => {
       const column = allColumns.value.find(col => col.key === key)
       return column ? [column] : []
@@ -4113,6 +4178,7 @@ const buildBulkEditFilterSnapshot = () => {
   const filters = {
     platform: typeof rawParams.platform === 'string' ? rawParams.platform : '',
     type: typeof rawParams.type === 'string' ? rawParams.type : '',
+    subscription_tier: typeof rawParams.subscription_tier === 'string' ? rawParams.subscription_tier : '',
     status: typeof rawParams.status === 'string' ? rawParams.status : '',
     usage_status: (rawParams.usage_status || 'all') as WorkbenchUsageStatus,
     group: typeof rawParams.group === 'string' ? rawParams.group : '',
@@ -4153,7 +4219,7 @@ const openBulkEditSelected = () => {
 
 const hasEffectiveFilters = computed(() => {
   return Boolean(
-    params.platform || params.type || params.status || params.group ||
+    params.platform || params.type || params.subscription_tier || params.status || params.group ||
     String(params.search || '').trim() || params.privacy_mode || params.uploader_user_id ||
     selectedWorkbenchUsageStatus.value !== 'all' || (embedded && workbenchScope.value !== 'all')
   )
@@ -4197,6 +4263,7 @@ const buildAccountQueryFilters = () => {
   const filters = workbenchRequestFilters({
     platform: params.platform || '',
     type: params.type || '',
+    subscription_tier: params.subscription_tier || '',
     status: params.status || '',
     usage_status: selectedWorkbenchUsageStatus.value,
     group: params.group || '',
@@ -4631,10 +4698,6 @@ onUnmounted(() => {
   box-shadow: none;
 }
 
-.account-operation-actions :deep(> button:first-of-type) {
-  display: none;
-}
-
 .workbench-sidebar-header {
   @apply shrink-0 border-b border-gray-200 bg-white/90 p-3 dark:border-dark-700 dark:bg-dark-900/80;
 }
@@ -4657,6 +4720,14 @@ onUnmounted(() => {
 
 .workbench-nav-item-active {
   @apply bg-primary-50 font-semibold text-primary-700 dark:bg-primary-900/20 dark:text-primary-300;
+}
+
+.workbench-focus-active {
+  @apply bg-gray-100/80 text-gray-900 dark:bg-dark-800/80 dark:text-white;
+}
+
+.workbench-scope-active {
+  @apply text-primary-700 dark:text-primary-300;
 }
 
 .workbench-nav-count {
@@ -4686,13 +4757,25 @@ onUnmounted(() => {
 }
 
 .workbench-uploader-row,
-.workbench-attention-row {
+.workbench-attention-row,
+.workbench-operational-row,
+.workbench-batch-row {
   @apply flex min-h-11 min-w-0 items-center rounded-md text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-dark-800;
+  transition: background-color 160ms ease, color 160ms ease;
 }
 
 .workbench-uploader-main,
-.workbench-attention-main {
+.workbench-attention-main,
+.workbench-operational-main {
   @apply flex min-h-11 min-w-0 flex-1 items-center gap-2 px-2 py-1.5 text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary-500;
+}
+
+.workbench-scope-toggle {
+  @apply inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-md text-gray-300 hover:bg-gray-200 hover:text-gray-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary-500 dark:text-gray-600 dark:hover:bg-dark-700 dark:hover:text-gray-300;
+}
+
+.workbench-scope-toggle-active {
+  @apply text-primary-600 dark:text-primary-300;
 }
 
 .workbench-uploader-avatar {
@@ -4725,7 +4808,7 @@ onUnmounted(() => {
 
 .workbench-uploader-batches,
 .workbench-attention-children {
-  @apply ml-5 pl-2;
+  @apply min-w-0;
 }
 
 .workbench-batch-item-active {
@@ -4733,7 +4816,19 @@ onUnmounted(() => {
 }
 
 .workbench-batch-main {
-  @apply flex min-h-11 w-full min-w-0 items-center gap-2 rounded-md px-2.5 py-2 text-left text-xs hover:bg-gray-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary-500 dark:hover:bg-dark-800;
+  @apply flex min-h-11 min-w-0 flex-1 items-center gap-2 rounded-md px-2.5 py-2 text-left text-xs focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary-500;
+}
+
+.workbench-focus-panel {
+  @apply min-w-0 pb-2 pl-10 pr-1;
+}
+
+.workbench-focus-actions {
+  @apply flex min-w-0 flex-wrap items-center gap-1 py-1;
+}
+
+.workbench-focus-actions button {
+  @apply inline-flex min-h-11 items-center gap-1.5 rounded-md px-2 text-xs font-medium text-gray-500 hover:bg-gray-100 hover:text-primary-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 dark:text-gray-400 dark:hover:bg-dark-700 dark:hover:text-primary-300;
 }
 
 .workbench-batch-meta {
@@ -4904,19 +4999,6 @@ onUnmounted(() => {
   @apply min-w-[232px] rounded-lg border border-gray-200/80 bg-gray-50/70 px-3 py-2 dark:border-dark-700 dark:bg-dark-800/60;
 }
 
-.account-usage-finance {
-  display: grid;
-  min-width: 0;
-  gap: 12px;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr));
-}
-
-.account-finance-summary {
-  width: 100%;
-  padding-top: 12px;
-  border-top: 1px solid rgb(226 232 240 / 0.9);
-}
-
 .account-workbench-table.is-compact :deep(.table-body tr[data-row-id] td) {
   padding-top: 8px;
   padding-bottom: 8px;
@@ -4936,8 +5018,30 @@ onUnmounted(() => {
   min-width: 0;
 }
 
-.dark .account-finance-summary {
-  border-top-color: rgb(51 65 85 / 0.8);
+.account-source-cell {
+  @apply flex min-w-0 flex-col gap-1;
+}
+
+.account-pool-cell {
+  @apply px-1 py-1 transition-colors hover:bg-gray-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 dark:hover:bg-dark-800;
+  max-width: 100%;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+
+.account-pool-cell > div,
+.account-pool-cell > dl {
+  max-width: 100%;
+  flex-wrap: wrap;
+}
+
+.account-workbench-table.is-embedded :deep(.openai-usage-window > div > div:last-child) {
+  max-width: 100%;
+  flex-wrap: wrap;
+}
+
+.account-workbench-table.is-embedded :deep(.openai-usage-window > div > div:last-child > span:first-child) {
+  width: 2rem;
 }
 
 /* Preserve the regular account page table; only the embedded pool view uses the composite card grid. */
@@ -4992,7 +5096,7 @@ onUnmounted(() => {
     display: grid;
     width: 100%;
     min-width: 0;
-    grid-template-columns: minmax(2.75rem, 0.2fr) repeat(auto-fit, minmax(min(100%, 11rem), 1fr));
+    grid-template-columns: minmax(2.75rem, 0.24fr) repeat(auto-fit, minmax(min(100%, 8rem), 1fr));
     margin: 0;
     overflow: visible;
     border: 0;
@@ -5008,6 +5112,7 @@ onUnmounted(() => {
     align-items: center;
     padding: 12px;
     white-space: normal;
+    overflow-wrap: anywhere;
     background: transparent;
   }
 
@@ -5038,17 +5143,19 @@ onUnmounted(() => {
 
 @media (min-width: 768px) and (max-width: 1439px) {
   .account-workbench-table.is-embedded :deep(.table-body tr[data-row-id]) {
-    grid-template-columns: minmax(2.75rem, 0.2fr) repeat(auto-fit, minmax(min(100%, 10rem), 1fr));
+    grid-template-columns: minmax(2.75rem, 0.24fr) repeat(auto-fit, minmax(min(100%, 7.5rem), 1fr));
   }
+}
 
-  .account-workbench-table.is-embedded :deep(.account-field-usage) {
-    grid-column: span 2;
+@media (min-width: 1180px) and (max-width: 1365px) {
+  .account-workbench-table.is-embedded :deep(.table-body tr[data-row-id]) {
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 7.5rem), 1fr));
   }
 }
 
 @media (min-width: 1440px) {
   .account-workbench-table.is-embedded :deep(.table-body tr[data-row-id]) {
-    grid-template-columns: minmax(2.75rem, 0.15fr) repeat(auto-fit, minmax(min(100%, 12rem), 1fr));
+    grid-template-columns: minmax(2.75rem, 0.2fr) repeat(auto-fit, minmax(min(100%, 9.5rem), 1fr));
   }
 }
 

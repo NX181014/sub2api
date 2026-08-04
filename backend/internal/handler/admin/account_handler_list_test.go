@@ -126,20 +126,30 @@ func TestAccountHandlerSelectionSummaryUsesListFilters(t *testing.T) {
 	batchID := "668f52b3-14af-4a5a-bde0-e923ed69299a"
 	adminSvc.selectionSummary = &service.AccountSelectionSummary{
 		Total: 3, Platforms: []string{"anthropic", "openai"}, Types: []string{"oauth"},
-		TypeCounts: map[string]int64{"oauth": 3}, UsageStatusCounts: map[string]int64{"all": 3},
+		TypeCounts: map[string]int64{"oauth": 3}, SubscriptionTierCounts: map[string]int64{"pro": 3}, UsageStatusCounts: map[string]int64{"all": 3},
 	}
 
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/accounts/selection-summary?platform=openai&type=oauth&status=active&group=12&privacy_mode=blocked&search=%20key%20&uploader_user_id=77&import_batch_id="+batchID, nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/accounts/selection-summary?platform=openai&type=oauth&subscription_tier=ChatGPT-Pro&status=active&group=12&privacy_mode=blocked&search=%20key%20&uploader_user_id=77&import_batch_id="+batchID, nil)
 	router.ServeHTTP(rec, req)
 
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.Equal(t, 1, adminSvc.selectionSummaryCalls)
 	require.Equal(t, service.AccountSelectionFilters{
-		Platform: "openai", Type: "oauth", Status: "active", Search: "key", GroupID: 12,
+		Platform: "openai", Type: "oauth", SubscriptionTier: "pro", Status: "active", Search: "key", GroupID: 12,
 		PrivacyMode: "blocked", UploaderUserID: 77, ImportBatchID: batchID,
 	}, adminSvc.selectionSummaryFilters)
-	require.JSONEq(t, `{"code":0,"message":"success","data":{"total":3,"platforms":["anthropic","openai"],"types":["oauth"],"type_counts":{"oauth":3},"usage_status_counts":{"all":3}}}`, rec.Body.String())
+	require.JSONEq(t, `{"code":0,"message":"success","data":{"total":3,"platforms":["anthropic","openai"],"types":["oauth"],"type_counts":{"oauth":3},"subscription_tier_counts":{"pro":3},"usage_status_counts":{"all":3}}}`, rec.Body.String())
+}
+
+func TestAccountHandlerNormalizesNonSubscriptionTier(t *testing.T) {
+	router, adminSvc := setupAccountListRouter()
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/accounts/selection-summary?subscription_tier=non_subscription", nil)
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, service.AccountSubscriptionTierNonSubscription, adminSvc.selectionSummaryFilters.SubscriptionTier)
 }
 
 func TestAccountHandlerUsageStatusUsesConcurrencyAcrossFullResult(t *testing.T) {

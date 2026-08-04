@@ -41,24 +41,31 @@
         class="min-h-11 px-2 text-sm font-medium text-primary-700 hover:text-primary-800 disabled:cursor-not-allowed disabled:opacity-50 dark:text-primary-300 dark:hover:text-primary-200"
         @click="$emit('clear')"
       >
+        <Icon name="x" size="sm" />
         {{ t('admin.accounts.bulkActions.clear') }}
       </button>
     </div>
 
     <div v-if="selectedIds.length" class="flex w-full flex-wrap gap-2 sm:w-auto sm:justify-end">
-      <button :disabled="busy" @click="$emit('edit-selected')" class="btn btn-primary min-h-11 disabled:cursor-not-allowed disabled:opacity-50">{{ t('admin.accounts.bulkActions.edit') }}</button>
-      <button :disabled="busy" @click="showMore = true" class="btn btn-secondary min-h-11 disabled:cursor-not-allowed disabled:opacity-50">{{ t('common.more') }}</button>
+      <button :disabled="busy" @click="$emit('edit-selected')" class="btn btn-primary min-h-11 disabled:cursor-not-allowed disabled:opacity-50">
+        <Icon name="edit" size="sm" />
+        {{ t('admin.accounts.bulkActions.edit') }}
+      </button>
+      <button :disabled="busy" @click="showMore = true" class="btn btn-secondary min-h-11 disabled:cursor-not-allowed disabled:opacity-50">
+        <Icon name="more" size="sm" />
+        {{ t('common.more') }}
+      </button>
     </div>
     <BaseDialog :show="showMore" :title="t('admin.accounts.bulkActions.title')" width="normal" :close-on-click-outside="true" @close="showMore = false">
       <div class="grid grid-cols-1 gap-2 sm:grid-cols-2">
-        <button class="bulk-dialog-action" :disabled="busy" @click="$emit('reset-status'); showMore = false">{{ t('admin.accounts.bulkActions.resetStatus') }}</button>
-        <button class="bulk-dialog-action" :disabled="busy" @click="$emit('refresh-token'); showMore = false">{{ t('admin.accounts.bulkActions.refreshToken') }}</button>
-        <button class="bulk-dialog-action" :disabled="busy" @click="$emit('probe-upstream-billing'); showMore = false">{{ t('admin.accounts.bulkActions.probeUpstreamBilling') }}</button>
-        <button class="bulk-dialog-action" :disabled="busy" @click="$emit('toggle-schedulable', true); showMore = false">{{ t('admin.accounts.bulkActions.enableScheduling') }}</button>
-        <button class="bulk-dialog-action" :disabled="busy" @click="$emit('toggle-schedulable', false); showMore = false">{{ t('admin.accounts.bulkActions.disableScheduling') }}</button>
+        <button class="bulk-dialog-action" :disabled="busy" @click="$emit('reset-status'); showMore = false"><Icon name="refresh" size="sm" />{{ t('admin.accounts.bulkActions.resetStatus') }}</button>
+        <button class="bulk-dialog-action" :disabled="busy" @click="$emit('refresh-token'); showMore = false"><Icon name="key" size="sm" />{{ t('admin.accounts.bulkActions.refreshToken') }}</button>
+        <button class="bulk-dialog-action" :disabled="busy" @click="$emit('probe-upstream-billing'); showMore = false"><Icon name="chart" size="sm" />{{ t('admin.accounts.bulkActions.probeUpstreamBilling') }}</button>
+        <button class="bulk-dialog-action" :disabled="busy" @click="$emit('toggle-schedulable', true); showMore = false"><Icon name="checkCircle" size="sm" />{{ t('admin.accounts.bulkActions.enableScheduling') }}</button>
+        <button class="bulk-dialog-action" :disabled="busy" @click="$emit('toggle-schedulable', false); showMore = false"><Icon name="ban" size="sm" />{{ t('admin.accounts.bulkActions.disableScheduling') }}</button>
       </div>
       <div class="mt-5 border-t border-red-200 pt-4 dark:border-red-900/60">
-        <button :disabled="busy" @click="$emit('delete'); showMore = false" class="btn btn-danger min-h-11 disabled:cursor-not-allowed disabled:opacity-50">{{ t('admin.accounts.bulkActions.delete') }}</button>
+        <button :disabled="busy" @click="$emit('delete'); showMore = false" class="btn btn-danger min-h-11 disabled:cursor-not-allowed disabled:opacity-50"><Icon name="trash" size="sm" />{{ t('admin.accounts.bulkActions.delete') }}</button>
       </div>
     </BaseDialog>
   </div>
@@ -68,6 +75,7 @@
 import { ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import BaseDialog from '@/components/common/BaseDialog.vue'
+import Icon from '@/components/icons/Icon.vue'
 
 withDefaults(defineProps<{
   selectedIds: number[]
@@ -104,6 +112,6 @@ const showMore = ref(false)
 
 <style scoped>
 .bulk-dialog-action {
-  @apply min-h-11 rounded-lg border border-gray-200 px-3 py-2 text-left text-sm font-medium text-gray-800 hover:border-primary-300 hover:bg-primary-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-dark-700 dark:text-gray-100 dark:hover:border-primary-700 dark:hover:bg-primary-900/20;
+  @apply flex min-h-11 items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-left text-sm font-medium text-gray-800 hover:border-primary-300 hover:bg-primary-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-dark-700 dark:text-gray-100 dark:hover:border-primary-700 dark:hover:bg-primary-900/20;
 }
 </style>

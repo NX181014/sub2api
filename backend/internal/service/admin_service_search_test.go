@@ -271,6 +271,29 @@ func TestAdminService_SelectionContractsForwardFilters(t *testing.T) {
 	require.Equal(t, filters, repo.selectionFilters)
 }
 
+func TestAccountSubscriptionTierNormalizesProviderPlans(t *testing.T) {
+	tests := []struct {
+		name        string
+		platform    string
+		accountType string
+		credentials map[string]any
+		want        string
+	}{
+		{name: "openai pro alias", platform: PlatformOpenAI, accountType: AccountTypeOAuth, credentials: map[string]any{"plan_type": "ChatGPT Pro"}, want: "pro"},
+		{name: "grok super", platform: PlatformGrok, accountType: AccountTypeOAuth, credentials: map[string]any{"subscription_tier": "SUPER_GROK"}, want: "supergrok"},
+		{name: "free alias", platform: PlatformOpenAI, accountType: AccountTypeOAuth, credentials: map[string]any{"plan_type": "basic"}, want: "free"},
+		{name: "blank plan falls back", platform: PlatformOpenAI, accountType: AccountTypeOAuth, credentials: map[string]any{"plan_type": "  ", "subscription_tier": "Team-Plan"}, want: "teamplan"},
+		{name: "unknown subscription", platform: PlatformAnthropic, accountType: AccountTypeSetupToken, want: AccountSubscriptionTierUnknown},
+		{name: "api key", platform: PlatformOpenAI, accountType: AccountTypeAPIKey, credentials: map[string]any{"plan_type": "plus"}, want: AccountSubscriptionTierNonSubscription},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			require.Equal(t, test.want, AccountSubscriptionTier(test.platform, test.accountType, test.credentials))
+		})
+	}
+	require.Equal(t, AccountSubscriptionTierNonSubscription, NormalizeAccountSubscriptionTierName("non_subscription"))
+}
+
 func TestAdminService_ListProxies_WithSearch(t *testing.T) {
 	t.Run("search 参数正常传递到 repository 层", func(t *testing.T) {
 		repo := &proxyRepoStubForAdminList{

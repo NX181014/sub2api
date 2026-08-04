@@ -15,6 +15,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"slices"
 	"strconv"
 	"strings"
@@ -1000,10 +1001,35 @@ func (r *accountRepository) accountSelectionFilteredQuery(filters service.Accoun
 		uploaderUserID = &filters.UploaderUserID
 	}
 	q := r.accountListFilteredQuery(filters.Platform, filters.Type, filters.Status, filters.Search, filters.GroupID, filters.PrivacyMode, uploaderUserID, filters.UploaderUnassigned, filters.ImportBatchID, filters.ImportBatchScope)
+	if filters.SubscriptionTier != "" {
+		q = q.Where(accountSubscriptionTierPredicate(filters.SubscriptionTier))
+	}
 	if predicate := accountUsageStatusPredicate(filters.UsageStatus, filters.InUseAccountIDs, time.Now()); predicate != nil {
 		q = q.Where(predicate)
 	}
 	return q
+}
+
+func accountSubscriptionTierPredicate(tier string) dbpredicate.Account {
+	return dbpredicate.Account(func(s *entsql.Selector) {
+		s.Where(entsql.ExprP(accountSubscriptionTierExpression(s.C(dbaccount.FieldType), s.C(dbaccount.FieldCredentials))+" = ?", tier))
+	})
+}
+
+func accountSubscriptionTierExpression(typeColumn, credentialsColumn string) string {
+	normalizedPlan := fmt.Sprintf(
+		"LOWER(REGEXP_REPLACE(BTRIM(COALESCE(NULLIF(BTRIM(%[1]s->>'plan_type'), ''), NULLIF(BTRIM(%[1]s->>'subscription_tier'), ''), '')), '[ _-]+', '', 'g'))",
+		credentialsColumn,
+	)
+	return fmt.Sprintf(
+		"CASE WHEN %[1]s NOT IN ('%[2]s', '%[3]s') THEN '%[4]s' WHEN %[5]s = 'chatgptpro' THEN 'pro' WHEN %[5]s = 'basic' THEN 'free' WHEN %[5]s = '' THEN '%[6]s' ELSE %[5]s END",
+		typeColumn,
+		service.AccountTypeOAuth,
+		service.AccountTypeSetupToken,
+		service.AccountSubscriptionTierNonSubscription,
+		normalizedPlan,
+		service.AccountSubscriptionTierUnknown,
+	)
 }
 
 func (r *accountRepository) ListWithFilters(ctx context.Context, params pagination.PaginationParams, platform, accountType, status, search string, groupID int64, privacyMode string) ([]service.Account, *pagination.PaginationResult, error) {
@@ -1123,6 +1149,30 @@ func (r *accountRepository) GetSelectionSummary(ctx context.Context, filters ser
 		typeCounts[row.Type] = row.Count
 	}
 
+	tierFilters := filters
+	tierFilters.SubscriptionTier = ""
+	var tierRows []struct {
+		Tier  string `json:"tier"`
+		Count int64  `json:"count"`
+	}
+	err = r.accountSelectionFilteredQuery(tierFilters).
+		Aggregate(
+			dbent.As(func(s *entsql.Selector) string {
+				expression := accountSubscriptionTierExpression(s.C(dbaccount.FieldType), s.C(dbaccount.FieldCredentials))
+				s.GroupBy(expression)
+				return expression
+			}, "tier"),
+			dbent.As(dbent.Count(), "count"),
+		).
+		Scan(ctx, &tierRows)
+	if err != nil {
+		return nil, err
+	}
+	subscriptionTierCounts := make(map[string]int64)
+	for _, row := range tierRows {
+		subscriptionTierCounts[row.Tier] = row.Count
+	}
+
 	usageFilters := filters
 	usageFilters.UsageStatus = ""
 	usageStatusCounts := make(map[string]int64, 8)
@@ -1148,7 +1198,7 @@ func (r *accountRepository) GetSelectionSummary(ctx context.Context, filters ser
 		usageStatusCounts[service.AccountUsageStatusAttention]
 	return &service.AccountSelectionSummary{
 		Total: int64(total), Platforms: platforms, Types: types,
-		TypeCounts: typeCounts, UsageStatusCounts: usageStatusCounts,
+		TypeCounts: typeCounts, SubscriptionTierCounts: subscriptionTierCounts, UsageStatusCounts: usageStatusCounts,
 	}, nil
 }
 

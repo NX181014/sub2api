@@ -70,6 +70,7 @@ func (s *adminServiceImpl) ListAccountsWithPoolMetrics(ctx context.Context, page
 type AccountSelectionFilters struct {
 	Platform           string
 	Type               string
+	SubscriptionTier   string
 	Status             string
 	UsageStatus        string
 	Search             string
@@ -83,11 +84,45 @@ type AccountSelectionFilters struct {
 }
 
 type AccountSelectionSummary struct {
-	Total             int64            `json:"total"`
-	Platforms         []string         `json:"platforms"`
-	Types             []string         `json:"types"`
-	TypeCounts        map[string]int64 `json:"type_counts"`
-	UsageStatusCounts map[string]int64 `json:"usage_status_counts"`
+	Total                  int64            `json:"total"`
+	Platforms              []string         `json:"platforms"`
+	Types                  []string         `json:"types"`
+	TypeCounts             map[string]int64 `json:"type_counts"`
+	SubscriptionTierCounts map[string]int64 `json:"subscription_tier_counts"`
+	UsageStatusCounts      map[string]int64 `json:"usage_status_counts"`
+}
+
+const (
+	AccountSubscriptionTierUnknown         = "unknown"
+	AccountSubscriptionTierNonSubscription = "non_subscription"
+)
+
+func NormalizeAccountSubscriptionTierName(value string) string {
+	normalized := strings.NewReplacer(" ", "", "_", "", "-", "").Replace(strings.ToLower(strings.TrimSpace(value)))
+	switch normalized {
+	case "chatgptpro":
+		return "pro"
+	case "basic":
+		return "free"
+	case "nonsubscription":
+		return AccountSubscriptionTierNonSubscription
+	case "":
+		return AccountSubscriptionTierUnknown
+	default:
+		return normalized
+	}
+}
+
+func AccountSubscriptionTier(platform, accountType string, credentials map[string]any) string {
+	if accountType != AccountTypeOAuth && accountType != AccountTypeSetupToken {
+		return AccountSubscriptionTierNonSubscription
+	}
+	account := Account{Platform: platform, Type: accountType, Credentials: credentials}
+	plan := account.GetCredential("plan_type")
+	if strings.TrimSpace(plan) == "" {
+		plan = account.GetCredential("subscription_tier")
+	}
+	return NormalizeAccountSubscriptionTierName(plan)
 }
 
 const (
