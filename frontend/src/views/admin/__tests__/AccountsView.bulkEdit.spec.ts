@@ -382,7 +382,7 @@ describe('admin AccountsView bulk edit scope', () => {
     expect(wrapper.find('[data-test="workbench-standalone"]').exists()).toBe(true)
     expect(wrapper.find('[data-test="workbench-batch"]').exists()).toBe(false)
     const defaultColumnKeys = (wrapper.getComponent(DataTableStub).props('columns') as Array<{ key: string }>).map(column => column.key)
-    expect(defaultColumnKeys).toEqual(['select', 'name', 'status', 'usage', 'pool_record', 'uploader', 'actions'])
+    expect(defaultColumnKeys).toEqual(['select', 'name', 'status', 'usage', 'pool_record', 'actions'])
     expect(defaultColumnKeys).not.toContain('id')
     expect(wrapper.text()).toContain('#7')
 
@@ -661,6 +661,8 @@ describe('admin AccountsView bulk edit scope', () => {
         ...account(7),
         last_used_at: '2026-07-31T12:00:00Z',
         uploader_username: 'Uploader A',
+        groups: [{ id: 3, name: 'Squad A', platform: 'openai', subscription_type: 'plus', rate_multiplier: 1 }],
+        proxy: { id: 5, name: 'Proxy A' },
         pool_latest_purchase_source: 'Supplier A',
         pool_purchase_source_count: 2,
         pool_purchase_cost_minor: 4200,
@@ -689,7 +691,13 @@ describe('admin AccountsView bulk edit scope', () => {
     expect(wrapper.find('[data-test="account-workbench-identity"]').exists()).toBe(true)
     expect(wrapper.find('[data-test="account-workbench-usage"]').exists()).toBe(true)
     expect(wrapper.find('[data-test="account-workbench-finance"]').exists()).toBe(true)
-    expect(wrapper.find('[data-test="account-workbench-secondary"]').exists()).toBe(true)
+    expect(wrapper.get('[data-test="account-workbench-usage"] [data-test="account-workbench-usage-source"]').text()).toContain('Uploader A')
+    expect(wrapper.get('[data-test="account-workbench-usage-source"]').text()).toContain(batchID)
+    const poolSource = wrapper.get('[data-test="account-workbench-pool"] [data-test="account-workbench-pool-source"]')
+    expect(poolSource.findComponent({ name: 'AccountGroupsCell' }).props('groups')).toEqual([
+      expect.objectContaining({ name: 'Squad A' })
+    ])
+    expect(poolSource.text()).toContain('Proxy A')
     expect(wrapper.find('[data-test="account-workbench-runtime"]').exists()).toBe(true)
 
     const usageView = wrapper.findAll('.workbench-view-option').find(button => button.text() === 'admin.accounts.display.usage')
@@ -697,7 +705,7 @@ describe('admin AccountsView bulk edit scope', () => {
     await usageView!.trigger('click')
     expect(wrapper.get('[data-test="account-workbench-last-used"]').text()).toContain('admin.accounts.columns.lastUsed')
     expect((wrapper.getComponent(DataTableStub).props('columns') as Array<{ key: string }>).map(column => column.key)).toEqual([
-      'select', 'name', 'usage', 'status', 'pool_record', 'uploader', 'actions'
+      'select', 'name', 'usage', 'status', 'pool_record', 'actions'
     ])
 
     const financeView = wrapper.findAll('.workbench-view-option').find(button => button.text() === 'admin.accounts.display.finance')
@@ -708,14 +716,15 @@ describe('admin AccountsView bulk edit scope', () => {
     expect(wrapper.get('[data-test="account-workbench-finance"]').text()).toContain('admin.sharedPool.workbench.dataQuality.future_purchase_time')
     expect(wrapper.find('[data-test="account-workbench-actions"]').exists()).toBe(true)
     expect((wrapper.getComponent(DataTableStub).props('columns') as Array<{ key: string }>).map(column => column.key)).toEqual([
-      'select', 'name', 'pool_record', 'usage', 'status', 'uploader', 'actions'
+      'select', 'name', 'pool_record', 'usage', 'status', 'actions'
     ])
 
     const fullView = wrapper.findAll('.workbench-view-option').find(button => button.text() === 'admin.accounts.display.full')
     expect(fullView).toBeDefined()
     await fullView!.trigger('click')
     expect(wrapper.find('[data-test="account-workbench-usage"]').exists()).toBe(true)
-    expect(wrapper.find('[data-test="account-workbench-secondary"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="account-workbench-usage-source"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="account-workbench-pool-source"]').exists()).toBe(true)
     expect(JSON.parse(localStorage.getItem('account-workbench-display-v1') || '{}')).toMatchObject({
       view: 'full',
       enabledModules: ['identity', 'runtime', 'usage', 'finance', 'source', 'actions']
@@ -723,9 +732,9 @@ describe('admin AccountsView bulk edit scope', () => {
 
     const table = wrapper.getComponent(DataTableStub)
     expect((table.props('columns') as Array<{ key: string }>).map(column => column.key)).toEqual([
-      'select', 'name', 'status', 'usage', 'pool_record', 'uploader', 'actions'
+      'select', 'name', 'status', 'usage', 'pool_record', 'actions'
     ])
-    expect(table.props('mobileColumnKeys')).toEqual(['select', 'name', 'status', 'usage', 'pool_record', 'uploader', 'actions'])
+    expect(table.props('mobileColumnKeys')).toEqual(['select', 'name', 'status', 'usage', 'pool_record', 'actions'])
 
     const navigator = wrapper.get('.workbench-sidebar')
     const mobileToggle = wrapper.get('[data-test="workbench-mobile-toggle"]')
@@ -752,7 +761,8 @@ describe('admin AccountsView bulk edit scope', () => {
     const sourceRow = wrapper.get('[data-test="display-module-source"]')
     expect((sourceRow.get('input').element as HTMLInputElement).checked).toBe(true)
     await sourceRow.get('input').setValue(false)
-    expect((wrapper.getComponent(DataTableStub).props('columns') as Array<{ key: string }>).map(column => column.key)).not.toContain('uploader')
+    expect(wrapper.find('[data-test="account-workbench-usage-source"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="account-workbench-pool-source"]').exists()).toBe(false)
 
     await wrapper.get('[data-test="display-module-finance"] [data-test="display-module-up"]').trigger('click')
     expect(JSON.parse(localStorage.getItem('account-workbench-display-v1') || '{}')).toMatchObject({

@@ -556,7 +556,7 @@
           </template>
           <template #cell-uploader="{ row }">
             <button
-              v-if="isImportBatchRow(row)"
+              v-if="isImportBatchRow(row) && !embedded"
               type="button"
               class="flex min-h-11 max-w-64 items-center gap-2 text-left"
               :disabled="isImportBatchLoading(row.batchID)"
@@ -570,25 +570,13 @@
                 <span class="mt-1 block max-w-56 truncate text-xs text-gray-500 dark:text-gray-400 md:hidden" :title="row.names">{{ row.names }}</span>
               </span>
             </button>
-            <div v-else-if="embedded" data-test="account-workbench-secondary" class="account-source-cell">
-              <span class="min-w-0 truncate font-medium text-gray-800 dark:text-gray-100" :title="accountUploader(row)">
-                {{ accountUploader(row) }}
-              </span>
-              <span v-if="importBatchID(row)" class="min-w-0 truncate text-xs text-gray-500 dark:text-gray-400" :title="importBatchID(row)">
-                {{ t('admin.accounts.importBatchGroup') }}: {{ importBatchID(row) }}
-              </span>
-              <AccountGroupsCell v-if="!authStore.isSimpleMode" :groups="row.groups" :max-display="2" />
-              <span class="min-w-0 truncate text-xs text-gray-500 dark:text-gray-400" :title="row.proxy?.name || ''">
-                {{ t('admin.accounts.columns.proxy') }}: {{ row.proxy?.name || '-' }}
-              </span>
-            </div>
-            <div v-else-if="isImportBatchChild(row)" class="min-w-0 border-l-2 border-gray-200 pl-3 dark:border-dark-600 md:border-0 md:pl-0">
+            <div v-else-if="!embedded && isImportBatchChild(row)" class="min-w-0 border-l-2 border-gray-200 pl-3 dark:border-dark-600 md:border-0 md:pl-0">
               <p class="max-w-52 truncate font-medium text-gray-900 dark:text-white md:hidden" :title="row.name">
                 {{ row.name }} · #{{ row.id }}
               </p>
               <span class="hidden text-xs text-gray-400 dark:text-gray-500 md:inline">—</span>
             </div>
-            <div v-else class="min-w-0">
+            <div v-else-if="!embedded" class="min-w-0">
               <p class="max-w-52 truncate font-medium text-gray-900 dark:text-white" :title="accountUploader(row)">{{ accountUploader(row) }}</p>
               <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.accounts.standaloneImport') }}</p>
             </div>
@@ -716,11 +704,23 @@
               >
                 {{ t('admin.accounts.columns.lastUsed') }}: {{ formatRelativeTime(row.last_used_at) }}
               </time>
+              <div
+                v-if="embedded && isWorkbenchModuleEnabled('source')"
+                data-test="account-workbench-usage-source"
+                class="account-source-cell"
+              >
+                <span class="min-w-0 shrink-0 truncate" :title="accountUploader(row)">
+                  {{ t('admin.sharedPool.columns.uploader') }}: {{ accountUploader(row) }}
+                </span>
+                <span v-if="importBatchID(row)" class="min-w-0 flex-1 truncate" :title="importBatchID(row)">
+                  {{ t('admin.accounts.importBatchGroup') }}: {{ importBatchID(row) }}
+                </span>
+              </div>
             </div>
           </template>
           <template #cell-pool_record="{ row }">
+            <div v-if="!isImportBatchRow(row) && embedded" data-test="account-workbench-pool" class="w-full min-w-0">
             <button
-              v-if="!isImportBatchRow(row) && embedded"
               type="button"
               data-test="account-workbench-finance"
               class="account-pool-cell min-h-11 w-full min-w-0 text-left"
@@ -769,6 +769,20 @@
                 </span>
               </div>
             </button>
+              <div
+                v-if="isWorkbenchModuleEnabled('source')"
+                data-test="account-workbench-pool-source"
+                class="account-source-cell"
+              >
+                <div v-if="!authStore.isSimpleMode" class="flex min-w-0 flex-1 items-center gap-2">
+                  <span class="shrink-0">{{ t('admin.accounts.columns.groups') }}:</span>
+                  <AccountGroupsCell :groups="row.groups" :max-display="2" class="!max-w-none min-w-0" />
+                </div>
+                <span class="min-w-0 truncate" :title="row.proxy?.name || ''">
+                  {{ t('admin.accounts.columns.proxy') }}: {{ row.proxy?.name || '-' }}
+                </span>
+              </div>
+            </div>
             <button
               v-else-if="!isImportBatchRow(row)"
               type="button"
@@ -3595,10 +3609,9 @@ const cols = computed(() => {
       status: 'runtime',
       usage: 'usage',
       pool_record: 'finance',
-      uploader: 'source',
       actions: 'actions'
     }
-    const keys = ['name', 'status', 'usage', 'pool_record', 'uploader', 'actions']
+    const keys = ['name', 'status', 'usage', 'pool_record', 'actions']
       .filter(key => isWorkbenchModuleEnabled(moduleByColumn[key]!))
       .sort((left, right) => workbenchModuleOrder.value.indexOf(moduleByColumn[left]!) - workbenchModuleOrder.value.indexOf(moduleByColumn[right]!))
     return ['select', ...keys].flatMap(key => {
@@ -5019,7 +5032,7 @@ onUnmounted(() => {
 }
 
 .account-source-cell {
-  @apply flex min-w-0 flex-col gap-1;
+  @apply mt-2 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 border-t border-gray-200 pt-2 text-[11px] text-gray-500 dark:border-dark-700 dark:text-gray-400;
 }
 
 .account-pool-cell {
