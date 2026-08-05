@@ -51,6 +51,13 @@
         </div>
       </div>
 
+      <SharedPoolMetricStrip :items="ledgerMetricItems" />
+      <SharedPoolBarChart
+        :title="t('admin.sharedPool.ledger.netCost')"
+        :items="ledgerUploaderBars"
+        :empty-title="t('admin.sharedPool.empty.sources')"
+      />
+
       <div v-if="loading" class="flex min-h-40 items-center justify-center"><LoadingSpinner /></div>
       <div v-else-if="uploaderSummaries.length" class="divide-y divide-gray-200 dark:divide-dark-700">
         <section v-for="group in uploaderSummaries" :key="uploaderGroupKey(group)" class="min-w-0">
@@ -306,6 +313,8 @@ import type {
 import { BaseDialog, EmptyState, LoadingSpinner, Pagination } from '@/components/common'
 import SearchInput from '@/components/common/SearchInput.vue'
 import Select from '@/components/common/Select.vue'
+import SharedPoolBarChart from '@/views/admin/shared-pool/SharedPoolBarChart.vue'
+import SharedPoolMetricStrip from '@/views/admin/shared-pool/SharedPoolMetricStrip.vue'
 import StatusBadge from '@/components/common/StatusBadge.vue'
 import Icon from '@/components/icons/Icon.vue'
 import { useAppStore } from '@/stores'
@@ -479,6 +488,25 @@ const uploaderGroupState = (group: SharedPoolCostUploaderSummary) => {
 }
 const selectedUploaderGroup = computed(() => uploaderSummaries.value.find((group) => uploaderGroupKey(group) === selectedUploaderGroupKey.value))
 const selectedUploaderState = computed(() => selectedUploaderGroup.value ? uploaderAccountStates[uploaderGroupKey(selectedUploaderGroup.value)] : undefined)
+const ledgerMetricItems = computed(() => {
+  const rows = uploaderSummaries.value
+  const accountCount = rows.reduce((sum, row) => sum + row.account_count, 0)
+  const netCost = rows.reduce((sum, row) => sum + row.net_cost_minor, 0)
+  const recognized = rows.reduce((sum, row) => sum + row.recognized_cost_minor, 0)
+  const remaining = rows.reduce((sum, row) => sum + row.remaining_cost_minor, 0)
+  return [
+    { label: t('admin.sharedPool.columns.accounts'), value: String(accountCount) },
+    { label: t('admin.sharedPool.ledger.netCost'), value: formatMinor(netCost) },
+    { label: t('admin.sharedPool.ledger.recognizedCost'), value: formatMinor(recognized), tone: 'positive' as const },
+    { label: t('admin.sharedPool.columns.remaining'), value: formatMinor(remaining), tone: remaining > 0 ? 'warning' as const : 'positive' as const },
+    { label: t('admin.sharedPool.columns.uploader'), value: String(rows.length) }
+  ]
+})
+const ledgerUploaderBars = computed(() => uploaderSummaries.value
+  .slice()
+  .sort((a, b) => b.net_cost_minor - a.net_cost_minor)
+  .slice(0, 6)
+  .map(group => ({ key: uploaderGroupKey(group), label: uploaderGroupName(group), value: Math.max(group.net_cost_minor / 100, 0), display: formatMinor(group.net_cost_minor) })))
 async function openUploaderGroup(group: SharedPoolCostUploaderSummary) {
   const key = uploaderGroupKey(group)
   selectedUploaderGroupKey.value = key
