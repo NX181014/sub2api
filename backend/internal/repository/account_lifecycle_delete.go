@@ -245,6 +245,9 @@ WHERE account_id=ANY($1) OR cost_entry_id IN (SELECT id FROM doomed_costs)`, pq.
 	if _, err := exec.ExecContext(ctx, `DELETE FROM pool_settlement_account_lines WHERE account_id=ANY($1)`, pq.Array(ids)); err != nil {
 		return err
 	}
+	if _, err := exec.ExecContext(ctx, `DELETE FROM pool_settlement_transfers WHERE settlement_id=ANY($1)`, pq.Array(settlementIDs)); err != nil {
+		return err
+	}
 	for _, settlementID := range settlementIDs {
 		if err := rebuildSettlementAfterAccountDelete(ctx, exec, settlementID, ids, textIDs); err != nil {
 			return err

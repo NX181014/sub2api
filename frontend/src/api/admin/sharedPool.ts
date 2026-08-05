@@ -473,6 +473,20 @@ export interface SharedPoolSettlementAccountLine {
   trace_quality: 'exact' | 'derived' | 'unavailable'
 }
 
+export interface SharedPoolSettlementTransfer {
+  id: number
+  settlement_id: number
+  from_user_id: number
+  from_user_name: string
+  to_user_id: number
+  to_user_name: string
+  amount: number
+  currency: string
+  payment_status: 'pending' | 'paid' | 'void'
+  account_line_ids: number[]
+  account_ids: number[]
+}
+
 export interface SharedPoolSettlementPreview {
   id?: number
   status: PoolSettlementStatus
@@ -490,6 +504,10 @@ export interface SharedPoolSettlementPreview {
   account_costs: SharedPoolSettlementAccountCost[]
   account_lines: SharedPoolSettlementAccountLine[]
   account_contexts: SharedPoolAccountContext[]
+  transfers: SharedPoolSettlementTransfer[]
+  calculated_at?: string
+  valid_account_count: number
+  input_version?: string
 }
 
 export interface SharedPoolAccountContext extends SharedPoolAccountRuntime {
@@ -683,6 +701,20 @@ interface RawSettlementAccountLine {
   trace_quality: 'exact' | 'derived' | 'unavailable'
 }
 
+interface RawSettlementTransfer {
+  id: number
+  settlement_id: number
+  from_user_id: number
+  from_user_name: string
+  to_user_id: number
+  to_user_name: string
+  amount_minor: number
+  currency: string
+  payment_status: 'pending' | 'paid' | 'void'
+  account_line_ids?: number[]
+  account_ids?: number[]
+}
+
 interface RawSettlement {
   id: number
   period_type: PoolPeriodType
@@ -701,6 +733,10 @@ interface RawSettlement {
   account_costs?: RawSettlementAccountCost[]
   account_lines?: RawSettlementAccountLine[]
   account_contexts?: RawPoolAccount[]
+  transfers?: RawSettlementTransfer[]
+  calculated_at?: string
+  valid_account_count?: number
+  input_version?: string
 }
 
 interface RawFXRate {
@@ -1023,7 +1059,23 @@ const mapSettlement = (raw: RawSettlement): SharedPoolSettlementPreview => {
       net_amount: minorToAmount(line.net_amount_minor),
       trace_quality: line.trace_quality
     })),
-    account_contexts: raw.account_contexts || []
+    account_contexts: raw.account_contexts || [],
+    transfers: (raw.transfers || []).map((transfer) => ({
+      id: transfer.id,
+      settlement_id: transfer.settlement_id,
+      from_user_id: transfer.from_user_id,
+      from_user_name: transfer.from_user_name,
+      to_user_id: transfer.to_user_id,
+      to_user_name: transfer.to_user_name,
+      amount: minorToAmount(transfer.amount_minor),
+      currency: transfer.currency || 'CNY',
+      payment_status: transfer.payment_status,
+      account_line_ids: transfer.account_line_ids || [],
+      account_ids: transfer.account_ids || []
+    })),
+    calculated_at: raw.calculated_at,
+    valid_account_count: raw.valid_account_count ?? raw.account_contexts?.length ?? 0,
+    input_version: raw.input_version
   }
 }
 
@@ -1080,6 +1132,16 @@ export async function markSettlementUserPaid(
     `/admin/pool/settlements/${id}/members/${userId}/paid`,
     { settlement_user_id: settlementUserId }
   )
+}
+
+export async function markSettlementTransferPaid(id: number, transferID: number): Promise<SharedPoolSettlementPreview> {
+  const data = await postPoolWrite<RawSettlement>(
+    `pool-settlement-transfer-paid:${id}:${transferID}`,
+    `pool-settlement-transfer-paid-${id}-${transferID}`,
+    `/admin/pool/settlements/${id}/transfers/${transferID}/paid`,
+    {}
+  )
+  return mapSettlement(data)
 }
 
 export async function listSources(params?: PoolPeriodParams): Promise<SharedPoolSourceList> {

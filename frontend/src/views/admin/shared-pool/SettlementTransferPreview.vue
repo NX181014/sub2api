@@ -1,10 +1,9 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import DataTable from '@/components/common/DataTable.vue'
 import PlatformIcon from '@/components/common/PlatformIcon.vue'
-import Select from '@/components/common/Select.vue'
 import StatusBadge from '@/components/common/StatusBadge.vue'
 import Icon from '@/components/icons/Icon.vue'
 import { useClipboard } from '@/composables/useClipboard'
@@ -12,16 +11,16 @@ import { useAppStore } from '@/stores/app'
 import type { GroupPlatform } from '@/types'
 import type { Column } from '@/components/common/types'
 import {
-  markSettlementUserPaid,
+  markSettlementTransferPaid,
   type SharedPoolAccountContext,
   type SharedPoolSettlementAccountLine,
-  type SharedPoolSettlementLine
+  type SharedPoolSettlementLine,
+  type SharedPoolSettlementTransfer
 } from '@/api/admin/sharedPool'
 import { formatPoolMoney } from '@/utils/sharedPool'
 import { settlementLineState, type SettlementLineFilter } from '@/utils/sharedPoolLedger'
 import {
   buildSettlementTransferPreview,
-  defaultSettlementUserID,
   type SettlementTransferPreview
 } from '@/utils/settlementTransfers'
 
@@ -34,6 +33,9 @@ const props = withDefaults(defineProps<{
   accountLines?: SharedPoolSettlementAccountLine[]
   accountNames?: Record<number, string>
   accountContexts?: SharedPoolAccountContext[]
+  transfers?: SharedPoolSettlementTransfer[]
+  calculatedAt?: string
+  validAccountCount?: number
   currency?: string
 }>(), {
   accountLines: () => [],
@@ -45,47 +47,49 @@ const props = withDefaults(defineProps<{
 })
 
 const emit = defineEmits<{ settled: [] }>()
-const { t } = useI18n()
+const { t, locale } = useI18n()
 const appStore = useAppStore()
 const { copyToClipboard } = useClipboard()
-const settlementUserID = ref<number>()
 const activeTransfer = ref<SettlementTransferPreview | null>(null)
 const settling = ref(false)
 
 const sourceLines = computed(() => props.accountLines.length ? props.accountLines : props.lines)
-const paymentStatuses = computed(() => Object.fromEntries(
-  props.lines.map(line => [line.user_id, line.payment_status || 'pending'])
-) as Record<number, 'pending' | 'paid'>)
-const memberOptions = computed(() => {
-  const members = new Map<number, string>()
-  for (const line of sourceLines.value) members.set(line.user_id, line.user_name)
-  return [...members].map(([value, label]) => ({ value, label }))
-})
 const transfers = computed(() => buildSettlementTransferPreview(
-  sourceLines.value,
-  settlementUserID.value,
-  props.accountNames,
-  paymentStatuses.value
+	sourceLines.value,
+	props.accountNames,
+	Object.fromEntries((props.transfers || []).map(transfer => [`${transfer.from_user_id}:${transfer.to_user_id}:${Math.round(transfer.amount * 100)}`, transfer.payment_status === 'paid' ? 'paid' : 'pending']))
 ))
+const serverTransfers = computed(() => (props.transfers || []).map((transfer): SettlementTransferPreview => ({
+  id: transfer.id,
+  member_user_id: transfer.from_user_id,
+  member_user_name: transfer.from_user_name,
+  from_user_id: transfer.from_user_id,
+  from_user_name: transfer.from_user_name,
+  to_user_id: transfer.to_user_id,
+  to_user_name: transfer.to_user_name,
+  amount: transfer.amount,
+  payment_status: transfer.payment_status === 'paid' ? 'paid' : 'pending',
+  allocation_ids: transfer.account_line_ids,
+  account_ids: transfer.account_ids,
+  account_names: transfer.account_ids.map(id => props.accountNames[id] || `#${id}`),
+  allocations: transfer.account_line_ids.map(id => {
+    const line = sourceLines.value.find(item => item.id === id)
+    return { id, account_id: line && 'account_id' in line ? line.account_id : undefined, account_name: line && 'account_id' in line ? props.accountNames[line.account_id] || `#${line.account_id}` : '-', net_amount: line?.net_amount || 0 }
+  })
+})))
+const effectiveTransfers = computed(() => serverTransfers.value.length ? serverTransfers.value : transfers.value)
 const visibleTransfers = computed(() => {
-  if (props.lineStatus === 'all') return transfers.value
-  const visibleMembers = new Set(props.lines
-    .filter(line => settlementLineState(line) === props.lineStatus)
-    .map(line => line.user_id))
-  return transfers.value.filter(item => visibleMembers.has(item.member_user_id))
+	if (props.lineStatus === 'all') return effectiveTransfers.value
+	const visibleMembers = new Set(props.lines
+		.filter(line => settlementLineState(line) === props.lineStatus)
+		.map(line => line.user_id))
+	return effectiveTransfers.value.filter(item => visibleMembers.has(item.from_user_id) || visibleMembers.has(item.to_user_id))
 })
 const pendingTransfers = computed(() => visibleTransfers.value.filter(item => item.payment_status !== 'paid'))
-const allPendingTransfers = computed(() => transfers.value.filter(item => item.payment_status !== 'paid'))
+const allPendingTransfers = computed(() => effectiveTransfers.value.filter(item => item.payment_status !== 'paid'))
 const pendingTotal = computed(() => pendingTransfers.value.reduce((sum, item) => sum + item.amount, 0))
+const calculatedLabel = computed(() => props.calculatedAt ? new Intl.DateTimeFormat(locale.value, { dateStyle: 'short', timeStyle: 'short' }).format(new Date(props.calculatedAt)) : '-')
 const contextByAccountID = computed(() => new Map(props.accountContexts.map(item => [item.id, item])))
-
-watch([memberOptions, () => props.settlementUserId], ([options, persistedUserID]) => {
-  if (persistedUserID && options.some(option => option.value === persistedUserID)) {
-    settlementUserID.value = persistedUserID
-  } else if (!options.some(option => option.value === settlementUserID.value)) {
-    settlementUserID.value = defaultSettlementUserID(sourceLines.value)
-  }
-}, { immediate: true })
 
 const columns = computed<Column[]>(() => [
   { key: 'transfer', label: t('admin.sharedPool.settlement.transferDirection') },
@@ -98,6 +102,7 @@ const money = (value: number) => formatPoolMoney(value, props.currency)
 const accountContext = (accountID?: number) => accountID ? contextByAccountID.value.get(accountID) : undefined
 const accountPlatform = (accountID?: number) => accountContext(accountID)?.platform as GroupPlatform | undefined
 const accountTitle = (transfer: SettlementTransferPreview) => transfer.account_names.join(', ') || '-'
+const transferKey = (transfer: SettlementTransferPreview) => transfer.id || `${transfer.from_user_id}:${transfer.to_user_id}:${transfer.amount}`
 
 const openTransfer = (transfer: SettlementTransferPreview) => {
   activeTransfer.value = transfer
@@ -124,7 +129,8 @@ const settleTransfer = async () => {
   if (!transfer || !props.settlementId || transfer.payment_status === 'paid' || settling.value) return
   settling.value = true
   try {
-    await markSettlementUserPaid(props.settlementId, transfer.member_user_id, transfer.settlement_user_id)
+    if (!transfer.id) return
+    await markSettlementTransferPaid(props.settlementId, transfer.id)
     appStore.showSuccess(t('admin.sharedPool.settlement.memberSettled'))
     activeTransfer.value = null
     emit('settled')
@@ -150,17 +156,10 @@ const settleTransfer = async () => {
       </header>
 
       <div class="card-body !p-4 sm:!p-5">
-        <div class="grid min-w-0 gap-4 lg:grid-cols-[minmax(15rem,0.8fr)_minmax(0,1.2fr)] lg:items-end">
+        <div class="grid min-w-0 gap-4 sm:grid-cols-[minmax(0,1.3fr)_repeat(3,minmax(0,1fr))] sm:items-end">
           <div class="min-w-0">
-            <label for="pool-settlement-user" class="input-label">{{ t('admin.sharedPool.settlement.settlementUser') }}</label>
-            <Select
-              id="pool-settlement-user"
-              v-model="settlementUserID"
-              :options="memberOptions"
-              searchable
-              :disabled="status === 'paid' || !!settlementUserId"
-              :aria-label="t('admin.sharedPool.settlement.settlementUser')"
-            />
+            <p class="text-xs font-medium uppercase text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.settlement.autoNetting') }}</p>
+            <p class="mt-1 text-sm text-gray-700 dark:text-gray-200">{{ t('admin.sharedPool.settlement.autoNettingHint') }}</p>
           </div>
           <dl class="grid grid-cols-3 gap-3 text-sm">
             <div class="min-w-0">
@@ -169,7 +168,7 @@ const settleTransfer = async () => {
             </div>
             <div class="min-w-0">
               <dt class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.columns.accounts') }}</dt>
-              <dd class="mt-1 font-semibold tabular-nums text-gray-900 dark:text-white">{{ new Set(pendingTransfers.flatMap(item => item.account_ids)).size }}</dd>
+              <dd class="mt-1 font-semibold tabular-nums text-gray-900 dark:text-white">{{ validAccountCount ?? new Set(pendingTransfers.flatMap(item => item.account_ids)).size }}</dd>
             </div>
             <div class="min-w-0">
               <dt class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.settlement.pendingAmount') }}</dt>
@@ -180,7 +179,7 @@ const settleTransfer = async () => {
       </div>
 
       <footer class="card-footer flex flex-wrap items-center justify-between gap-2 !px-4 !py-3 text-xs text-gray-500 dark:text-gray-400 sm:!px-5">
-        <span>{{ t('admin.sharedPool.settlement.singleTransferHint') }}</span>
+        <span>{{ t('admin.sharedPool.settlement.singleTransferHint') }} · {{ calculatedLabel }}</span>
         <StatusBadge
           :status="allPendingTransfers.length ? 'warning' : 'success'"
           :label="allPendingTransfers.length ? t('admin.sharedPool.settlement.pendingSummary', { count: allPendingTransfers.length }) : t('admin.sharedPool.settlement.allSettled')"
@@ -199,7 +198,7 @@ const settleTransfer = async () => {
       <DataTable
         :columns="columns"
         :data="visibleTransfers"
-        row-key="member_user_id"
+        :row-key="transferKey"
         :sticky-first-column="false"
         :sticky-actions-column="false"
         :expandable-actions="false"

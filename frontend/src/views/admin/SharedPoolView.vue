@@ -101,19 +101,19 @@
                 <h2 id="pool-account-recovery-title" class="text-base font-semibold text-gray-900 dark:text-white">{{ t('admin.sharedPool.overview.accountRecovery') }}</h2>
                 <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.page.coverage', { start: dateOnly(overview.period_start), end: dateOnly(overview.period_end), count: filteredOverviewAccounts.length }) }}</p>
               </div>
-              <div class="w-full sm:w-44">
-                <Select v-model="overviewRecoveryFilter" :options="overviewRecoveryFilterOptions" :aria-label="t('admin.sharedPool.page.recoveryFilter')" @change="applyOverviewRecoveryFilter" />
+              <div class="flex w-full flex-wrap items-center gap-2 sm:w-auto">
+                <Select v-model="overviewRecoveryFilter" class="min-w-40" :options="overviewRecoveryFilterOptions" :aria-label="t('admin.sharedPool.page.recoveryFilter')" @change="applyOverviewRecoveryFilter" />
+                <button type="button" class="btn btn-secondary min-h-11" :disabled="loading" @click="loadActiveTab"><Icon name="refresh" size="sm" :class="loading ? 'animate-spin' : ''" />{{ t('common.refresh') }}</button>
               </div>
             </div>
-            <div class="card-body space-y-6">
-              <SharedPoolMetricStrip :items="overviewMetricItems" />
-              <div class="grid min-w-0 grid-cols-1 gap-6 lg:grid-cols-2 lg:divide-x lg:divide-gray-100 dark:lg:divide-dark-700">
-                <SharedPoolBarChart :title="t('admin.sharedPool.overview.accountRecovery')" :items="overviewRecoveryBars" :empty-title="t('admin.sharedPool.empty.overview')" />
-                <div class="lg:pl-6"><SharedPoolBarChart :title="t('admin.sharedPool.metrics.usageValue')" :items="overviewUsageBars" color="#22c55e" :empty-title="t('admin.sharedPool.empty.overview')" /></div>
+            <div class="border-b border-gray-100 px-4 py-4 dark:border-dark-700 sm:px-5"><SharedPoolMetricStrip :items="overviewMetricItems" /></div>
+            <div class="grid min-w-0 grid-cols-1 gap-0 divide-y divide-gray-100 border-b border-gray-100 dark:divide-dark-700 dark:border-dark-700 lg:grid-cols-2 lg:divide-x lg:divide-y-0 dark:lg:divide-dark-700">
+                <div class="min-w-0 p-4 sm:p-5"><SharedPoolBarChart :title="t('admin.sharedPool.overview.accountRecovery')" :items="overviewRecoveryBars" :empty-title="t('admin.sharedPool.empty.overview')" /></div>
+                <div class="min-w-0 p-4 sm:p-5"><SharedPoolBarChart :title="t('admin.sharedPool.metrics.usageValue')" :items="overviewUsageBars" color="#22c55e" :empty-title="t('admin.sharedPool.empty.overview')" /></div>
               </div>
-            </div>
             <div v-if="paginatedOverviewAccounts.length" class="divide-y divide-gray-100 border-t border-gray-100 dark:divide-dark-700 dark:border-dark-700">
-              <article v-for="row in paginatedOverviewAccounts" :key="row.id" class="grid min-w-0 grid-cols-1 gap-4 px-4 py-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-[minmax(220px,1.35fr)_minmax(180px,1fr)_repeat(3,minmax(120px,.75fr))_auto] 2xl:items-center sm:px-6">
+              <div class="hidden grid-cols-[minmax(0,1.35fr)_minmax(10rem,.9fr)_repeat(3,minmax(7rem,.7fr))_auto] gap-4 border-b border-gray-100 px-4 py-3 text-xs font-medium text-gray-500 dark:border-dark-700 dark:text-gray-400 xl:grid sm:px-6"><span>{{ t('admin.sharedPool.columns.account') }}</span><span>{{ t('admin.sharedPool.columns.status') }}</span><span class="text-right">{{ t('admin.sharedPool.metrics.usageValue') }}</span><span class="text-right">{{ t('admin.sharedPool.columns.remaining') }}</span><span class="text-right">{{ t('admin.sharedPool.columns.netProfit') }}</span><span class="text-right">{{ t('admin.sharedPool.columns.actions') }}</span></div>
+              <article v-for="row in paginatedOverviewAccounts" :key="row.id" class="grid min-w-0 grid-cols-1 gap-3 px-4 py-3.5 sm:grid-cols-2 xl:grid-cols-[minmax(0,1.35fr)_minmax(10rem,.9fr)_repeat(3,minmax(7rem,.7fr))_auto] xl:items-center sm:px-6">
                 <div class="min-w-0 2xl:pr-3">
                   <button type="button" class="block min-h-11 max-w-full truncate text-left font-semibold text-gray-900 hover:text-primary-600 dark:text-white dark:hover:text-primary-400" :title="row.account_name" @click="openAccountTrace(row.account_id)">{{ row.account_name }}</button>
                   <p class="max-w-52 truncate text-xs text-gray-500 dark:text-gray-400" :title="row.provider_identity">{{ row.provider_identity || '-' }}</p>
@@ -124,10 +124,10 @@
                   <div class="mt-2 h-1.5 overflow-hidden rounded-full bg-gray-100 dark:bg-dark-700"><div class="h-full rounded-full bg-green-500" :style="{ width: `${Math.min(Math.max(row.roi_rate, 0), 100)}%` }"></div></div>
                   <span class="mt-1 block text-xs text-gray-500 dark:text-gray-400">{{ t(`admin.sharedPool.page.recoveryStates.${recoveryState(row)}`) }}</span>
                 </div>
-                <div><span class="block text-xs text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.metrics.usageValue') }}</span><span class="mt-1 block font-medium tabular-nums">{{ formatMoney(row.usage_value, row.currency) }}</span></div>
-                <div><span class="block text-xs text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.columns.remaining') }}</span><span class="mt-1 block font-medium tabular-nums">{{ formatMoney(row.remaining_cost, row.currency) }}</span></div>
-                <div><span class="block text-xs text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.columns.netProfit') }}</span><span class="mt-1 block font-medium tabular-nums" :class="(row.net_profit || 0) >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'">{{ formatMoney(row.net_profit || 0, row.currency) }}</span></div>
-                <div class="flex flex-wrap gap-2 sm:col-span-2 xl:col-span-3 2xl:col-span-1 2xl:justify-end">
+                <div class="flex items-center justify-between gap-3 xl:block xl:text-right"><span class="text-xs text-gray-500 dark:text-gray-400 xl:hidden">{{ t('admin.sharedPool.metrics.usageValue') }}</span><span class="font-medium tabular-nums">{{ formatMoney(row.usage_value, row.currency) }}</span></div>
+                <div class="flex items-center justify-between gap-3 xl:block xl:text-right"><span class="text-xs text-gray-500 dark:text-gray-400 xl:hidden">{{ t('admin.sharedPool.columns.remaining') }}</span><span class="font-medium tabular-nums">{{ formatMoney(row.remaining_cost, row.currency) }}</span></div>
+                <div class="flex items-center justify-between gap-3 xl:block xl:text-right"><span class="text-xs text-gray-500 dark:text-gray-400 xl:hidden">{{ t('admin.sharedPool.columns.netProfit') }}</span><span class="font-medium tabular-nums" :class="(row.net_profit || 0) >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'">{{ formatMoney(row.net_profit || 0, row.currency) }}</span></div>
+                <div class="flex flex-wrap gap-2 sm:col-span-2 xl:col-span-1 xl:justify-end">
                   <button type="button" class="btn btn-secondary min-h-11 px-3 text-xs" @click="openAccountContext('ledger', row)"><Icon name="book" size="sm" />{{ t('admin.sharedPool.tabs.ledger') }}</button>
                   <button type="button" class="btn btn-secondary min-h-11 px-3 text-xs" @click="openAccountContext('settlement', row)"><Icon name="calculator" size="sm" />{{ t('admin.sharedPool.tabs.settlement') }}</button>
                 </div>
@@ -223,6 +223,9 @@
             :lines="settlement.lines"
             :account-lines="settlement.account_lines"
             :account-contexts="settlement.account_contexts"
+            :transfers="settlement.transfers"
+            :calculated-at="settlement.calculated_at"
+            :valid-account-count="settlement.valid_account_count"
             :account-names="settlementTransferAccountNames"
             :currency="settlement.currency"
             @settled="loadActiveTab"
@@ -237,12 +240,15 @@
               <div><h2 class="text-base font-semibold text-gray-900 dark:text-white">{{ t('admin.sharedPool.sources.title') }}</h2><p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.sources.sampleHint') }}</p></div>
               <div class="w-full sm:w-52"><Select v-model="sourceUploaderFilter" :options="sourceUploaderOptions" searchable :aria-label="t('admin.sharedPool.columns.uploader')" @change="applySourceUploaderFilter" /></div>
             </div>
-            <div v-if="sourceRankings.length" class="card-body space-y-6">
-              <SharedPoolMetricStrip :items="sourceMetricItems" />
-              <SharedPoolBarChart :title="t('admin.sharedPool.sources.chartTitle')" :items="sourceRoiBars" color="#0ea5e9" :empty-title="t('admin.sharedPool.empty.sources')" />
+            <div v-if="sourceRankings.length" class="border-b border-gray-100 dark:border-dark-700">
+              <div class="border-b border-gray-100 px-4 py-4 dark:border-dark-700 sm:px-5"><SharedPoolMetricStrip :items="sourceMetricItems" /></div>
+              <div class="grid min-w-0 grid-cols-1 gap-0 divide-y divide-gray-100 dark:divide-dark-700 lg:grid-cols-[minmax(0,1.25fr)_minmax(18rem,.75fr)] lg:divide-x lg:divide-y-0 dark:lg:divide-dark-700">
+                <div class="min-w-0 p-4 sm:p-5"><SharedPoolBarChart :title="t('admin.sharedPool.sources.chartTitle')" :items="sourceRoiBars" color="#0ea5e9" :empty-title="t('admin.sharedPool.empty.sources')" /></div>
+                <div class="min-w-0 p-4 sm:p-5"><div class="flex items-center justify-between gap-3"><div><h3 class="text-sm font-semibold text-gray-900 dark:text-white">{{ t('admin.sharedPool.columns.ban30') }}</h3><p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.sources.sampleHint') }}</p></div><Icon name="shield" size="md" class="text-amber-500" /></div><div class="mt-4 divide-y divide-gray-100 border-y border-gray-100 dark:divide-dark-700 dark:border-dark-700"><button v-for="source in sourceRiskRankings" :key="source.name" type="button" class="flex min-h-14 w-full min-w-0 items-center gap-3 py-3 text-left hover:bg-gray-50 dark:hover:bg-dark-800/50" @click="selectedSourceName = source.name"><span class="min-w-0 flex-1 truncate text-sm font-medium text-gray-900 dark:text-white">{{ source.name }}</span><span class="shrink-0 text-sm font-semibold tabular-nums" :class="source.ban_rate_30d > 10 ? 'text-red-600 dark:text-red-400' : source.ban_rate_30d > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-green-600 dark:text-green-400'">{{ formatPercent(source.ban_rate_30d) }}</span></button><p v-if="!sourceRiskRankings.length" class="py-6 text-center text-sm text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.empty.sources') }}</p></div></div>
+              </div>
             </div>
             <div v-if="paginatedSources.length" class="divide-y divide-gray-100 border-t border-gray-100 dark:divide-dark-700 dark:border-dark-700">
-              <article v-for="(source, index) in paginatedSources" :key="source.name" class="grid min-w-0 grid-cols-1 gap-4 px-4 py-4 sm:grid-cols-2 xl:grid-cols-[44px_minmax(180px,1.4fr)_repeat(4,minmax(100px,.7fr))_auto] xl:items-center sm:px-6">
+              <article v-for="(source, index) in paginatedSources" :key="source.name" class="grid min-w-0 grid-cols-1 gap-3 px-4 py-3.5 sm:grid-cols-2 xl:grid-cols-[44px_minmax(180px,1.4fr)_repeat(4,minmax(100px,.7fr))_auto] xl:items-center sm:px-6">
                 <span class="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-gray-100 text-sm font-semibold tabular-nums text-gray-600 dark:bg-dark-700 dark:text-gray-300">{{ (sourcePagination.page - 1) * sourcePagination.page_size + index + 1 }}</span>
                 <div class="min-w-0"><div class="flex min-w-0 items-center gap-2"><span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary-50 text-primary-600 dark:bg-primary-900/20 dark:text-primary-300"><Icon name="link" size="sm" /></span><div class="min-w-0"><div class="flex min-w-0 items-center gap-2"><h3 class="truncate font-semibold text-gray-900 dark:text-white" :title="source.name">{{ source.name }}</h3><StatusBadge :status="sourceMeta(source)?.active === false ? 'inactive' : 'success'" :label="t(`admin.sharedPool.status.${sourceMeta(source)?.active === false ? 'inactive' : 'active'}`)" /></div><p class="mt-1 truncate text-xs text-gray-500 dark:text-gray-400" :title="source.uploaderNames.join(', ')">{{ source.account_count }} {{ t('admin.sharedPool.columns.accounts') }} · {{ source.uploaderNames.join(', ') || '-' }}</p></div></div></div>
                 <div><span class="block text-xs text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.columns.roi') }}</span><span class="mt-1 block font-semibold tabular-nums" :class="source.roi_rate >= 100 ? 'text-green-600 dark:text-green-400' : 'text-amber-600 dark:text-amber-400'">{{ formatPercent(source.roi_rate) }}</span></div>
@@ -875,6 +881,7 @@ const sourceMetricItems = computed(() => {
 })
 const sourceRoiBars = computed(() => sourceRankings.value.slice(0, 6)
   .map(source => ({ key: source.name, label: source.name, value: Math.max(source.roi_rate, 0), display: formatPercent(source.roi_rate) })))
+const sourceRiskRankings = computed(() => [...sourceRankings.value].sort((a, b) => b.ban_rate_30d - a.ban_rate_30d || a.name.localeCompare(b.name)).slice(0, 4))
 const selectedSource = computed(() => sourceRankings.value.find((source) => source.name === selectedSourceName.value))
 const sourceMeta = (source: Pick<RankedSource, 'name'>) => purchaseSources.value.find(
   (item) => item.name.trim().toLocaleLowerCase() === source.name.trim().toLocaleLowerCase()

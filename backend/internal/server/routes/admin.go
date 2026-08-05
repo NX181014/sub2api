@@ -182,6 +182,7 @@ func registerPoolRoutes(admin *gin.RouterGroup, h *handler.Handlers, stepUpAuth 
 		pool.POST("/settlements/:id/lock", h.Admin.Pool.LockSettlement)
 		pool.POST("/settlements/:id/confirm", h.Admin.Pool.ConfirmSettlementLine)
 		pool.POST("/settlements/:id/paid", h.Admin.Pool.MarkSettlementPaid)
+		pool.POST("/settlements/:id/transfers/:transfer_id/paid", h.Admin.Pool.MarkSettlementTransferPaid)
 		pool.POST("/settlements/:id/members/:user_id/paid", h.Admin.Pool.MarkSettlementMemberPaid)
 	}
 }

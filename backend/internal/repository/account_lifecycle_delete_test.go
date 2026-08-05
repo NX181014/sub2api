@@ -91,6 +91,7 @@ func TestHardDeleteAccountSettlementsKeepsMixedSettlement(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(int64(51)))
 	mock.ExpectExec(`DELETE FROM pool_settlement_account_costs`).WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(`DELETE FROM pool_settlement_account_lines`).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(`DELETE FROM pool_settlement_transfers`).WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectQuery(`SELECT account_id,cost_entry_id,kind,payer_user_id,amount_minor`).
 		WithArgs(int64(51)).
 		WillReturnRows(sqlmock.NewRows([]string{"account_id", "cost_entry_id", "kind", "payer_user_id", "amount_minor"}).
@@ -121,6 +122,7 @@ func TestHardDeleteAccountSettlementsDeletesOnlyEmptySettlement(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(int64(51)))
 	mock.ExpectExec(`DELETE FROM pool_settlement_account_costs`).WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(`DELETE FROM pool_settlement_account_lines`).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(`DELETE FROM pool_settlement_transfers`).WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectQuery(`SELECT account_id,cost_entry_id,kind,payer_user_id,amount_minor`).
 		WillReturnRows(sqlmock.NewRows([]string{"account_id", "cost_entry_id", "kind", "payer_user_id", "amount_minor"}))
 	mock.ExpectQuery(`SELECT account_id,user_id,account_usage_weight::text`).

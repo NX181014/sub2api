@@ -2,6 +2,9 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strconv"
@@ -405,35 +408,58 @@ type PoolSettlementLine struct {
 	ConfirmedAt             *time.Time `json:"confirmed_at"`
 }
 
+type PoolSettlementTransfer struct {
+	ID             int64      `json:"id"`
+	SettlementID   int64      `json:"settlement_id"`
+	TransferKey    string     `json:"transfer_key"`
+	InputHash      string     `json:"input_hash,omitempty"`
+	FromUserID     int64      `json:"from_user_id"`
+	FromUserName   string     `json:"from_user_name"`
+	ToUserID       int64      `json:"to_user_id"`
+	ToUserName     string     `json:"to_user_name"`
+	AmountMinor    int64      `json:"amount_minor"`
+	Currency       string     `json:"currency"`
+	PaymentStatus  string     `json:"payment_status"`
+	AccountLineIDs []int64    `json:"account_line_ids"`
+	AccountIDs     []int64    `json:"account_ids"`
+	PaidByUserID   *int64     `json:"paid_by_user_id,omitempty"`
+	PaidAt         *time.Time `json:"paid_at,omitempty"`
+}
+
 type PoolSettlement struct {
-	ID               int64                       `json:"id"`
-	PeriodType       string                      `json:"period_type"`
-	PeriodStart      time.Time                   `json:"period_start"`
-	PeriodEnd        time.Time                   `json:"period_end"`
-	Timezone         string                      `json:"timezone"`
-	Status           string                      `json:"status"`
-	PeriodCostMinor  int64                       `json:"period_cost_minor"`
-	CarryInMinor     int64                       `json:"carry_in_minor"`
-	CarryOutMinor    int64                       `json:"carry_out_minor"`
-	TotalCostMinor   int64                       `json:"total_cost_minor"`
-	TotalUsageWeight string                      `json:"total_usage_weight"`
-	PricingCoverage  string                      `json:"pricing_coverage"`
-	UnpricedCount    int64                       `json:"unpriced_usage_count"`
-	FXRate           string                      `json:"fx_rate"`
-	FormulaVersion   string                      `json:"formula_version"`
-	CostSnapshot     []SettlementCostSnapshot    `json:"cost_snapshot"`
-	FilterSnapshot   SettlementFilterSnapshot    `json:"filter_snapshot"`
-	GeneratedBy      int64                       `json:"generated_by_user_id"`
-	LockedBy         *int64                      `json:"locked_by_user_id"`
-	LockedAt         *time.Time                  `json:"locked_at"`
-	PaidBy           *int64                      `json:"paid_by_user_id"`
-	PaidAt           *time.Time                  `json:"paid_at"`
-	CreatedAt        time.Time                   `json:"created_at"`
-	UpdatedAt        time.Time                   `json:"updated_at"`
-	Lines            []PoolSettlementLine        `json:"lines"`
-	AccountCosts     []PoolSettlementAccountCost `json:"account_costs"`
-	AccountLines     []PoolSettlementAccountLine `json:"account_lines"`
-	AccountContexts  []PoolAccount               `json:"account_contexts"`
+	ID                int64                       `json:"id"`
+	PeriodType        string                      `json:"period_type"`
+	PeriodStart       time.Time                   `json:"period_start"`
+	PeriodEnd         time.Time                   `json:"period_end"`
+	Timezone          string                      `json:"timezone"`
+	Status            string                      `json:"status"`
+	PeriodCostMinor   int64                       `json:"period_cost_minor"`
+	CarryInMinor      int64                       `json:"carry_in_minor"`
+	CarryOutMinor     int64                       `json:"carry_out_minor"`
+	TotalCostMinor    int64                       `json:"total_cost_minor"`
+	TotalUsageWeight  string                      `json:"total_usage_weight"`
+	PricingCoverage   string                      `json:"pricing_coverage"`
+	UnpricedCount     int64                       `json:"unpriced_usage_count"`
+	FXRate            string                      `json:"fx_rate"`
+	FormulaVersion    string                      `json:"formula_version"`
+	CostSnapshot      []SettlementCostSnapshot    `json:"cost_snapshot"`
+	FilterSnapshot    SettlementFilterSnapshot    `json:"filter_snapshot"`
+	GeneratedBy       int64                       `json:"generated_by_user_id"`
+	LockedBy          *int64                      `json:"locked_by_user_id"`
+	LockedAt          *time.Time                  `json:"locked_at"`
+	PaidBy            *int64                      `json:"paid_by_user_id"`
+	PaidAt            *time.Time                  `json:"paid_at"`
+	CreatedAt         time.Time                   `json:"created_at"`
+	UpdatedAt         time.Time                   `json:"updated_at"`
+	Lines             []PoolSettlementLine        `json:"lines"`
+	AccountCosts      []PoolSettlementAccountCost `json:"account_costs"`
+	AccountLines      []PoolSettlementAccountLine `json:"account_lines"`
+	AccountContexts   []PoolAccount               `json:"account_contexts"`
+	Transfers         []PoolSettlementTransfer    `json:"transfers"`
+	CalculatedAt      *time.Time                  `json:"calculated_at,omitempty"`
+	ValidAccountCount int                         `json:"valid_account_count"`
+	InputHash         string                      `json:"input_hash"`
+	InputVersion      string                      `json:"input_version"`
 }
 
 type AccountRecovery struct {
@@ -533,9 +559,172 @@ type PoolRepository interface {
 	ConfirmSettlementLine(ctx context.Context, id, userID, actorID int64) error
 	MarkSettlementPaid(ctx context.Context, id, actorID int64) error
 	MarkSettlementMemberPaid(ctx context.Context, id, memberUserID, settlementUserID, actorID int64) error
+	MarkSettlementTransferPaid(ctx context.Context, id, transferID, actorID int64, inputHash string) error
 	ListSettlements(ctx context.Context, accountID *int64, limit, offset int) ([]PoolSettlement, int64, error)
 	GetSettlement(ctx context.Context, id int64) (*PoolSettlement, error)
 	GetRecovery(ctx context.Context, start, end time.Time, accountID ...*int64) ([]AccountRecovery, error)
+}
+
+type settlementBalance struct {
+	ID     int64
+	Name   string
+	Amount int64
+}
+
+const PoolSettlementInputVersion = "aa-pairwise-v2"
+
+// BuildSettlementTransfers first settles exact opposites, then uses largest-balance-first.
+func BuildSettlementTransfers(lines []PoolSettlementLine, accountLines []PoolSettlementAccountLine) []PoolSettlementTransfer {
+	balances := make([]settlementBalance, 0, len(lines))
+	for _, line := range lines {
+		if line.NetAmountMinor != 0 {
+			balances = append(balances, settlementBalance{ID: line.UserID, Name: line.Username, Amount: line.NetAmountMinor})
+		}
+	}
+	payables := make([]settlementBalance, 0)
+	receivables := make([]settlementBalance, 0)
+	for _, balance := range balances {
+		if balance.Amount > 0 {
+			payables = append(payables, balance)
+		} else {
+			balance.Amount = -balance.Amount
+			receivables = append(receivables, balance)
+		}
+	}
+	transfers := make([]PoolSettlementTransfer, 0, len(payables)+len(receivables))
+	accountByUser := make(map[int64][]PoolSettlementAccountLine)
+	for _, line := range accountLines {
+		accountByUser[line.UserID] = append(accountByUser[line.UserID], line)
+	}
+	addTransfer := func(from, to settlementBalance, amount int64) {
+		transfer := PoolSettlementTransfer{FromUserID: from.ID, FromUserName: from.Name, ToUserID: to.ID, ToUserName: to.Name, AmountMinor: amount, Currency: "CNY", PaymentStatus: "pending"}
+		seen := map[int64]struct{}{}
+		for _, line := range append(accountByUser[from.ID], accountByUser[to.ID]...) {
+			if _, ok := seen[line.AccountID]; ok {
+				continue
+			}
+			seen[line.AccountID] = struct{}{}
+			transfer.AccountIDs = append(transfer.AccountIDs, line.AccountID)
+			if line.ID > 0 {
+				transfer.AccountLineIDs = append(transfer.AccountLineIDs, line.ID)
+			}
+		}
+		sort.Slice(transfer.AccountIDs, func(i, j int) bool { return transfer.AccountIDs[i] < transfer.AccountIDs[j] })
+		sort.Slice(transfer.AccountLineIDs, func(i, j int) bool { return transfer.AccountLineIDs[i] < transfer.AccountLineIDs[j] })
+		transfers = append(transfers, transfer)
+	}
+	sort.Slice(payables, func(i, j int) bool {
+		return payables[i].Amount > payables[j].Amount || (payables[i].Amount == payables[j].Amount && payables[i].ID < payables[j].ID)
+	})
+	sort.Slice(receivables, func(i, j int) bool {
+		return receivables[i].Amount > receivables[j].Amount || (receivables[i].Amount == receivables[j].Amount && receivables[i].ID < receivables[j].ID)
+	})
+	// Exact matches are consumed before the greedy pass.
+	for i := range payables {
+		if payables[i].Amount == 0 {
+			continue
+		}
+		for j := range receivables {
+			if receivables[j].Amount == payables[i].Amount {
+				addTransfer(payables[i], receivables[j], payables[i].Amount)
+				payables[i].Amount, receivables[j].Amount = 0, 0
+				break
+			}
+		}
+	}
+	for i, j := 0, 0; i < len(payables) && j < len(receivables); {
+		if payables[i].Amount == 0 {
+			i++
+			continue
+		}
+		if receivables[j].Amount == 0 {
+			j++
+			continue
+		}
+		amount := payables[i].Amount
+		if receivables[j].Amount < amount {
+			amount = receivables[j].Amount
+		}
+		if amount > 0 {
+			addTransfer(payables[i], receivables[j], amount)
+		}
+		payables[i].Amount -= amount
+		receivables[j].Amount -= amount
+		if payables[i].Amount == 0 {
+			i++
+		}
+		if receivables[j].Amount == 0 {
+			j++
+		}
+	}
+	return transfers
+}
+
+func SettlementTransferKey(inputHash string, fromUserID, toUserID, amountMinor int64) string {
+	sum := sha256.Sum256([]byte(fmt.Sprintf("%s:%d:%d:%d", inputHash, fromUserID, toUserID, amountMinor)))
+	return hex.EncodeToString(sum[:])
+}
+
+type settlementHashCost struct {
+	Kind                                         string
+	EntryID, AccountID, PayerUserID, AmountMinor int64
+}
+type settlementHashLine struct {
+	AccountID, UserID                                                            int64
+	UsageWeight, UsageShare                                                      string
+	AllocatedCostMinor, ContributionCreditMinor, AdjustmentMinor, NetAmountMinor int64
+}
+
+func SettlementInputHash(item *PoolSettlement) string {
+	costs := make([]settlementHashCost, 0, len(item.AccountCosts)+len(item.CostSnapshot))
+	if len(item.AccountCosts) > 0 {
+		for _, cost := range item.AccountCosts {
+			costs = append(costs, settlementHashCost{cost.Kind, cost.CostEntryID, cost.AccountID, cost.PayerUserID, cost.AmountMinor})
+		}
+	} else {
+		for _, cost := range item.CostSnapshot {
+			costs = append(costs, settlementHashCost{cost.Kind, cost.EntryID, cost.AccountID, cost.PayerUserID, cost.AmountMinor})
+		}
+	}
+	sort.Slice(costs, func(i, j int) bool {
+		if costs[i].AccountID != costs[j].AccountID {
+			return costs[i].AccountID < costs[j].AccountID
+		}
+		return costs[i].EntryID < costs[j].EntryID
+	})
+	lines := make([]settlementHashLine, 0, len(item.AccountLines))
+	for _, line := range item.AccountLines {
+		lines = append(lines, settlementHashLine{line.AccountID, line.UserID, line.AccountUsageWeight, line.UsageShare, line.AllocatedCostMinor, line.ContributionCreditMinor, line.AdjustmentMinor, line.NetAmountMinor})
+	}
+	sort.Slice(lines, func(i, j int) bool {
+		if lines[i].AccountID != lines[j].AccountID {
+			return lines[i].AccountID < lines[j].AccountID
+		}
+		return lines[i].UserID < lines[j].UserID
+	})
+	payload := struct {
+		Start, End          time.Time
+		Filter              SettlementFilterSnapshot
+		Costs               []settlementHashCost
+		Lines               []settlementHashLine
+		Coverage            string
+		Unpriced, TotalCost int64
+		FXRate              string
+	}{item.PeriodStart.UTC(), item.PeriodEnd.UTC(), item.FilterSnapshot, costs, lines, item.PricingCoverage, item.UnpricedCount, item.TotalCostMinor, item.FXRate}
+	raw, _ := json.Marshal(payload)
+	sum := sha256.Sum256(raw)
+	return hex.EncodeToString(sum[:])
+}
+
+func SetSettlementTransferIdentity(item *PoolSettlement) {
+	if item.InputHash == "" {
+		item.InputHash = SettlementInputHash(item)
+	}
+	item.InputVersion = PoolSettlementInputVersion
+	for i := range item.Transfers {
+		item.Transfers[i].TransferKey = SettlementTransferKey(item.InputHash, item.Transfers[i].FromUserID, item.Transfers[i].ToUserID, item.Transfers[i].AmountMinor)
+		item.Transfers[i].InputHash = item.InputHash
+	}
 }
 
 type PoolService struct {
@@ -1131,6 +1320,20 @@ func (s *PoolService) RecalculateSettlement(ctx context.Context, period Settleme
 		FormulaVersion: "v1", CostSnapshot: snapshot, FilterSnapshot: period.Filter, GeneratedBy: actorID,
 		Lines: lines, AccountCosts: accountCosts, AccountLines: accountLines,
 	}
+	accountIDs := make(map[int64]struct{}, len(weights)+len(costs))
+	for _, weight := range weights {
+		accountIDs[weight.AccountID] = struct{}{}
+	}
+	for _, cost := range costs {
+		accountIDs[cost.AccountID] = struct{}{}
+	}
+	settlement.ValidAccountCount = len(accountIDs)
+	now := time.Now().UTC()
+	settlement.CalculatedAt = &now
+	settlement.InputVersion = PoolSettlementInputVersion
+	settlement.InputHash = SettlementInputHash(settlement)
+	settlement.Transfers = BuildSettlementTransfers(lines, accountLines)
+	SetSettlementTransferIdentity(settlement)
 	return s.repo.SaveDraftSettlement(ctx, settlement)
 }
 
@@ -1342,6 +1545,12 @@ func (s *PoolService) LockSettlement(ctx context.Context, id, actorID int64) (*P
 	if err != nil || coverage.LessThan(decimal.RequireFromString("0.99")) {
 		return nil, infraerrors.Conflict("SETTLEMENT_PRICING_INCOMPLETE", "pricing coverage must reach 99% before locking")
 	}
+	if item.Status == "paid" {
+		return item, nil
+	}
+	if item.Status == "locked" {
+		return s.repo.LockSettlement(ctx, id, actorID)
+	}
 	if item.Status != "draft" {
 		return item, nil
 	}
@@ -1449,7 +1658,7 @@ func (s *PoolService) MarkSettlementMemberPaid(ctx context.Context, id, memberUs
 	if err != nil {
 		return nil, err
 	}
-	if item.Status == "draft" {
+	if item.Status != "paid" {
 		item, err = s.LockSettlement(ctx, id, actorID)
 		if err != nil {
 			return nil, err
@@ -1459,6 +1668,33 @@ func (s *PoolService) MarkSettlementMemberPaid(ctx context.Context, id, memberUs
 		return nil, err
 	}
 	return s.repo.GetSettlement(ctx, item.ID)
+}
+
+func (s *PoolService) MarkSettlementTransferPaid(ctx context.Context, id, transferID, actorID int64) (*PoolSettlement, error) {
+	if id <= 0 || transferID <= 0 {
+		return nil, ErrPoolSettlementNotFound
+	}
+	if actorID <= 0 {
+		return nil, infraerrors.BadRequest("SETTLEMENT_PAID_ACTOR_REQUIRED", "a signed-in administrator is required")
+	}
+	item, err := s.repo.GetSettlement(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if item.Status != "paid" {
+		// Re-run the repository's live cost, usage, coverage and FX checks immediately before payment.
+		item, err = s.repo.LockSettlement(ctx, id, actorID)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if item.InputHash == "" {
+		item.InputHash = SettlementInputHash(item)
+	}
+	if err := s.repo.MarkSettlementTransferPaid(ctx, id, transferID, actorID, item.InputHash); err != nil {
+		return nil, err
+	}
+	return s.repo.GetSettlement(ctx, id)
 }
 
 func (s *PoolService) GetRecovery(ctx context.Context, start, end time.Time, accountID ...*int64) (*PoolRecoveryOverview, error) {

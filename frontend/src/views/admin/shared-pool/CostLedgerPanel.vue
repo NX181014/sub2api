@@ -1,6 +1,6 @@
 <template>
   <section class="card min-w-0 overflow-hidden">
-    <header class="flex flex-col gap-4 border-b border-gray-200 px-4 py-5 dark:border-dark-700 sm:px-5 lg:flex-row lg:items-end lg:justify-between">
+    <header class="flex flex-col gap-3 border-b border-gray-200 px-4 py-4 dark:border-dark-700 sm:px-5 lg:flex-row lg:items-center lg:justify-between">
       <div class="min-w-0">
         <h2 class="text-lg font-semibold text-gray-900 dark:text-white">{{ t('admin.sharedPool.ledger.title') }}</h2>
         <p class="mt-1 max-w-3xl text-sm leading-6 text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.ledger.subtitle') }}</p>
@@ -51,19 +51,15 @@
         </div>
       </div>
 
-      <div class="space-y-6 border-b border-gray-200 px-4 py-5 dark:border-dark-700 sm:px-5">
-        <SharedPoolMetricStrip :items="ledgerMetricItems" />
-        <SharedPoolBarChart
-          :title="t('admin.sharedPool.ledger.netCost')"
-          :items="ledgerUploaderBars"
-          :empty-title="t('admin.sharedPool.empty.sources')"
-        />
+      <div class="grid min-w-0 grid-cols-1 gap-0 divide-y divide-gray-200 border-b border-gray-200 dark:divide-dark-700 dark:border-dark-700 lg:grid-cols-[minmax(0,1.15fr)_minmax(18rem,.85fr)] lg:divide-x lg:divide-y-0 dark:lg:divide-dark-700">
+        <div class="min-w-0 p-4 sm:p-5"><SharedPoolMetricStrip :items="ledgerMetricItems" /></div>
+        <div class="min-w-0 p-4 sm:p-5"><SharedPoolBarChart :title="t('admin.sharedPool.ledger.netCost')" :items="ledgerUploaderBars" :empty-title="t('admin.sharedPool.empty.sources')" /></div>
       </div>
 
       <div v-if="loading" class="flex min-h-40 items-center justify-center"><LoadingSpinner /></div>
       <div v-else-if="uploaderSummaries.length" class="divide-y divide-gray-200 dark:divide-dark-700">
         <section v-for="group in uploaderSummaries" :key="uploaderGroupKey(group)" class="min-w-0">
-          <button type="button" class="grid min-h-20 w-full min-w-0 grid-cols-1 gap-3 px-4 py-4 text-left transition-colors hover:bg-gray-50 dark:hover:bg-dark-700/50 sm:px-5 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_auto] lg:items-center" @click="openUploaderGroup(group)">
+          <button type="button" class="grid min-h-16 w-full min-w-0 grid-cols-1 gap-3 px-4 py-3 text-left transition-colors hover:bg-gray-50 dark:hover:bg-dark-700/50 sm:px-5 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_auto] lg:items-center" @click="openUploaderGroup(group)">
             <span class="min-w-0">
               <span class="block truncate font-semibold text-gray-900 dark:text-white">{{ uploaderGroupName(group) }}</span>
               <span class="mt-1 block text-xs text-gray-500 dark:text-gray-400">{{ group.account_count }} {{ t('admin.sharedPool.columns.accounts') }}</span>
@@ -115,7 +111,7 @@
 
       <div v-if="loading" class="flex min-h-40 items-center justify-center"><LoadingSpinner /></div>
       <div v-else-if="entries.length" class="divide-y divide-gray-200 dark:divide-dark-700">
-        <article v-for="row in entries" :key="row.id" class="grid min-w-0 grid-cols-1 gap-4 px-4 py-5 sm:px-5 lg:grid-cols-2 2xl:grid-cols-[minmax(0,1.15fr)_minmax(0,.8fr)_minmax(0,1fr)_auto] 2xl:items-center">
+        <article v-for="row in entries" :key="row.id" class="grid min-w-0 grid-cols-1 gap-3 px-4 py-3.5 sm:px-5 lg:grid-cols-2 2xl:grid-cols-[minmax(0,1.15fr)_minmax(0,.8fr)_minmax(0,1fr)_auto] 2xl:items-center">
           <div class="min-w-0">
             <button type="button" class="flex min-h-11 max-w-full items-center text-left font-semibold text-primary-600 hover:underline dark:text-primary-400" :title="row.account_name" @click="emit('trace-account', row.account_id)"><span class="truncate">{{ row.account_name }}</span></button>
             <div class="mt-1 flex flex-wrap items-center gap-2 text-xs">

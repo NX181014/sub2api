@@ -1143,6 +1143,28 @@ func (h *PoolHandler) MarkSettlementMemberPaid(c *gin.Context) {
 	response.Success(c, item)
 }
 
+func (h *PoolHandler) MarkSettlementTransferPaid(c *gin.Context) {
+	id, ok := poolPathID(c)
+	if !ok {
+		return
+	}
+	transferID, err := strconv.ParseInt(c.Param("transfer_id"), 10, 64)
+	if err != nil || transferID <= 0 {
+		response.BadRequest(c, "invalid settlement transfer")
+		return
+	}
+	actorID, ok := poolActorID(c)
+	if !ok {
+		return
+	}
+	item, err := h.poolService.MarkSettlementTransferPaid(c.Request.Context(), id, transferID, actorID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, item)
+}
+
 func (h *PoolHandler) GetOverview(c *gin.Context) {
 	accountID, ok := optionalPoolQueryID(c, "account_id")
 	if !ok {

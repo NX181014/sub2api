@@ -16,6 +16,11 @@ import (
 	"github.com/shopspring/decimal"
 )
 
+func jsonArrayInt64(values []int64) []byte {
+	raw, _ := json.Marshal(values)
+	return raw
+}
+
 type poolRepository struct{ db *sql.DB }
 
 func NewPoolRepository(db *sql.DB) service.PoolRepository { return &poolRepository{db: db} }
@@ -1043,6 +1048,12 @@ GROUP BY c.cost_entry_id`, pq.Array(ids))
 }
 
 func (r *poolRepository) SaveDraftSettlement(ctx context.Context, settlement *service.PoolSettlement) (*service.PoolSettlement, error) {
+	if settlement.InputHash == "" {
+		settlement.InputHash = service.SettlementInputHash(settlement)
+	}
+	if settlement.InputVersion == "" {
+		settlement.InputVersion = service.PoolSettlementInputVersion
+	}
 	filterRaw, err := json.Marshal(settlement.FilterSnapshot)
 	if err != nil {
 		return nil, err
@@ -1103,6 +1114,17 @@ VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`, settlement.ID, line.Accoun
 			return nil, fmt.Errorf("save settlement account line: %w", err)
 		}
 	}
+	for i := range settlement.Transfers {
+		transfer := &settlement.Transfers[i]
+		transfer.SettlementID = settlement.ID
+		err = tx.QueryRowContext(ctx, `
+INSERT INTO pool_settlement_transfers(settlement_id,transfer_key,input_hash,from_user_id,to_user_id,amount_minor,currency,payment_status,account_line_ids,account_ids)
+VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10::jsonb) RETURNING id`, settlement.ID, transfer.TransferKey, settlement.InputHash, transfer.FromUserID, transfer.ToUserID, transfer.AmountMinor, transfer.Currency, transfer.PaymentStatus,
+			jsonArrayInt64(transfer.AccountLineIDs), jsonArrayInt64(transfer.AccountIDs)).Scan(&transfer.ID)
+		if err != nil {
+			return nil, fmt.Errorf("save settlement transfer: %w", err)
+		}
+	}
 	if err = tx.Commit(); err != nil {
 		return nil, err
 	}
@@ -1136,7 +1158,7 @@ func (r *poolRepository) LockSettlement(ctx context.Context, id, actorID int64) 
 	if err = json.Unmarshal(filterRaw, &filter); err != nil {
 		return nil, fmt.Errorf("decode settlement filter: %w", err)
 	}
-	if status == "locked" || status == "paid" {
+	if status == "paid" {
 		if err = tx.Commit(); err != nil {
 			return nil, err
 		}
@@ -1276,6 +1298,12 @@ SELECT EXISTS (
 	}
 	if stale || carryIn != expectedCarry {
 		return nil, infraerrors.Conflict("SETTLEMENT_STALE", "settlement changed after preview; recalculate before locking")
+	}
+	if status == "locked" {
+		if err = tx.Commit(); err != nil {
+			return nil, err
+		}
+		return r.GetSettlement(ctx, id)
 	}
 	result, err := tx.ExecContext(ctx, `UPDATE pool_settlements SET status='locked',locked_by_user_id=$2,locked_at=NOW(),updated_at=NOW() WHERE id=$1 AND status='draft'`, id, actorID)
 	if err != nil {
@@ -1482,6 +1510,54 @@ WHERE settlement_id=$1 AND user_id<>$2 AND net_amount_minor<>0 AND payment_statu
 	return tx.Commit()
 }
 
+func (r *poolRepository) MarkSettlementTransferPaid(ctx context.Context, id, transferID, actorID int64, inputHash string) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	var status string
+	if err = tx.QueryRowContext(ctx, `SELECT status FROM pool_settlements WHERE id=$1 FOR UPDATE`, id).Scan(&status); errors.Is(err, sql.ErrNoRows) {
+		return service.ErrPoolSettlementNotFound
+	} else if err != nil {
+		return err
+	}
+	if status != "locked" && status != "paid" {
+		return infraerrors.Conflict("SETTLEMENT_NOT_LOCKED", "only a validated settlement can accept transfers")
+	}
+	var transferStatus, transferHash sql.NullString
+	if err = tx.QueryRowContext(ctx, `SELECT payment_status,input_hash FROM pool_settlement_transfers WHERE id=$1 AND settlement_id=$2 FOR UPDATE`, transferID, id).Scan(&transferStatus, &transferHash); errors.Is(err, sql.ErrNoRows) {
+		return infraerrors.NotFound("SETTLEMENT_TRANSFER_NOT_FOUND", "settlement transfer not found")
+	} else if err != nil {
+		return err
+	}
+	if transferStatus.String == "paid" {
+		return tx.Commit()
+	}
+	if transferStatus.String == "void" {
+		return infraerrors.Conflict("SETTLEMENT_TRANSFER_VOID", "settlement transfer is no longer active")
+	}
+	if inputHash != "" && transferHash.Valid && transferHash.String != inputHash {
+		return infraerrors.Conflict("SETTLEMENT_INPUT_CHANGED", "settlement inputs changed; recalculate before paying")
+	}
+	if _, err = tx.ExecContext(ctx, `UPDATE pool_settlement_transfers SET payment_status='paid',paid_by_user_id=$3,paid_at=NOW(),updated_at=NOW() WHERE id=$1 AND settlement_id=$2`, transferID, id, actorID); err != nil {
+		return err
+	}
+	var pending int64
+	if err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM pool_settlement_transfers WHERE settlement_id=$1 AND payment_status='pending' AND ($2='' OR input_hash=$2)`, id, inputHash).Scan(&pending); err != nil {
+		return err
+	}
+	if pending == 0 {
+		if _, err = tx.ExecContext(ctx, `UPDATE pool_settlement_lines SET payment_status='paid',confirmation_status='confirmed',updated_at=NOW() WHERE settlement_id=$1`, id); err != nil {
+			return err
+		}
+		if _, err = tx.ExecContext(ctx, `UPDATE pool_settlements SET status='paid',paid_by_user_id=$2,paid_at=COALESCE(paid_at,NOW()),updated_at=NOW() WHERE id=$1`, id, actorID); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
 const settlementSelect = `
 SELECT id,period_type,period_start,period_end,timezone,status,period_cost_minor,carry_in_minor,carry_out_minor,total_cost_minor,total_usage_weight,pricing_coverage,unpriced_usage_count,fx_rate,formula_version,cost_snapshot,filter_snapshot,generated_by_user_id,locked_by_user_id,locked_at,paid_by_user_id,paid_at,created_at,updated_at
 FROM pool_settlements`
@@ -1603,6 +1679,63 @@ FROM pool_settlement_lines l JOIN users u ON u.id=l.user_id WHERE l.settlement_i
 	return items, rows.Err()
 }
 
+func (r *poolRepository) loadSettlementTransfers(ctx context.Context, id int64) ([]service.PoolSettlementTransfer, error) {
+	rows, err := r.db.QueryContext(ctx, `
+SELECT t.id,t.settlement_id,t.transfer_key,t.input_hash,t.from_user_id,fu.username,t.to_user_id,tu.username,t.amount_minor,t.currency,t.payment_status,t.paid_by_user_id,t.paid_at,t.account_line_ids,t.account_ids
+FROM pool_settlement_transfers t
+JOIN users fu ON fu.id=t.from_user_id
+JOIN users tu ON tu.id=t.to_user_id
+WHERE t.settlement_id=$1 AND t.payment_status <> 'void'
+	ORDER BY t.payment_status,t.amount_minor DESC,t.id`, id)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	items := make([]service.PoolSettlementTransfer, 0)
+	for rows.Next() {
+		var item service.PoolSettlementTransfer
+		var lineIDsRaw, accountIDsRaw []byte
+		if err := rows.Scan(&item.ID, &item.SettlementID, &item.TransferKey, &item.InputHash, &item.FromUserID, &item.FromUserName, &item.ToUserID, &item.ToUserName, &item.AmountMinor, &item.Currency, &item.PaymentStatus, &item.PaidByUserID, &item.PaidAt, &lineIDsRaw, &accountIDsRaw); err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal(lineIDsRaw, &item.AccountLineIDs); err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal(accountIDsRaw, &item.AccountIDs); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func (r *poolRepository) ensureSettlementTransfers(ctx context.Context, item *service.PoolSettlement, transfers []service.PoolSettlementTransfer) error {
+	if len(transfers) == 0 {
+		return nil
+	}
+	paymentStatus := "pending"
+	if item.Status == "paid" {
+		paymentStatus = "paid"
+	}
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err = tx.ExecContext(ctx, `UPDATE pool_settlement_transfers SET payment_status='void',updated_at=NOW() WHERE settlement_id=$1 AND payment_status='pending' AND input_hash IS DISTINCT FROM $2`, item.ID, item.InputHash); err != nil {
+		return err
+	}
+	for _, transfer := range transfers {
+		if _, err = tx.ExecContext(ctx, `
+INSERT INTO pool_settlement_transfers(settlement_id,transfer_key,input_hash,from_user_id,to_user_id,amount_minor,currency,payment_status,account_line_ids,account_ids)
+VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10::jsonb)
+ON CONFLICT (settlement_id,transfer_key) WHERE transfer_key IS NOT NULL AND payment_status <> 'void' DO NOTHING`, item.ID, transfer.TransferKey, item.InputHash, transfer.FromUserID, transfer.ToUserID, transfer.AmountMinor, transfer.Currency, paymentStatus, jsonArrayInt64(transfer.AccountLineIDs), jsonArrayInt64(transfer.AccountIDs)); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
 func (r *poolRepository) GetSettlement(ctx context.Context, id int64) (*service.PoolSettlement, error) {
 	item, err := scanSettlement(r.db.QueryRowContext(ctx, settlementSelect+` WHERE id=$1`, id))
 	if errors.Is(err, sql.ErrNoRows) {
@@ -1624,8 +1757,44 @@ func (r *poolRepository) loadSettlementDetails(ctx context.Context, item *servic
 	if item.Lines, err = r.loadSettlementLines(ctx, item.ID); err != nil {
 		return err
 	}
-	item.AccountLines, err = r.loadSettlementAccountLines(ctx, item.ID)
-	return err
+	if item.AccountLines, err = r.loadSettlementAccountLines(ctx, item.ID); err != nil {
+		return err
+	}
+	item.InputHash = service.SettlementInputHash(item)
+	item.InputVersion = service.PoolSettlementInputVersion
+	item.ValidAccountCount = len(item.AccountContexts)
+	calculatedAt := item.UpdatedAt
+	item.CalculatedAt = &calculatedAt
+	computed := service.BuildSettlementTransfers(item.Lines, item.AccountLines)
+	plan := service.PoolSettlement{InputHash: item.InputHash, Transfers: computed}
+	service.SetSettlementTransferIdentity(&plan)
+	computed = plan.Transfers
+	if len(computed) == 0 {
+		item.Transfers = []service.PoolSettlementTransfer{}
+		return nil
+	}
+	if err = r.ensureSettlementTransfers(ctx, item, computed); err != nil {
+		return err
+	}
+	persisted, err := r.loadSettlementTransfers(ctx, item.ID)
+	if err != nil {
+		return err
+	}
+	byKey := make(map[string]service.PoolSettlementTransfer, len(persisted))
+	for _, transfer := range persisted {
+		byKey[transfer.TransferKey] = transfer
+	}
+	item.Transfers = make([]service.PoolSettlementTransfer, 0, len(computed))
+	for _, transfer := range computed {
+		if saved, ok := byKey[transfer.TransferKey]; ok {
+			transfer.ID, transfer.PaymentStatus, transfer.PaidByUserID, transfer.PaidAt = saved.ID, saved.PaymentStatus, saved.PaidByUserID, saved.PaidAt
+		}
+		if item.Status == "paid" {
+			transfer.PaymentStatus = "paid"
+		}
+		item.Transfers = append(item.Transfers, transfer)
+	}
+	return nil
 }
 
 func (r *poolRepository) ListSettlements(ctx context.Context, accountID *int64, limit, offset int) ([]service.PoolSettlement, int64, error) {

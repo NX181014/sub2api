@@ -15,6 +15,27 @@ type recoveryCaptureRepository struct {
 	accountID *int64
 }
 
+type memberPaymentCaptureRepository struct {
+	PoolRepository
+	settlement *PoolSettlement
+	lockCalls  int
+	paidCalls  int
+}
+
+func (r *memberPaymentCaptureRepository) GetSettlement(context.Context, int64) (*PoolSettlement, error) {
+	return r.settlement, nil
+}
+
+func (r *memberPaymentCaptureRepository) LockSettlement(context.Context, int64, int64) (*PoolSettlement, error) {
+	r.lockCalls++
+	return r.settlement, nil
+}
+
+func (r *memberPaymentCaptureRepository) MarkSettlementMemberPaid(context.Context, int64, int64, int64, int64) error {
+	r.paidCalls++
+	return nil
+}
+
 func (r *recoveryCaptureRepository) GetRecovery(_ context.Context, _, _ time.Time, accountID ...*int64) ([]AccountRecovery, error) {
 	if len(accountID) > 0 {
 		r.accountID = accountID[0]
@@ -71,6 +92,17 @@ func TestPoolRecoveryForwardsAccountID(t *testing.T) {
 	require.Equal(t, &accountID, repo.accountID)
 	require.Len(t, overview.Accounts, 1)
 	require.Equal(t, accountID, overview.Accounts[0].AccountID)
+}
+
+func TestMarkSettlementMemberPaidRevalidatesLockedSettlement(t *testing.T) {
+	repo := &memberPaymentCaptureRepository{settlement: &PoolSettlement{ID: 9, Status: "locked", PricingCoverage: "1"}}
+	pool := NewPoolService(repo, nil, nil, nil, nil)
+
+	_, err := pool.MarkSettlementMemberPaid(context.Background(), 9, 23, 42, 4)
+
+	require.NoError(t, err)
+	require.Equal(t, 1, repo.lockCalls)
+	require.Equal(t, 1, repo.paidCalls)
 }
 
 func TestPoolSettlementMath(t *testing.T) {
@@ -152,6 +184,25 @@ func TestBuildSettlementAllocationCarriesWhenThereIsNoUsage(t *testing.T) {
 	require.Zero(t, lines[0].NetAmountMinor)
 	require.Len(t, accountLines, 1)
 	require.Zero(t, accountLines[0].NetAmountMinor)
+}
+
+func TestBuildSettlementTransfersPrefersExactThenLargestBalances(t *testing.T) {
+	lines := []PoolSettlementLine{
+		{UserID: 5, Username: "receiver-5", NetAmountMinor: -100},
+		{UserID: 7, Username: "receiver-7", NetAmountMinor: -300},
+		{UserID: 6, Username: "payer-6", NetAmountMinor: 300},
+		{UserID: 4, Username: "receiver-4", NetAmountMinor: -400},
+		{UserID: 3, Username: "receiver-3", NetAmountMinor: -300},
+		{UserID: 2, Username: "payer-2", NetAmountMinor: 300},
+		{UserID: 1, Username: "payer-1", NetAmountMinor: 500},
+	}
+	transfers := BuildSettlementTransfers(lines, nil)
+	require.Equal(t, []PoolSettlementTransfer{
+		{FromUserID: 2, FromUserName: "payer-2", ToUserID: 3, ToUserName: "receiver-3", AmountMinor: 300, Currency: "CNY", PaymentStatus: "pending"},
+		{FromUserID: 6, FromUserName: "payer-6", ToUserID: 7, ToUserName: "receiver-7", AmountMinor: 300, Currency: "CNY", PaymentStatus: "pending"},
+		{FromUserID: 1, FromUserName: "payer-1", ToUserID: 4, ToUserName: "receiver-4", AmountMinor: 400, Currency: "CNY", PaymentStatus: "pending"},
+		{FromUserID: 1, FromUserName: "payer-1", ToUserID: 5, ToUserName: "receiver-5", AmountMinor: 100, Currency: "CNY", PaymentStatus: "pending"},
+	}, transfers)
 }
 
 func TestValidateSettlementFilter(t *testing.T) {
