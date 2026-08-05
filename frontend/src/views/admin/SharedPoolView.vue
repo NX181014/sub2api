@@ -92,7 +92,7 @@
                 <p v-if="lastLoadedAt" class="min-w-0 truncate pb-2 text-xs text-gray-500 dark:text-gray-400" :title="lastLoadedAt">
                   {{ t('common.updatedAt', { date: lastLoadedAt }) }}
                 </p>
-                <button type="button" class="btn btn-secondary min-h-11 shrink-0 px-3" :disabled="loading" @click="loadActiveTab">
+                <button type="button" class="btn btn-secondary min-h-11 shrink-0 px-3" :disabled="loading" @click="loadActiveTab(true)">
                   <Icon name="refresh" size="sm" :class="loading ? 'animate-spin' : ''" />
                   <span>{{ t('common.refresh') }}</span>
                 </button>
@@ -1028,7 +1028,7 @@ async function handlePeriodTypeChange(value: string | number | boolean | null) {
     endDate.value = range.end
   }
   await syncPeriodQuery()
-  await loadActiveTab()
+  await loadActiveTab(true)
 }
 
 async function handleDateRangeChange(range: { startDate: string; endDate: string }) {
@@ -1036,7 +1036,7 @@ async function handleDateRangeChange(range: { startDate: string; endDate: string
   endDate.value = range.endDate
   periodType.value = 'custom'
   await syncPeriodQuery()
-  await loadActiveTab()
+  await loadActiveTab(true)
 }
 
 function switchTab(tab: TabKey) {
@@ -1167,32 +1167,41 @@ async function applySettlementFilters() {
   await loadActiveTab()
 }
 
-async function loadActiveTab() {
+let loadSequence = 0
+
+async function loadActiveTab(force = false) {
   if (activeTab.value === 'ledger') return
+  const sequence = ++loadSequence
+  const tab = activeTab.value
+  if (force) adminAPI.sharedPool.invalidateOverviewRequests()
   loading.value = true
   try {
-    if (activeTab.value === 'overview') {
-      overview.value = await adminAPI.sharedPool.getOverview(periodParams())
-    } else if (activeTab.value === 'accounts') {
+    if (tab === 'overview') {
+      const result = await adminAPI.sharedPool.getOverview(periodParams())
+      if (sequence === loadSequence) overview.value = result
+    } else if (tab === 'accounts') {
       const response = await adminAPI.sharedPool.listAccountCosts(periodParams())
-      accountCosts.value = response.items || []
-    } else if (activeTab.value === 'settlement') {
+      if (sequence === loadSequence) accountCosts.value = response.items || []
+    } else if (tab === 'settlement') {
       if (!accountOptions.value.length || !userOptions.value.length) await loadReferenceOptions()
-      settlement.value = await adminAPI.sharedPool.previewSettlement(settlementParams())
+      const result = await adminAPI.sharedPool.previewSettlement(settlementParams())
+      if (sequence === loadSequence) settlement.value = result
     } else {
       const [sourceResponse, sourceOptions] = await Promise.all([
         adminAPI.sharedPool.listSources(periodParams()),
         adminAPI.sharedPool.listPurchaseSources({ referenced: true })
       ])
-      sources.value = sourceResponse.items || []
-      selectedSourceName.value = ''
-      purchaseSources.value = sourceOptions
+      if (sequence === loadSequence) {
+        sources.value = sourceResponse.items || []
+        selectedSourceName.value = ''
+        purchaseSources.value = sourceOptions
+      }
     }
-    lastLoadedAt.value = formatDateTimeToMinute(new Date().toISOString(), locale.value)
+    if (sequence === loadSequence) lastLoadedAt.value = formatDateTimeToMinute(new Date().toISOString(), locale.value)
   } catch (error: any) {
-    appStore.showError(error?.message || t('admin.sharedPool.errors.load'))
+    if (sequence === loadSequence) appStore.showError(error?.message || t('admin.sharedPool.errors.load'))
   } finally {
-    loading.value = false
+    if (sequence === loadSequence) loading.value = false
   }
 }
 
@@ -1542,7 +1551,7 @@ async function saveLifecycleEvent() {
     })
     appStore.showSuccess(t('admin.sharedPool.event.saved'))
     showEventDialog.value = false
-    await loadActiveTab()
+    await loadActiveTab(true)
   } catch (error: any) {
     appStore.showError(error?.message || t('admin.sharedPool.errors.event'))
   } finally {
@@ -1559,7 +1568,7 @@ async function updateFXRate() {
   try {
     fxRate.value = await adminAPI.sharedPool.saveFXRate(fxRate.value, startDate.value)
     appStore.showSuccess(t('admin.sharedPool.form.fxRateSaved'))
-    await loadActiveTab()
+    await loadActiveTab(true)
   } catch (error: any) {
     appStore.showError(error?.message || t('admin.sharedPool.errors.fxRate'))
   } finally {
@@ -1604,7 +1613,7 @@ async function persistPendingAccounts(accounts: CreatedAccount[]) {
     resetPendingIntake()
     appStore.showSuccess(t('admin.sharedPool.form.saved'))
   }
-  await loadActiveTab()
+  await loadActiveTab(true)
 }
 
 async function reopenDraftForManualSelection() {
@@ -1728,7 +1737,7 @@ async function saveAccountCost() {
     if (!profileReadOnly.value) appStore.showSuccess(t('admin.sharedPool.form.saved'))
     showCostDialog.value = false
     resetPendingIntake()
-    await loadActiveTab()
+    await loadActiveTab(true)
   } catch (error: any) {
     appStore.showError(error?.message || t('admin.sharedPool.errors.save'))
   } finally {

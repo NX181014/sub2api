@@ -773,9 +773,20 @@ const overviewParams = (params: PoolPeriodParams) => ({
   account_id: params.account_id
 })
 
+const overviewRequests = new Map<string, Promise<RawOverview>>()
+
 async function getRawOverview(params: PoolPeriodParams): Promise<RawOverview> {
-  const { data } = await apiClient.get<RawOverview>('/admin/pool/overview', { params: overviewParams(params) })
-  return data
+  const requestParams = overviewParams(params)
+  const key = JSON.stringify(requestParams)
+  const existing = overviewRequests.get(key)
+  if (existing) return existing
+  const request = apiClient.get<RawOverview>('/admin/pool/overview', { params: requestParams })
+    .then(({ data }) => data)
+    .finally(() => {
+      if (overviewRequests.get(key) === request) overviewRequests.delete(key)
+    })
+  overviewRequests.set(key, request)
+  return request
 }
 
 export async function getOverview(params: PoolPeriodParams): Promise<SharedPoolOverview> {
@@ -837,6 +848,10 @@ export async function getOverview(params: PoolPeriodParams): Promise<SharedPoolO
     period_end: raw.end_at,
     currency: 'CNY'
   }
+}
+
+export function invalidateOverviewRequests(): void {
+  overviewRequests.clear()
 }
 
 export async function listAccountCosts(params?: PoolPeriodParams): Promise<SharedPoolCostList> {
@@ -1297,6 +1312,7 @@ export async function revealProxyExportApproval(id: number): Promise<PoolProxyEx
 
 export default {
   getOverview,
+  invalidateOverviewRequests,
   listAccountCosts,
   listCostSummaries,
   listCostUploaderSummaries,

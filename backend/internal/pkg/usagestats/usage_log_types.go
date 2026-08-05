@@ -165,6 +165,7 @@ type UserSpendingRankingResponse struct {
 // UserBreakdownItem represents per-user usage breakdown within a dimension (group, model, endpoint).
 type UserBreakdownItem struct {
 	UserID       int64   `json:"user_id"`
+	Username     string  `json:"username"`
 	Email        string  `json:"email"`
 	Requests     int64   `json:"requests"`
 	InputTokens  int64   `json:"input_tokens"`  // 输入 token 累计
