@@ -1,7 +1,7 @@
 <template>
   <AppLayout>
     <div class="shared-pool-shell min-w-0 space-y-5">
-      <header class="min-w-0 border-b border-gray-200 bg-white dark:border-dark-700 dark:bg-dark-900">
+      <header class="card min-w-0 overflow-hidden">
         <div class="flex flex-col gap-4 px-4 py-4 sm:px-5 lg:flex-row lg:items-center lg:justify-between">
           <div class="min-w-0">
             <h1 class="text-lg font-semibold text-gray-900 dark:text-white">{{ t('admin.sharedPool.title') }}</h1>
@@ -20,9 +20,9 @@
             v-for="tab in tabs"
             :key="tab.key"
             type="button"
-            class="inline-flex min-h-11 items-center gap-2 rounded-md px-3 text-sm font-medium transition-colors"
+            class="inline-flex min-h-11 items-center gap-2 rounded-lg px-3 text-sm font-medium transition-colors"
             :class="activeTab === tab.key
-              ? 'bg-gray-900 text-white dark:bg-white dark:text-gray-900'
+              ? 'bg-primary-50 text-primary-700 ring-1 ring-inset ring-primary-200 dark:bg-primary-900/20 dark:text-primary-300 dark:ring-primary-800'
               : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-dark-700 dark:hover:text-white'"
             :aria-current="activeTab === tab.key ? 'page' : undefined"
             @click="switchTab(tab.key)"
@@ -95,76 +95,46 @@
 
       <template v-else-if="activeTab === 'overview'">
         <template v-if="overview">
-          <SharedPoolMetricStrip :items="overviewMetricItems" />
-          <div class="grid min-w-0 grid-cols-1 gap-4 lg:grid-cols-2">
-            <SharedPoolBarChart
-              :title="t('admin.sharedPool.overview.accountRecovery')"
-              :items="overviewRecoveryBars"
-              :empty-title="t('admin.sharedPool.empty.overview')"
-            />
-            <SharedPoolBarChart
-              :title="t('admin.sharedPool.metrics.usageValue')"
-              :items="overviewUsageBars"
-              color="#22c55e"
-              :empty-title="t('admin.sharedPool.empty.overview')"
-            />
-          </div>
-
-          <section class="overflow-hidden rounded-lg border border-gray-200 bg-white dark:border-dark-700 dark:bg-dark-800" aria-labelledby="pool-account-recovery-title">
-              <div class="flex flex-col gap-3 border-b border-gray-100 px-4 py-3 dark:border-dark-700 sm:flex-row sm:items-center sm:justify-between">
-                <div>
-                  <h2 id="pool-account-recovery-title" class="text-sm font-semibold text-gray-900 dark:text-white">
-                    {{ t('admin.sharedPool.overview.accountRecovery') }}
-                  </h2>
-                  <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
-                    {{ t('admin.sharedPool.page.coverage', { start: dateOnly(overview.period_start), end: dateOnly(overview.period_end), count: filteredOverviewAccounts.length }) }}
-                  </p>
-                </div>
-                <div class="w-full sm:w-40">
-                  <Select
-                    v-model="overviewRecoveryFilter"
-                    :options="overviewRecoveryFilterOptions"
-                    :aria-label="t('admin.sharedPool.page.recoveryFilter')"
-                    @change="applyOverviewRecoveryFilter"
-                  />
-                </div>
+          <section class="card overflow-hidden" aria-labelledby="pool-account-recovery-title">
+            <div class="card-header flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h2 id="pool-account-recovery-title" class="text-base font-semibold text-gray-900 dark:text-white">{{ t('admin.sharedPool.overview.accountRecovery') }}</h2>
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.page.coverage', { start: dateOnly(overview.period_start), end: dateOnly(overview.period_end), count: filteredOverviewAccounts.length }) }}</p>
               </div>
-              <div v-if="paginatedOverviewAccounts.length" class="divide-y divide-gray-100 dark:divide-dark-700">
-                <article v-for="row in paginatedOverviewAccounts" :key="row.id" class="grid min-w-0 grid-cols-1 gap-4 px-4 py-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-[minmax(220px,1.35fr)_minmax(180px,1fr)_repeat(3,minmax(120px,.75fr))_auto] 2xl:items-center">
-                  <div class="min-w-0 2xl:pr-3">
-                    <button
-                      type="button"
-                      class="block min-h-11 max-w-full truncate text-left font-semibold text-gray-900 hover:text-primary-600 dark:text-white dark:hover:text-primary-400"
-                      :title="row.account_name"
-                      @click="openAccountTrace(row.account_id)"
-                    >
-                      {{ row.account_name }}
-                    </button>
-                    <p class="max-w-52 truncate text-xs text-gray-500 dark:text-gray-400" :title="row.provider_identity">
-                      {{ row.provider_identity || '-' }}
-                    </p>
-                    <p class="mt-1 truncate text-xs text-gray-500 dark:text-gray-400">{{ row.uploader_name || '-' }} · {{ row.purchase_source_name || '-' }}</p>
-                  </div>
-                  <div class="min-w-0">
-                    <div class="flex items-center justify-between gap-3"><StatusBadge :status="availabilityPresentation(row.availability_status, row.account_status).badge" :label="t(`admin.accounts.status.${availabilityPresentation(row.availability_status, row.account_status).key}`)" /><span class="font-semibold tabular-nums" :class="row.roi_rate >= 100 ? 'text-green-600 dark:text-green-400' : 'text-amber-600 dark:text-amber-400'">{{ formatPercent(row.roi_rate) }}</span></div>
-                    <div class="mt-2 h-1.5 overflow-hidden rounded-full bg-gray-100 dark:bg-dark-700"><div class="h-full rounded-full bg-green-500" :style="{ width: `${Math.min(Math.max(row.roi_rate, 0), 100)}%` }"></div></div>
-                    <span class="mt-1 block text-xs text-gray-500 dark:text-gray-400">{{ t(`admin.sharedPool.page.recoveryStates.${recoveryState(row)}`) }}</span>
-                  </div>
-                  <div><span class="block text-xs text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.metrics.usageValue') }}</span><span class="mt-1 block font-medium tabular-nums">{{ formatMoney(row.usage_value, row.currency) }}</span></div>
-                  <div><span class="block text-xs text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.columns.remaining') }}</span><span class="mt-1 block font-medium tabular-nums">{{ formatMoney(row.remaining_cost, row.currency) }}</span></div>
-                  <div><span class="block text-xs text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.columns.netProfit') }}</span><span class="mt-1 block font-medium tabular-nums" :class="(row.net_profit || 0) >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'">{{ formatMoney(row.net_profit || 0, row.currency) }}</span></div>
-                  <div class="flex flex-wrap gap-2 sm:col-span-2 xl:col-span-3 2xl:col-span-1 2xl:justify-end"><button type="button" class="btn btn-secondary min-h-11 px-3 text-xs" @click="openAccountContext('ledger', row)">{{ t('admin.sharedPool.tabs.ledger') }}</button><button type="button" class="btn btn-secondary min-h-11 px-3 text-xs" @click="openAccountContext('settlement', row)">{{ t('admin.sharedPool.tabs.settlement') }}</button></div>
-                </article>
+              <div class="w-full sm:w-44">
+                <Select v-model="overviewRecoveryFilter" :options="overviewRecoveryFilterOptions" :aria-label="t('admin.sharedPool.page.recoveryFilter')" @change="applyOverviewRecoveryFilter" />
               </div>
-              <EmptyState v-else :title="t('admin.sharedPool.empty.overview')" />
-              <Pagination
-                v-if="filteredOverviewAccounts.length"
-                :page="overviewPagination.page"
-                :page-size="overviewPagination.page_size"
-                :total="filteredOverviewAccounts.length"
-                @update:page="changeOverviewPage"
-                @update:page-size="changeOverviewPageSize"
-              />
+            </div>
+            <div class="card-body space-y-6">
+              <SharedPoolMetricStrip :items="overviewMetricItems" />
+              <div class="grid min-w-0 grid-cols-1 gap-6 lg:grid-cols-2 lg:divide-x lg:divide-gray-100 dark:lg:divide-dark-700">
+                <SharedPoolBarChart :title="t('admin.sharedPool.overview.accountRecovery')" :items="overviewRecoveryBars" :empty-title="t('admin.sharedPool.empty.overview')" />
+                <div class="lg:pl-6"><SharedPoolBarChart :title="t('admin.sharedPool.metrics.usageValue')" :items="overviewUsageBars" color="#22c55e" :empty-title="t('admin.sharedPool.empty.overview')" /></div>
+              </div>
+            </div>
+            <div v-if="paginatedOverviewAccounts.length" class="divide-y divide-gray-100 border-t border-gray-100 dark:divide-dark-700 dark:border-dark-700">
+              <article v-for="row in paginatedOverviewAccounts" :key="row.id" class="grid min-w-0 grid-cols-1 gap-4 px-4 py-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-[minmax(220px,1.35fr)_minmax(180px,1fr)_repeat(3,minmax(120px,.75fr))_auto] 2xl:items-center sm:px-6">
+                <div class="min-w-0 2xl:pr-3">
+                  <button type="button" class="block min-h-11 max-w-full truncate text-left font-semibold text-gray-900 hover:text-primary-600 dark:text-white dark:hover:text-primary-400" :title="row.account_name" @click="openAccountTrace(row.account_id)">{{ row.account_name }}</button>
+                  <p class="max-w-52 truncate text-xs text-gray-500 dark:text-gray-400" :title="row.provider_identity">{{ row.provider_identity || '-' }}</p>
+                  <p class="mt-1 truncate text-xs text-gray-500 dark:text-gray-400">{{ row.uploader_name || '-' }} · {{ row.purchase_source_name || '-' }}</p>
+                </div>
+                <div class="min-w-0">
+                  <div class="flex items-center justify-between gap-3"><StatusBadge :status="availabilityPresentation(row.availability_status, row.account_status).badge" :label="t(`admin.accounts.status.${availabilityPresentation(row.availability_status, row.account_status).key}`)" /><span class="font-semibold tabular-nums" :class="row.roi_rate >= 100 ? 'text-green-600 dark:text-green-400' : 'text-amber-600 dark:text-amber-400'">{{ formatPercent(row.roi_rate) }}</span></div>
+                  <div class="mt-2 h-1.5 overflow-hidden rounded-full bg-gray-100 dark:bg-dark-700"><div class="h-full rounded-full bg-green-500" :style="{ width: `${Math.min(Math.max(row.roi_rate, 0), 100)}%` }"></div></div>
+                  <span class="mt-1 block text-xs text-gray-500 dark:text-gray-400">{{ t(`admin.sharedPool.page.recoveryStates.${recoveryState(row)}`) }}</span>
+                </div>
+                <div><span class="block text-xs text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.metrics.usageValue') }}</span><span class="mt-1 block font-medium tabular-nums">{{ formatMoney(row.usage_value, row.currency) }}</span></div>
+                <div><span class="block text-xs text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.columns.remaining') }}</span><span class="mt-1 block font-medium tabular-nums">{{ formatMoney(row.remaining_cost, row.currency) }}</span></div>
+                <div><span class="block text-xs text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.columns.netProfit') }}</span><span class="mt-1 block font-medium tabular-nums" :class="(row.net_profit || 0) >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'">{{ formatMoney(row.net_profit || 0, row.currency) }}</span></div>
+                <div class="flex flex-wrap gap-2 sm:col-span-2 xl:col-span-3 2xl:col-span-1 2xl:justify-end">
+                  <button type="button" class="btn btn-secondary min-h-11 px-3 text-xs" @click="openAccountContext('ledger', row)"><Icon name="book" size="sm" />{{ t('admin.sharedPool.tabs.ledger') }}</button>
+                  <button type="button" class="btn btn-secondary min-h-11 px-3 text-xs" @click="openAccountContext('settlement', row)"><Icon name="calculator" size="sm" />{{ t('admin.sharedPool.tabs.settlement') }}</button>
+                </div>
+              </article>
+            </div>
+            <EmptyState v-else :title="t('admin.sharedPool.empty.overview')" />
+            <Pagination v-if="filteredOverviewAccounts.length" :page="overviewPagination.page" :page-size="overviewPagination.page_size" :total="filteredOverviewAccounts.length" @update:page="changeOverviewPage" @update:page-size="changeOverviewPageSize" />
           </section>
         </template>
         <EmptyState v-else :title="t('admin.sharedPool.empty.overview')" />
@@ -217,107 +187,69 @@
           <Icon name="exclamationTriangle" size="md" class="mt-0.5 shrink-0" />
           <span>{{ t('admin.sharedPool.settlement.unpricedWarning', { count: settlement.unpriced_usage_count }) }}</span>
         </div>
-        <section class="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-6">
-          <Select v-model="settlementFilters.account_id" :options="settlementAccountOptions" searchable :aria-label="t('admin.sharedPool.ledger.allAccounts')" @change="applySettlementFilters" />
-          <Select v-model="settlementFilters.uploader_user_id" :options="settlementUploaderOptions" searchable :aria-label="t('admin.sharedPool.ledger.allUploaders')" @change="applySettlementFilters" />
-          <Select v-model="settlementFilters.payer_user_id" :options="settlementPayerOptions" searchable :aria-label="t('admin.sharedPool.ledger.allPayers')" @change="applySettlementFilters" />
-          <Select v-model="settlementFilters.purchase_source_id" :options="settlementSourceOptions" searchable :aria-label="t('admin.sharedPool.ledger.allSources')" @change="applySettlementFilters" />
-          <Select v-model="settlementFilters.line_status" :options="settlementLineFilterOptions" :aria-label="t('admin.sharedPool.page.lineStatus')" @change="applySettlementFilters" />
-          <button type="button" class="btn btn-secondary min-h-11" :disabled="loading" @click="loadActiveTab">
-            <Icon name="refresh" size="sm" />
-            {{ t('common.refresh') }}
-          </button>
+        <section class="card overflow-hidden">
+          <div class="card-header flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <h2 class="text-base font-semibold text-gray-900 dark:text-white">{{ t('admin.sharedPool.tabs.settlement') }}</h2>
+              <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.settlement.formula') }}</p>
+            </div>
+            <button type="button" class="btn btn-secondary min-h-11 shrink-0" :disabled="loading" @click="loadActiveTab">
+              <Icon name="refresh" size="sm" :class="loading ? 'animate-spin' : ''" />{{ t('common.refresh') }}
+            </button>
+          </div>
+          <div class="card-body space-y-5">
+            <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
+              <Select v-model="settlementFilters.account_id" :options="settlementAccountOptions" searchable :aria-label="t('admin.sharedPool.ledger.allAccounts')" @change="applySettlementFilters" />
+              <Select v-model="settlementFilters.uploader_user_id" :options="settlementUploaderOptions" searchable :aria-label="t('admin.sharedPool.ledger.allUploaders')" @change="applySettlementFilters" />
+              <Select v-model="settlementFilters.payer_user_id" :options="settlementPayerOptions" searchable :aria-label="t('admin.sharedPool.ledger.allPayers')" @change="applySettlementFilters" />
+              <Select v-model="settlementFilters.purchase_source_id" :options="settlementSourceOptions" searchable :aria-label="t('admin.sharedPool.ledger.allSources')" @change="applySettlementFilters" />
+              <Select v-model="settlementFilters.line_status" :options="settlementLineFilterOptions" :aria-label="t('admin.sharedPool.page.lineStatus')" @change="applySettlementFilters" />
+            </div>
+            <SharedPoolMetricStrip :items="settlementMetricItems" />
+            <dl v-if="selectedSettlementIdentity" class="grid grid-cols-2 gap-3 rounded-lg bg-primary-50/70 px-4 py-3 text-sm dark:bg-primary-900/10 sm:grid-cols-4">
+              <div><dt class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.columns.account') }}</dt><dd class="mt-1 truncate font-medium"><button type="button" class="max-w-full truncate text-primary-600 hover:underline dark:text-primary-400" :title="selectedSettlementIdentity.name" @click="openAccountTrace(selectedSettlementIdentity.id)">{{ selectedSettlementIdentity.name }}</button></dd></div>
+              <div><dt class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.columns.uploader') }}</dt><dd class="mt-1 truncate font-medium">{{ selectedSettlementIdentity.uploader || '-' }}</dd></div>
+              <div><dt class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.page.importBatch') }}</dt><dd class="mt-1 truncate font-medium">{{ selectedSettlementIdentity.importBatch || t('admin.sharedPool.page.singleImport') }}</dd></div>
+              <div><dt class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.columns.uploadedAt') }}</dt><dd class="mt-1 whitespace-nowrap font-medium">{{ selectedSettlementIdentity.createdAt ? formatDateTimeToMinute(selectedSettlementIdentity.createdAt, locale) : '-' }}</dd></div>
+            </dl>
+          </div>
         </section>
-        <SharedPoolMetricStrip :items="settlementMetricItems" />
-        <dl v-if="selectedSettlementIdentity" class="grid grid-cols-2 gap-3 rounded-lg border border-primary-100 bg-primary-50/60 px-4 py-3 text-sm dark:border-primary-900/60 dark:bg-primary-900/10 sm:grid-cols-4">
-          <div><dt class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.columns.account') }}</dt><dd class="mt-1 truncate font-medium"><button type="button" class="max-w-full truncate text-primary-600 hover:underline dark:text-primary-400" :title="selectedSettlementIdentity.name" @click="openAccountTrace(selectedSettlementIdentity.id)">{{ selectedSettlementIdentity.name }}</button></dd></div>
-          <div><dt class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.columns.uploader') }}</dt><dd class="mt-1 truncate font-medium">{{ selectedSettlementIdentity.uploader || '-' }}</dd></div>
-          <div><dt class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.page.importBatch') }}</dt><dd class="mt-1 truncate font-medium">{{ selectedSettlementIdentity.importBatch || t('admin.sharedPool.page.singleImport') }}</dd></div>
-          <div><dt class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.columns.uploadedAt') }}</dt><dd class="mt-1 whitespace-nowrap font-medium">{{ selectedSettlementIdentity.createdAt ? formatDateTimeToMinute(selectedSettlementIdentity.createdAt, locale) : '-' }}</dd></div>
-        </dl>
         <template v-if="settlement">
           <SettlementTransferPreview
+            :settlement-id="settlement.id"
+            :settlement-user-id="settlement.settlement_user_id"
+            :status="settlement.status"
+            :line-status="settlementFilters.line_status"
             :lines="settlement.lines"
             :account-lines="settlement.account_lines"
+            :account-contexts="settlement.account_contexts"
             :account-names="settlementTransferAccountNames"
             :currency="settlement.currency"
+            @settled="loadActiveTab"
           />
-          <SharedPoolBarChart
-            :title="t('admin.sharedPool.columns.cost')"
-            :items="settlementCostBars"
-            :empty-title="t('admin.sharedPool.empty.settlement')"
-          />
-
-          <section class="overflow-hidden rounded-lg border border-gray-200 bg-white dark:border-dark-700 dark:bg-dark-800">
-            <div class="flex flex-col gap-3 border-b border-gray-100 px-4 py-3 dark:border-dark-700 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <h2 class="text-sm font-semibold text-gray-900 dark:text-white">{{ t('admin.sharedPool.settlement.title') }}</h2>
-                <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.settlement.formula') }}</p>
-              </div>
-            </div>
-            <div v-if="filteredSettlementLines.length" class="divide-y divide-gray-100 dark:divide-dark-700">
-              <article v-for="row in filteredSettlementLines" :key="row.user_id" class="grid min-w-0 grid-cols-[repeat(auto-fit,minmax(min(100%,8rem),1fr))] gap-4 px-4 py-4 lg:items-center">
-                <div class="min-w-0 sm:col-span-2"><span class="block truncate font-semibold text-gray-900 dark:text-white" :title="row.user_name">{{ row.user_name }}</span><StatusBadge class="mt-2" :status="row.net_amount > 0 ? 'warning' : 'success'" :label="row.net_amount > 0 ? t('admin.sharedPool.settlement.payable') : row.net_amount < 0 ? t('admin.sharedPool.settlement.receivable') : t('admin.sharedPool.settlement.balanced')" /></div>
-                <div><span class="block text-xs text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.columns.usageWeight') }}</span><span class="mt-1 block font-medium tabular-nums">{{ formatMoney(row.usage_weight, settlement.currency) }}</span><span class="text-xs text-gray-500 dark:text-gray-400">{{ formatPercent(row.usage_share) }}</span></div>
-                <div><span class="block text-xs text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.columns.allocated') }}</span><span class="mt-1 block font-medium tabular-nums">{{ formatMoney(row.allocated_cost, settlement.currency) }}</span></div>
-                <div><span class="block text-xs text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.columns.credit') }}</span><span class="mt-1 block font-medium tabular-nums text-green-600 dark:text-green-400">-{{ formatMoney(row.contribution_credit, settlement.currency) }}</span></div>
-                <div><span class="block text-xs text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.columns.net') }}</span><span class="mt-1 block font-semibold tabular-nums" :class="row.net_amount > 0 ? 'text-red-600 dark:text-red-400' : row.net_amount < 0 ? 'text-green-600 dark:text-green-400' : 'text-gray-600 dark:text-gray-300'">{{ row.net_amount > 0 ? t('admin.sharedPool.settlement.payable') : row.net_amount < 0 ? t('admin.sharedPool.settlement.receivable') : '' }} {{ formatMoney(Math.abs(row.net_amount), settlement.currency) }}</span></div>
-              </article>
-            </div>
-            <EmptyState v-else :title="t('admin.sharedPool.empty.settlement')" />
-          </section>
-
-          <section v-if="settlementAccountGroups.length" class="overflow-hidden rounded-lg border border-gray-200 bg-white dark:border-dark-700 dark:bg-dark-800">
-            <div class="border-b border-gray-100 px-4 py-3 dark:border-dark-700">
-              <h2 class="text-sm font-semibold text-gray-900 dark:text-white">{{ t('admin.sharedPool.tabs.settlement') }} · {{ t('admin.sharedPool.columns.account') }}</h2>
-              <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.settlement.formula') }}</p>
-            </div>
-            <div class="divide-y divide-gray-100 dark:divide-dark-700">
-              <article v-for="group in paginatedSettlementAccountGroups" :key="group.account_id">
-                <div class="flex min-h-14 items-center gap-2 px-3 py-2 sm:px-4">
-                  <button type="button" class="min-w-0 flex-1 py-2 text-left" @click="openSettlementAccountDetail(group.account_id)">
-                    <span class="block truncate text-sm font-semibold" :title="group.account_name">{{ group.account_name }}</span>
-                    <span class="block text-xs text-gray-500 dark:text-gray-400">{{ group.lines.length }} {{ t('admin.sharedPool.columns.member') }} · {{ formatMoney(group.total_cost, settlement.currency) }}</span>
-                  </button>
-                  <div v-if="group.context" class="hidden shrink-0 flex-col items-end gap-1 sm:flex">
-                    <StatusBadge :status="availabilityPresentation(group.context.availability_status, group.context.account_status).badge" :label="t(`admin.accounts.status.${availabilityPresentation(group.context.availability_status, group.context.account_status).key}`)" />
-                    <span class="text-xs text-gray-500 dark:text-gray-400">{{ lifecycleStatusLabel(group.context.latest_lifecycle_status) }}</span>
-                  </div>
-                  <button type="button" class="inline-flex h-11 w-11 shrink-0 items-center justify-center text-primary-600 dark:text-primary-400" :title="t('admin.sharedPool.actions.poolRecord')" :aria-label="t('admin.sharedPool.actions.poolRecord')" @click="openAccountTrace(group.account_id)"><Icon name="eye" size="sm" /></button>
-                  <button type="button" class="btn btn-secondary min-h-11 shrink-0 px-3 text-xs" @click="openSettlementAccountDetail(group.account_id)">{{ t('common.view') }}</button>
-                </div>
-              </article>
-            </div>
-            <Pagination v-if="settlementAccountGroups.length > settlementAccountPagination.page_size" :page="settlementAccountPagination.page" :page-size="settlementAccountPagination.page_size" :total="settlementAccountGroups.length" @update:page="changeSettlementAccountPage" @update:page-size="changeSettlementAccountPageSize" />
-          </section>
         </template>
         <EmptyState v-else :title="t('admin.sharedPool.empty.settlement')" />
       </template>
 
       <template v-else>
-        <template v-if="sourceRankings.length">
-          <SharedPoolMetricStrip :items="sourceMetricItems" />
-          <SharedPoolBarChart
-            :title="t('admin.sharedPool.sources.chartTitle')"
-            :items="sourceRoiBars"
-            color="#0ea5e9"
-            :empty-title="t('admin.sharedPool.empty.sources')"
-          />
-        </template>
-        <section class="min-w-0 overflow-hidden rounded-lg border border-gray-200 bg-white dark:border-dark-700 dark:bg-dark-800">
-            <div class="flex flex-col gap-3 border-b border-gray-100 px-4 py-3 dark:border-dark-700 sm:flex-row sm:items-center sm:justify-between">
-              <div><h2 class="text-sm font-semibold text-gray-900 dark:text-white">{{ t('admin.sharedPool.sources.title') }}</h2><p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.sources.sampleHint') }}</p></div>
-              <div class="w-full sm:w-48"><Select v-model="sourceUploaderFilter" :options="sourceUploaderOptions" searchable :aria-label="t('admin.sharedPool.columns.uploader')" @change="applySourceUploaderFilter" /></div>
+        <section class="card min-w-0 overflow-hidden">
+            <div class="card-header flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div><h2 class="text-base font-semibold text-gray-900 dark:text-white">{{ t('admin.sharedPool.sources.title') }}</h2><p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.sources.sampleHint') }}</p></div>
+              <div class="w-full sm:w-52"><Select v-model="sourceUploaderFilter" :options="sourceUploaderOptions" searchable :aria-label="t('admin.sharedPool.columns.uploader')" @change="applySourceUploaderFilter" /></div>
             </div>
-            <div v-if="paginatedSources.length" class="divide-y divide-gray-100 dark:divide-dark-700">
-              <article v-for="(source, index) in paginatedSources" :key="source.name" class="grid min-w-0 grid-cols-1 gap-4 px-4 py-4 sm:grid-cols-2 xl:grid-cols-[44px_minmax(180px,1.4fr)_repeat(4,minmax(100px,.7fr))_auto] xl:items-center">
-                <span class="inline-flex h-8 w-8 items-center justify-center rounded-md bg-gray-100 text-sm font-semibold tabular-nums text-gray-600 dark:bg-dark-700 dark:text-gray-300">{{ (sourcePagination.page - 1) * sourcePagination.page_size + index + 1 }}</span>
-                <div class="min-w-0"><div class="flex min-w-0 items-center gap-2"><h3 class="truncate font-semibold text-gray-900 dark:text-white" :title="source.name">{{ source.name }}</h3><StatusBadge :status="sourceMeta(source)?.active === false ? 'inactive' : 'success'" :label="t(`admin.sharedPool.status.${sourceMeta(source)?.active === false ? 'inactive' : 'active'}`)" /></div><p class="mt-1 truncate text-xs text-gray-500 dark:text-gray-400" :title="source.uploaderNames.join(', ')">{{ source.account_count }} {{ t('admin.sharedPool.columns.accounts') }} · {{ source.uploaderNames.join(', ') || '-' }}</p></div>
+            <div v-if="sourceRankings.length" class="card-body space-y-6">
+              <SharedPoolMetricStrip :items="sourceMetricItems" />
+              <SharedPoolBarChart :title="t('admin.sharedPool.sources.chartTitle')" :items="sourceRoiBars" color="#0ea5e9" :empty-title="t('admin.sharedPool.empty.sources')" />
+            </div>
+            <div v-if="paginatedSources.length" class="divide-y divide-gray-100 border-t border-gray-100 dark:divide-dark-700 dark:border-dark-700">
+              <article v-for="(source, index) in paginatedSources" :key="source.name" class="grid min-w-0 grid-cols-1 gap-4 px-4 py-4 sm:grid-cols-2 xl:grid-cols-[44px_minmax(180px,1.4fr)_repeat(4,minmax(100px,.7fr))_auto] xl:items-center sm:px-6">
+                <span class="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-gray-100 text-sm font-semibold tabular-nums text-gray-600 dark:bg-dark-700 dark:text-gray-300">{{ (sourcePagination.page - 1) * sourcePagination.page_size + index + 1 }}</span>
+                <div class="min-w-0"><div class="flex min-w-0 items-center gap-2"><span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary-50 text-primary-600 dark:bg-primary-900/20 dark:text-primary-300"><Icon name="link" size="sm" /></span><div class="min-w-0"><div class="flex min-w-0 items-center gap-2"><h3 class="truncate font-semibold text-gray-900 dark:text-white" :title="source.name">{{ source.name }}</h3><StatusBadge :status="sourceMeta(source)?.active === false ? 'inactive' : 'success'" :label="t(`admin.sharedPool.status.${sourceMeta(source)?.active === false ? 'inactive' : 'active'}`)" /></div><p class="mt-1 truncate text-xs text-gray-500 dark:text-gray-400" :title="source.uploaderNames.join(', ')">{{ source.account_count }} {{ t('admin.sharedPool.columns.accounts') }} · {{ source.uploaderNames.join(', ') || '-' }}</p></div></div></div>
                 <div><span class="block text-xs text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.columns.roi') }}</span><span class="mt-1 block font-semibold tabular-nums" :class="source.roi_rate >= 100 ? 'text-green-600 dark:text-green-400' : 'text-amber-600 dark:text-amber-400'">{{ formatPercent(source.roi_rate) }}</span></div>
                 <div><span class="block text-xs text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.columns.ban30') }}</span><span class="mt-1 block font-medium tabular-nums" :class="source.ban_rate_30d > 10 ? 'text-red-600 dark:text-red-400' : source.ban_rate_30d > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-green-600 dark:text-green-400'">{{ formatPercent(source.ban_rate_30d) }}</span></div>
                 <div><span class="block text-xs text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.form.currency') }}</span><span class="mt-1 block font-medium">CNY</span></div>
                 <div><span class="block text-xs text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.sources.costRule') }}</span><span class="mt-1 block font-medium tabular-nums">{{ formatMoney(source.purchase_cost) }} · {{ source.average_survival_days.toFixed(1) }} {{ t('admin.sharedPool.sources.days') }}</span></div>
-                <button type="button" class="btn btn-secondary min-h-11 px-3 text-xs sm:col-span-2 xl:col-span-1" @click="selectedSourceName = source.name">{{ t('admin.sharedPool.sources.history') }}</button>
+                <button type="button" class="btn btn-secondary min-h-11 px-3 text-xs sm:col-span-2 xl:col-span-1" @click="selectedSourceName = source.name"><Icon name="eye" size="sm" />{{ t('admin.sharedPool.sources.history') }}</button>
               </article>
             </div>
             <EmptyState v-else :title="t('admin.sharedPool.empty.sources')" />
@@ -325,34 +257,6 @@
         </section>
       </template>
     </div>
-
-    <BaseDialog
-      :show="!!selectedSettlementAccountGroup"
-      :title="selectedSettlementAccountGroup?.account_name || t('admin.sharedPool.tabs.settlement')"
-      width="wide"
-      @close="selectedSettlementAccountID = null"
-    >
-      <template v-if="selectedSettlementAccountGroup">
-        <dl class="grid grid-cols-2 gap-3 border-b border-gray-100 pb-4 text-sm dark:border-dark-700 sm:grid-cols-4">
-          <div><dt class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.columns.member') }}</dt><dd class="mt-1 font-semibold tabular-nums">{{ selectedSettlementAccountGroup.lines.length }}</dd></div>
-          <div><dt class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.columns.cost') }}</dt><dd class="mt-1 font-semibold tabular-nums">{{ formatMoney(selectedSettlementAccountGroup.total_cost, settlement?.currency) }}</dd></div>
-          <div v-if="selectedSettlementAccountGroup.context"><dt class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.columns.status') }}</dt><dd class="mt-1"><StatusBadge :status="availabilityPresentation(selectedSettlementAccountGroup.context.availability_status, selectedSettlementAccountGroup.context.account_status).badge" :label="t(`admin.accounts.status.${availabilityPresentation(selectedSettlementAccountGroup.context.availability_status, selectedSettlementAccountGroup.context.account_status).key}`)" /></dd></div>
-          <div v-if="selectedSettlementAccountGroup.context"><dt class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.approval.impacts.lifecycle_events') }}</dt><dd class="mt-1 font-medium">{{ lifecycleStatusLabel(selectedSettlementAccountGroup.context.latest_lifecycle_status) }}</dd></div>
-        </dl>
-        <div class="mt-4 divide-y divide-gray-100 rounded-lg border border-gray-200 dark:divide-dark-700 dark:border-dark-700">
-          <article v-for="line in selectedSettlementAccountGroup.lines" :key="line.id" class="grid gap-3 p-4 sm:grid-cols-2 lg:grid-cols-[minmax(140px,1fr)_repeat(4,minmax(100px,.7fr))]">
-            <div class="min-w-0"><span class="block truncate font-semibold" :title="line.user_name">{{ line.user_name }}</span><span class="mt-1 block text-xs uppercase text-gray-500 dark:text-gray-400">{{ line.trace_quality }}</span></div>
-            <div><span class="block text-xs text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.columns.usageWeight') }}</span><span class="mt-1 block tabular-nums">{{ formatMoney(line.account_usage_weight, settlement?.currency) }}</span></div>
-            <div><span class="block text-xs text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.columns.share') }}</span><span class="mt-1 block tabular-nums">{{ formatPercent(line.usage_share) }}</span></div>
-            <div><span class="block text-xs text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.columns.allocated') }}</span><span class="mt-1 block tabular-nums">{{ formatMoney(line.allocated_cost, settlement?.currency) }}</span></div>
-            <div><span class="block text-xs text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.columns.net') }}</span><span class="mt-1 block font-semibold tabular-nums">{{ formatMoney(line.net_amount, settlement?.currency) }}</span></div>
-          </article>
-        </div>
-        <div v-if="selectedSettlementAccountGroup.costs.length" class="mt-4 divide-y divide-gray-100 rounded-lg border border-gray-200 px-4 text-sm dark:divide-dark-700 dark:border-dark-700">
-          <div v-for="cost in selectedSettlementAccountGroup.costs" :key="cost.id" class="grid grid-cols-[minmax(0,1fr)_auto] gap-3 py-3"><span class="truncate">#{{ cost.cost_entry_id }} · {{ cost.kind }}</span><span class="font-medium tabular-nums">{{ formatMoney(cost.amount, settlement?.currency) }}</span></div>
-        </div>
-      </template>
-    </BaseDialog>
 
     <BaseDialog :show="!!selectedSource" :title="selectedSource?.name || t('admin.sharedPool.sources.title')" width="wide" @close="selectedSourceName = ''">
       <template v-if="selectedSource">
@@ -362,7 +266,7 @@
           <div><dt class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.columns.uploader') }}</dt><dd class="mt-1 truncate font-semibold" :title="selectedSource.uploaderNames.join(', ')">{{ selectedSource.uploaderNames.join(', ') || '-' }}</dd></div>
           <div><dt class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.form.currency') }}</dt><dd class="mt-1 font-semibold">CNY</dd></div>
           <div><dt class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.columns.roi') }}</dt><dd class="mt-1 font-semibold tabular-nums">{{ formatPercent(selectedSource.roi_rate) }}</dd></div>
-          <div><dt class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.columns.ban30') }}</dt><dd class="mt-1 font-semibold tabular-nums text-red-600 dark:text-red-400">{{ formatPercent(selectedSource.ban_rate_30d) }}</dd></div>
+          <div><dt class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.columns.ban30') }}</dt><dd class="mt-1 font-semibold tabular-nums" :class="selectedSource.ban_rate_30d > 10 ? 'text-red-600 dark:text-red-400' : selectedSource.ban_rate_30d > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-green-600 dark:text-green-400'">{{ formatPercent(selectedSource.ban_rate_30d) }}</dd></div>
         </dl>
         <div class="mt-4 divide-y divide-gray-100 rounded-lg border border-gray-200 dark:divide-dark-700 dark:border-dark-700">
           <article v-for="account in selectedSource.accounts" :key="`${account.uploader_user_id}:${account.account_id}`" class="grid min-w-0 gap-3 p-4 sm:grid-cols-[minmax(180px,1.4fr)_minmax(120px,1fr)_auto_auto] sm:items-center">
@@ -590,11 +494,8 @@ import type {
   PoolAccountStatus,
   PoolPeriodType,
   SharedPoolAccountCost,
-  SharedPoolAccountContext,
   SharedPoolLifecycleEvent,
   SharedPoolOverview,
-  SharedPoolSettlementAccountCost,
-  SharedPoolSettlementAccountLine,
   SharedPoolSettlementPreview,
   SharedPoolSourceStat,
   SharedPoolUploaderSourceGroup,
@@ -618,7 +519,6 @@ import {
 import {
   DEFAULT_EXPECTED_TOKEN_COUNT,
   filterRecoveryAccounts,
-  filterSettlementLines,
   millionsToTokens,
   recoveryState,
   tokensToMillions,
@@ -750,9 +650,7 @@ const editingLedgerEntry = ref<SharedPoolLedgerEntry | null>(null)
 const overviewPagination = reactive({ page: queryPage('overview_page', 1), page_size: queryPage('overview_page_size', 10) })
 const sourcePagination = reactive({ page: queryPage('source_page', 1), page_size: queryPage('source_page_size', 8) })
 const sourceUploaderFilter = ref<number | string>(routeQueryID('uploader_user_id') || '')
-const settlementAccountPagination = reactive({ page: queryPage('settlement_page', 1), page_size: queryPage('settlement_page_size', 10) })
 const selectedSourceName = ref('')
-const selectedSettlementAccountID = ref<number | null>(null)
 const showTracePanel = ref(false)
 const traceLoading = ref(false)
 const traceAccountId = ref(0)
@@ -836,11 +734,11 @@ const overviewMetricItems = computed(() => {
   const summary = overview.value?.summary
   if (!summary) return []
   return [
-    { label: t('admin.sharedPool.metrics.activeAccounts'), value: String(summary.active_accounts), hint: `${summary.total_accounts} ${t('admin.sharedPool.columns.accounts')}` },
-    { label: t('admin.sharedPool.metrics.bannedLoss'), value: formatMoney(summary.banned_loss), tone: summary.banned_loss > 0 ? 'danger' as const : 'positive' as const },
-    { label: t('admin.sharedPool.metrics.purchaseCost'), value: formatMoney(summary.total_purchase_cost) },
-    { label: t('admin.sharedPool.metrics.usageValue'), value: formatMoney(summary.total_usage_value), tone: 'positive' as const },
-    { label: t('admin.sharedPool.metrics.roiRate'), value: formatPercent(summary.roi_rate), hint: `${summary.recovered_accounts}/${summary.total_accounts} ${t('admin.sharedPool.overview.accountsRecovered')} · ${t('admin.sharedPool.metrics.pendingRecovery')} ${formatMoney(summary.pending_recovery)}`, tone: summary.roi_rate >= 100 ? 'positive' as const : 'warning' as const }
+    { label: t('admin.sharedPool.metrics.activeAccounts'), value: String(summary.active_accounts), hint: `${summary.total_accounts} ${t('admin.sharedPool.columns.accounts')}`, icon: 'server' as const },
+    { label: t('admin.sharedPool.metrics.bannedLoss'), value: formatMoney(summary.banned_loss), icon: 'exclamationTriangle' as const, tone: summary.banned_loss > 0 ? 'danger' as const : 'positive' as const },
+    { label: t('admin.sharedPool.metrics.purchaseCost'), value: formatMoney(summary.total_purchase_cost), icon: 'dollar' as const },
+    { label: t('admin.sharedPool.metrics.usageValue'), value: formatMoney(summary.total_usage_value), icon: 'bolt' as const, tone: 'positive' as const },
+    { label: t('admin.sharedPool.metrics.roiRate'), value: formatPercent(summary.roi_rate), hint: `${summary.recovered_accounts}/${summary.total_accounts} ${t('admin.sharedPool.overview.accountsRecovered')} · ${t('admin.sharedPool.metrics.pendingRecovery')} ${formatMoney(summary.pending_recovery)}`, icon: 'chart' as const, tone: summary.roi_rate >= 100 ? 'positive' as const : 'warning' as const }
   ]
 })
 const overviewRecoveryBars = computed(() => (overview.value?.accounts || [])
@@ -857,58 +755,20 @@ const overviewUsageBars = computed(() => (overview.value?.accounts || [])
 const settlementContextByID = computed(() => new Map(
   (settlement.value?.account_contexts || []).map((context) => [context.id, context])
 ))
-const settlementAccountGroups = computed(() => {
-  const groups = new Map<number, { account_id: number; account_name: string; context?: SharedPoolAccountContext; lines: SharedPoolSettlementAccountLine[]; costs: SharedPoolSettlementAccountCost[]; total_cost: number }>()
-  const ensure = (accountID: number) => {
-    let group = groups.get(accountID)
-    if (!group) {
-      const context = settlementContextByID.value.get(accountID)
-      group = {
-        account_id: accountID,
-        account_name: context?.name || `#${accountID}`,
-        context,
-        lines: [],
-        costs: [],
-        total_cost: 0
-      }
-      groups.set(accountID, group)
-    }
-    return group
-  }
-  for (const line of settlement.value?.account_lines || []) ensure(line.account_id).lines.push(line)
-  for (const cost of settlement.value?.account_costs || []) {
-    const group = ensure(cost.account_id)
-    group.costs.push(cost)
-    group.total_cost += cost.amount
-  }
-  return [...groups.values()].sort((a, b) => a.account_id - b.account_id)
-})
-const paginatedSettlementAccountGroups = computed(() => {
-  const start = (settlementAccountPagination.page - 1) * settlementAccountPagination.page_size
-  return settlementAccountGroups.value.slice(start, start + settlementAccountPagination.page_size)
-})
-const selectedSettlementAccountGroup = computed(() => settlementAccountGroups.value.find(
-  (group) => group.account_id === selectedSettlementAccountID.value
-))
 const settlementMetricItems = computed(() => {
   if (!settlement.value) return []
   const payables = settlement.value.lines.filter(line => line.net_amount > 0).reduce((sum, line) => sum + line.net_amount, 0)
   const receivables = settlement.value.lines.filter(line => line.net_amount < 0).reduce((sum, line) => sum + Math.abs(line.net_amount), 0)
   return [
-    { label: t('admin.sharedPool.settlement.totalCost'), value: formatMoney(settlement.value.total_cost) },
-    { label: t('admin.sharedPool.settlement.usageWeight'), value: formatMoney(settlement.value.total_usage_weight) },
-    { label: t('admin.sharedPool.settlement.coverage'), value: formatPercent(settlement.value.pricing_coverage), tone: settlement.value.pricing_coverage >= 99 ? 'positive' as const : 'warning' as const },
-    { label: t('admin.sharedPool.settlement.payable'), value: formatMoney(payables), tone: payables > 0 ? 'danger' as const : 'positive' as const },
-    { label: t('admin.sharedPool.settlement.receivable'), value: formatMoney(receivables), tone: receivables > 0 ? 'positive' as const : 'default' as const }
+    { label: t('admin.sharedPool.settlement.totalCost'), value: formatMoney(settlement.value.total_cost), icon: 'dollar' as const },
+    { label: t('admin.sharedPool.settlement.usageWeight'), value: formatMoney(settlement.value.total_usage_weight), icon: 'bolt' as const },
+    { label: t('admin.sharedPool.settlement.coverage'), value: formatPercent(settlement.value.pricing_coverage), icon: 'checkCircle' as const, tone: settlement.value.pricing_coverage >= 99 ? 'positive' as const : 'warning' as const },
+    { label: t('admin.sharedPool.settlement.payable'), value: formatMoney(payables), icon: 'calculator' as const, tone: payables > 0 ? 'danger' as const : 'positive' as const },
+    { label: t('admin.sharedPool.settlement.receivable'), value: formatMoney(receivables), icon: 'users' as const, tone: receivables > 0 ? 'positive' as const : 'default' as const }
   ]
 })
-const settlementCostBars = computed(() => settlementAccountGroups.value
-  .filter(group => group.total_cost > 0)
-  .sort((a, b) => b.total_cost - a.total_cost)
-  .slice(0, 6)
-  .map(group => ({ key: group.account_id, label: group.account_name, value: group.total_cost, display: formatMoney(group.total_cost) })))
 const settlementTransferAccountNames = computed(() => Object.fromEntries(
-  settlementAccountGroups.value.map(group => [group.account_id, group.account_name])
+  (settlement.value?.account_contexts || []).map(context => [context.id, context.name])
 ))
 const settlementAccountOptions = computed(() => {
   const options = new Map<number, string>()
@@ -943,9 +803,6 @@ const selectedSettlementIdentity = computed(() => {
     createdAt: account?.created_at || context?.created_at || ''
   }
 })
-const filteredSettlementLines = computed(() => filterSettlementLines(settlement.value?.lines || [], settlementFilters.line_status)
-  .sort((a, b) => Math.abs(b.net_amount) - Math.abs(a.net_amount)))
-
 const sourceRankings = computed<RankedSource[]>(() => {
   const grouped = new Map<string, Array<{ group: SharedPoolUploaderSourceGroup; source: SharedPoolSourceStat }>>()
   for (const group of sources.value) {
@@ -1009,11 +866,11 @@ const sourceMetricItems = computed(() => {
   const banRate = rows.reduce((sum, row) => sum + row.ban_rate_30d * Math.max(row.account_count, 1), 0) /
     rows.reduce((sum, row) => sum + Math.max(row.account_count, 1), 0)
   return [
-    { label: t('admin.sharedPool.tabs.sources'), value: String(rows.length) },
-    { label: t('admin.sharedPool.columns.accounts'), value: String(totalAccounts) },
-    { label: t('admin.sharedPool.metrics.purchaseCost'), value: formatMoney(cost) },
-    { label: t('admin.sharedPool.metrics.usageValue'), value: formatMoney(value), tone: 'positive' as const },
-    { label: t('admin.sharedPool.columns.ban30'), value: formatPercent(banRate), tone: banRate > 10 ? 'danger' as const : banRate > 0 ? 'warning' as const : 'positive' as const }
+    { label: t('admin.sharedPool.tabs.sources'), value: String(rows.length), icon: 'link' as const },
+    { label: t('admin.sharedPool.columns.accounts'), value: String(totalAccounts), icon: 'server' as const },
+    { label: t('admin.sharedPool.metrics.purchaseCost'), value: formatMoney(cost), icon: 'dollar' as const },
+    { label: t('admin.sharedPool.metrics.usageValue'), value: formatMoney(value), icon: 'bolt' as const, tone: 'positive' as const },
+    { label: t('admin.sharedPool.columns.ban30'), value: formatPercent(banRate), icon: 'exclamationTriangle' as const, tone: banRate > 10 ? 'danger' as const : banRate > 0 ? 'warning' as const : 'positive' as const }
   ]
 })
 const sourceRoiBars = computed(() => sourceRankings.value.slice(0, 6)
@@ -1094,11 +951,6 @@ const availabilityPresentation = (availability?: PoolAvailabilityStatus | null, 
   } as const
   return states[value]
 }
-const lifecycleStatusLabel = (status: string) => {
-  const state = accountStatus(status === 'banned_confirmed' ? 'banned' : status === 'refund' ? 'warning' : status === 'retired' || status === 'replaced' ? 'inactive' : 'active')
-  return t(`admin.sharedPool.status.${state.key}`)
-}
-
 function resetPendingIntake() {
   pendingAccountAction.value = null
   pendingIntakeDraft.value = null
@@ -1238,7 +1090,7 @@ async function openAccountContext(tab: 'ledger' | 'settlement', row: SharedPoolA
   }
 }
 
-async function syncPageQuery(prefix: 'overview' | 'source' | 'settlement', page: number, pageSize: number) {
+async function syncPageQuery(prefix: 'overview' | 'source', page: number, pageSize: number) {
   await router.replace({ query: { ...route.query, [`${prefix}_page`]: String(page), [`${prefix}_page_size`]: String(pageSize) } })
 }
 function changeOverviewPage(page: number) {
@@ -1264,14 +1116,6 @@ async function applySourceUploaderFilter() {
   else delete query.uploader_user_id
   await router.replace({ query })
 }
-function changeSettlementAccountPage(page: number) {
-  settlementAccountPagination.page = page
-  void syncPageQuery('settlement', page, settlementAccountPagination.page_size)
-}
-function changeSettlementAccountPageSize(size: number) {
-  settlementAccountPagination.page_size = size
-  changeSettlementAccountPage(1)
-}
 async function applyOverviewRecoveryFilter() {
   overviewPagination.page = 1
   const query: LocationQueryRaw = { ...route.query, overview_page: '1' }
@@ -1279,10 +1123,6 @@ async function applyOverviewRecoveryFilter() {
   else query.overview_recovery = overviewRecoveryFilter.value
   await router.replace({ query })
 }
-function openSettlementAccountDetail(accountID: number) {
-  selectedSettlementAccountID.value = accountID
-}
-
 async function applySettlementFilters() {
   const query: LocationQueryRaw = { ...route.query, tab: 'settlement' }
   const values: Record<string, string | number> = {
@@ -1296,10 +1136,7 @@ async function applySettlementFilters() {
     if (value) query[key] = String(value)
     else delete query[key]
   }
-  settlementAccountPagination.page = 1
-  query.settlement_page = '1'
   await router.replace({ query })
-  selectedSettlementAccountID.value = null
   await loadActiveTab()
 }
 
@@ -1315,7 +1152,6 @@ async function loadActiveTab() {
     } else if (activeTab.value === 'settlement') {
       if (!accountOptions.value.length || !userOptions.value.length) await loadReferenceOptions()
       settlement.value = await adminAPI.sharedPool.previewSettlement(settlementParams())
-      selectedSettlementAccountID.value = null
     } else {
       const [sourceResponse, sourceOptions] = await Promise.all([
         adminAPI.sharedPool.listSources(periodParams()),
@@ -1954,8 +1790,7 @@ watch(
 watch(
   () => [
     route.query.overview_page, route.query.overview_page_size, route.query.overview_recovery,
-    route.query.source_page, route.query.source_page_size, route.query.uploader_user_id,
-    route.query.settlement_page, route.query.settlement_page_size
+    route.query.source_page, route.query.source_page_size, route.query.uploader_user_id
   ],
   () => {
     overviewPagination.page = queryPage('overview_page', 1)
@@ -1966,8 +1801,6 @@ watch(
     sourcePagination.page = queryPage('source_page', 1)
     sourcePagination.page_size = queryPage('source_page_size', 8)
     sourceUploaderFilter.value = routeQueryID('uploader_user_id') || ''
-    settlementAccountPagination.page = queryPage('settlement_page', 1)
-    settlementAccountPagination.page_size = queryPage('settlement_page_size', 10)
   }
 )
 

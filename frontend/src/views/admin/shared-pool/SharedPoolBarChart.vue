@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import EmptyState from '@/components/common/EmptyState.vue'
+import Icon from '@/components/icons/Icon.vue'
 
 interface BarItem {
   key: string | number
@@ -23,9 +24,12 @@ const maxValue = computed(() => Math.max(...props.items.map(item => Math.max(Num
 </script>
 
 <template>
-  <section class="min-w-0 border-y border-gray-200 bg-white px-4 py-4 dark:border-dark-700 dark:bg-dark-800 sm:px-5">
+  <div class="min-w-0">
     <div class="mb-4 flex min-w-0 items-center justify-between gap-3">
-      <h2 class="truncate text-sm font-semibold text-gray-900 dark:text-white">{{ title }}</h2>
+      <h2 class="flex min-w-0 items-center gap-2 truncate text-sm font-semibold text-gray-900 dark:text-white">
+        <Icon name="chart" size="sm" class="shrink-0 text-primary-500" />
+        <span class="truncate">{{ title }}</span>
+      </h2>
       <slot name="actions" />
     </div>
     <div v-if="items.length" class="space-y-3">
@@ -40,5 +44,5 @@ const maxValue = computed(() => Math.max(...props.items.map(item => Math.max(Num
       </div>
     </div>
     <EmptyState v-else :title="emptyTitle" />
-  </section>
+  </div>
 </template>

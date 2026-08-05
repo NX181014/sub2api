@@ -64,3 +64,45 @@ func TestMarkSettlementPaidAfterEveryNonZeroConfirmation(t *testing.T) {
 	require.NoError(t, repo.MarkSettlementPaid(context.Background(), 9, 4))
 	require.NoError(t, mock.ExpectationsWereMet())
 }
+
+func TestMarkSettlementMemberPaidRequiresLockCompletesAndIsIdempotent(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+	repo := &poolRepository{db: db}
+
+	mock.ExpectBegin()
+	mock.ExpectQuery(`SELECT status,locked_by_user_id FROM pool_settlements`).WithArgs(int64(9)).
+		WillReturnRows(sqlmock.NewRows([]string{"status", "locked_by_user_id"}).AddRow("draft", nil))
+	mock.ExpectRollback()
+	err = repo.MarkSettlementMemberPaid(context.Background(), 9, 23, 42, 4)
+	require.Equal(t, "SETTLEMENT_NOT_LOCKED", infraerrors.Reason(err))
+
+	mock.ExpectBegin()
+	mock.ExpectQuery(`SELECT status,locked_by_user_id FROM pool_settlements`).WithArgs(int64(9)).
+		WillReturnRows(sqlmock.NewRows([]string{"status", "locked_by_user_id"}).AddRow("locked", int64(4)))
+	mock.ExpectQuery(`SELECT user_id,net_amount_minor,payment_status`).WithArgs(int64(9)).
+		WillReturnRows(sqlmock.NewRows([]string{"user_id", "net_amount_minor", "payment_status"}).
+			AddRow(int64(23), int64(1200), "unpaid").
+			AddRow(int64(42), int64(-1200), "unpaid"))
+	mock.ExpectExec(`UPDATE pool_settlements`).WithArgs(int64(9), int64(42)).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(`UPDATE pool_settlement_lines`).WithArgs(int64(9), int64(23), int64(4)).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery(`SELECT COUNT\(\*\) FROM pool_settlement_lines`).WithArgs(int64(9), int64(42)).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(int64(0)))
+	mock.ExpectExec(`UPDATE pool_settlement_lines SET payment_status='paid'`).WithArgs(int64(9)).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(`UPDATE pool_settlements SET status='paid'`).WithArgs(int64(9), int64(4)).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+
+	require.NoError(t, repo.MarkSettlementMemberPaid(context.Background(), 9, 23, 42, 4))
+
+	mock.ExpectBegin()
+	mock.ExpectQuery(`SELECT status,locked_by_user_id FROM pool_settlements`).WithArgs(int64(9)).
+		WillReturnRows(sqlmock.NewRows([]string{"status", "locked_by_user_id"}).AddRow("paid", int64(42)))
+	mock.ExpectQuery(`SELECT user_id,net_amount_minor,payment_status`).WithArgs(int64(9)).
+		WillReturnRows(sqlmock.NewRows([]string{"user_id", "net_amount_minor", "payment_status"}).
+			AddRow(int64(23), int64(1200), "paid").
+			AddRow(int64(42), int64(-1200), "paid"))
+	mock.ExpectCommit()
+	require.NoError(t, repo.MarkSettlementMemberPaid(context.Background(), 9, 23, 42, 4))
+	require.NoError(t, mock.ExpectationsWereMet())
+}

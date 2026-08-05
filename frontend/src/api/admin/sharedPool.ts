@@ -476,6 +476,7 @@ export interface SharedPoolSettlementAccountLine {
 export interface SharedPoolSettlementPreview {
   id?: number
   status: PoolSettlementStatus
+  settlement_user_id?: number | null
   period_type: PoolPeriodType
   period_start: string
   period_end: string
@@ -688,6 +689,8 @@ interface RawSettlement {
   period_start: string
   period_end: string
   status: PoolSettlementStatus
+  settlement_user_id?: number | null
+  locked_by_user_id?: number | null
   total_cost_minor: number
   carry_out_minor: number
   total_usage_weight: string
@@ -970,6 +973,10 @@ const mapSettlement = (raw: RawSettlement): SharedPoolSettlementPreview => {
   return {
     id: raw.id,
     status: raw.status,
+    settlement_user_id: raw.settlement_user_id
+      ?? (raw.status !== 'draft' && raw.lines?.some(line => line.payment_status === 'paid')
+        ? raw.locked_by_user_id
+        : undefined),
     period_type: raw.period_type,
     period_start: raw.period_start,
     period_end: raw.period_end,
@@ -1060,6 +1067,19 @@ export async function confirmSettlement(id: number, userId?: number): Promise<Sh
 export async function markSettlementPaid(id: number): Promise<SharedPoolSettlementPreview> {
   const { data } = await apiClient.post<RawSettlement>(`/admin/pool/settlements/${id}/paid`)
   return mapSettlement(data)
+}
+
+export async function markSettlementUserPaid(
+  id: number,
+  userId: number,
+  settlementUserId: number
+): Promise<void> {
+  await postPoolWrite(
+    `pool-settlement-user-paid:${id}:${userId}`,
+    `pool-settlement-user-paid-${id}-${userId}`,
+    `/admin/pool/settlements/${id}/members/${userId}/paid`,
+    { settlement_user_id: settlementUserId }
+  )
 }
 
 export async function listSources(params?: PoolPeriodParams): Promise<SharedPoolSourceList> {
@@ -1234,6 +1254,7 @@ export default {
   lockSettlement,
   confirmSettlement,
   markSettlementPaid,
+  markSettlementUserPaid,
   listSources,
   createApproval,
   listApprovals,

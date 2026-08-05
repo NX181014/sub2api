@@ -1112,6 +1112,37 @@ func (h *PoolHandler) MarkSettlementPaid(c *gin.Context) {
 	response.Success(c, item)
 }
 
+type poolSettlementMemberPaidRequest struct {
+	SettlementUserID int64 `json:"settlement_user_id" binding:"required"`
+}
+
+func (h *PoolHandler) MarkSettlementMemberPaid(c *gin.Context) {
+	id, ok := poolPathID(c)
+	if !ok {
+		return
+	}
+	memberUserID, err := strconv.ParseInt(c.Param("user_id"), 10, 64)
+	if err != nil || memberUserID <= 0 {
+		response.BadRequest(c, "invalid settlement member")
+		return
+	}
+	actorID, ok := poolActorID(c)
+	if !ok {
+		return
+	}
+	var req poolSettlementMemberPaidRequest
+	if err = c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+	item, err := h.poolService.MarkSettlementMemberPaid(c.Request.Context(), id, memberUserID, req.SettlementUserID, actorID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, item)
+}
+
 func (h *PoolHandler) GetOverview(c *gin.Context) {
 	accountID, ok := optionalPoolQueryID(c, "account_id")
 	if !ok {

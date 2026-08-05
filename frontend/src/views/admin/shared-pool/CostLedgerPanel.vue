@@ -1,5 +1,5 @@
 <template>
-  <section class="min-w-0 overflow-hidden border-y border-gray-200 bg-white dark:border-dark-700 dark:bg-dark-800">
+  <section class="card min-w-0 overflow-hidden">
     <header class="flex flex-col gap-4 border-b border-gray-200 px-4 py-5 dark:border-dark-700 sm:px-5 lg:flex-row lg:items-end lg:justify-between">
       <div class="min-w-0">
         <h2 class="text-lg font-semibold text-gray-900 dark:text-white">{{ t('admin.sharedPool.ledger.title') }}</h2>
@@ -51,12 +51,14 @@
         </div>
       </div>
 
-      <SharedPoolMetricStrip :items="ledgerMetricItems" />
-      <SharedPoolBarChart
-        :title="t('admin.sharedPool.ledger.netCost')"
-        :items="ledgerUploaderBars"
-        :empty-title="t('admin.sharedPool.empty.sources')"
-      />
+      <div class="space-y-6 border-b border-gray-200 px-4 py-5 dark:border-dark-700 sm:px-5">
+        <SharedPoolMetricStrip :items="ledgerMetricItems" />
+        <SharedPoolBarChart
+          :title="t('admin.sharedPool.ledger.netCost')"
+          :items="ledgerUploaderBars"
+          :empty-title="t('admin.sharedPool.empty.sources')"
+        />
+      </div>
 
       <div v-if="loading" class="flex min-h-40 items-center justify-center"><LoadingSpinner /></div>
       <div v-else-if="uploaderSummaries.length" class="divide-y divide-gray-200 dark:divide-dark-700">
@@ -495,11 +497,11 @@ const ledgerMetricItems = computed(() => {
   const recognized = rows.reduce((sum, row) => sum + row.recognized_cost_minor, 0)
   const remaining = rows.reduce((sum, row) => sum + row.remaining_cost_minor, 0)
   return [
-    { label: t('admin.sharedPool.columns.accounts'), value: String(accountCount) },
-    { label: t('admin.sharedPool.ledger.netCost'), value: formatMinor(netCost) },
-    { label: t('admin.sharedPool.ledger.recognizedCost'), value: formatMinor(recognized), tone: 'positive' as const },
-    { label: t('admin.sharedPool.columns.remaining'), value: formatMinor(remaining), tone: remaining > 0 ? 'warning' as const : 'positive' as const },
-    { label: t('admin.sharedPool.columns.uploader'), value: String(rows.length) }
+    { label: t('admin.sharedPool.columns.accounts'), value: String(accountCount), icon: 'server' as const },
+    { label: t('admin.sharedPool.ledger.netCost'), value: formatMinor(netCost), icon: 'dollar' as const },
+    { label: t('admin.sharedPool.ledger.recognizedCost'), value: formatMinor(recognized), icon: 'checkCircle' as const, tone: 'positive' as const },
+    { label: t('admin.sharedPool.columns.remaining'), value: formatMinor(remaining), icon: 'exclamationTriangle' as const, tone: remaining > 0 ? 'warning' as const : 'positive' as const },
+    { label: t('admin.sharedPool.columns.uploader'), value: String(rows.length), icon: 'users' as const }
   ]
 })
 const ledgerUploaderBars = computed(() => uploaderSummaries.value

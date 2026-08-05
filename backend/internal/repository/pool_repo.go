@@ -1373,6 +1373,115 @@ WHERE settlement_id=$1 AND net_amount_minor<>0 AND confirmation_status<>'confirm
 	return tx.Commit()
 }
 
+func (r *poolRepository) MarkSettlementMemberPaid(ctx context.Context, id, memberUserID, settlementUserID, actorID int64) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var status string
+	var lockedBy sql.NullInt64
+	err = tx.QueryRowContext(ctx, `SELECT status,locked_by_user_id FROM pool_settlements WHERE id=$1 FOR UPDATE`, id).Scan(&status, &lockedBy)
+	if errors.Is(err, sql.ErrNoRows) {
+		return service.ErrPoolSettlementNotFound
+	}
+	if err != nil {
+		return err
+	}
+	if status != "locked" && status != "paid" {
+		return infraerrors.Conflict("SETTLEMENT_NOT_LOCKED", "only a validated locked settlement can accept member payments")
+	}
+
+	rows, err := tx.QueryContext(ctx, `
+SELECT user_id,net_amount_minor,payment_status
+FROM pool_settlement_lines
+WHERE settlement_id=$1
+ORDER BY user_id
+FOR UPDATE`, id)
+	if err != nil {
+		return err
+	}
+	memberFound, settlementUserFound, hasPaidLine := false, false, false
+	var memberAmount int64
+	for rows.Next() {
+		var userID, amount int64
+		var paymentStatus string
+		if err = rows.Scan(&userID, &amount, &paymentStatus); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		if userID == memberUserID {
+			memberFound, memberAmount = true, amount
+		}
+		if userID == settlementUserID {
+			settlementUserFound = true
+		}
+		if amount != 0 && paymentStatus == "paid" {
+			hasPaidLine = true
+		}
+	}
+	if err = rows.Err(); err != nil {
+		_ = rows.Close()
+		return err
+	}
+	if err = rows.Close(); err != nil {
+		return err
+	}
+	if !memberFound {
+		return infraerrors.NotFound("SETTLEMENT_MEMBER_LINE_NOT_FOUND", "the member has no line in this settlement")
+	}
+	if !settlementUserFound {
+		return infraerrors.NotFound("SETTLEMENT_USER_LINE_NOT_FOUND", "the settlement user has no line in this settlement")
+	}
+	if memberAmount == 0 {
+		return infraerrors.Conflict("SETTLEMENT_PAYMENT_NOT_REQUIRED", "a zero amount line does not require payment")
+	}
+	if status == "paid" {
+		if lockedBy.Valid && lockedBy.Int64 != settlementUserID {
+			return infraerrors.Conflict("SETTLEMENT_USER_MISMATCH", "the settlement user cannot be changed after payments begin")
+		}
+		return tx.Commit()
+	}
+	if status == "locked" && hasPaidLine && (!lockedBy.Valid || lockedBy.Int64 != settlementUserID) {
+		return infraerrors.Conflict("SETTLEMENT_USER_MISMATCH", "the settlement user cannot be changed after payments begin")
+	}
+	if !hasPaidLine {
+		// The internal locker field persists the chosen settlement user without adding short-lived hub state.
+		if _, err = tx.ExecContext(ctx, `
+UPDATE pool_settlements
+SET locked_by_user_id=$2,locked_at=COALESCE(locked_at,NOW()),updated_at=NOW()
+WHERE id=$1`, id, settlementUserID); err != nil {
+			return err
+		}
+	}
+	if _, err = tx.ExecContext(ctx, `
+UPDATE pool_settlement_lines
+SET confirmation_status='confirmed',
+    confirmed_by_user_id=COALESCE(confirmed_by_user_id,$3),
+    confirmed_at=COALESCE(confirmed_at,NOW()),
+    payment_status='paid',updated_at=NOW()
+WHERE settlement_id=$1 AND user_id=$2 AND net_amount_minor<>0`, id, memberUserID, actorID); err != nil {
+		return err
+	}
+
+	var pending int64
+	if err = tx.QueryRowContext(ctx, `
+SELECT COUNT(*) FROM pool_settlement_lines
+WHERE settlement_id=$1 AND user_id<>$2 AND net_amount_minor<>0 AND payment_status<>'paid'`, id, settlementUserID).Scan(&pending); err != nil {
+		return err
+	}
+	if pending == 0 {
+		if _, err = tx.ExecContext(ctx, `UPDATE pool_settlement_lines SET payment_status='paid',updated_at=NOW() WHERE settlement_id=$1 AND payment_status<>'paid'`, id); err != nil {
+			return err
+		}
+		if _, err = tx.ExecContext(ctx, `UPDATE pool_settlements SET status='paid',paid_by_user_id=$2,paid_at=COALESCE(paid_at,NOW()),updated_at=NOW() WHERE id=$1`, id, actorID); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
 const settlementSelect = `
 SELECT id,period_type,period_start,period_end,timezone,status,period_cost_minor,carry_in_minor,carry_out_minor,total_cost_minor,total_usage_weight,pricing_coverage,unpriced_usage_count,fx_rate,formula_version,cost_snapshot,filter_snapshot,generated_by_user_id,locked_by_user_id,locked_at,paid_by_user_id,paid_at,created_at,updated_at
 FROM pool_settlements`

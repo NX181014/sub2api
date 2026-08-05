@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import type { SharedPoolSettlementAccountLine } from '@/api/admin/sharedPool'
-import { buildSettlementTransferPreview } from '@/utils/settlementTransfers'
+import {
+  buildSettlementTransferPreview,
+  defaultSettlementUserID
+} from '@/utils/settlementTransfers'
 
 const line = (accountID: number, userID: number, netAmount: number): SharedPoolSettlementAccountLine => ({
   id: accountID * 10 + userID,
@@ -17,23 +20,41 @@ const line = (accountID: number, userID: number, netAmount: number): SharedPoolS
   trace_quality: 'exact'
 })
 
-describe('settlement transfer preview', () => {
-  it('pairs balances inside each account without cross-account netting', () => {
-    const transfers = buildSettlementTransferPreview([
-      line(1, 1, 10),
-      line(1, 2, -10),
-      line(2, 1, -8),
-      line(2, 3, 8)
-    ])
+const lines = [
+  line(1, 1, 10),
+  line(1, 2, -10),
+  line(2, 1, -8),
+  line(2, 3, 8)
+]
 
-    expect(transfers.map(({ account_id, from_user_id, to_user_id, amount }) => ({
-      account_id,
+describe('settlement transfer preview', () => {
+  it('nets each member to one designated settlement user and keeps account allocations', () => {
+    expect(defaultSettlementUserID(lines)).toBe(2)
+
+    const transfers = buildSettlementTransferPreview(lines, 2, { 1: 'one', 2: 'two' })
+
+    expect(transfers.map(({ member_user_id, from_user_id, to_user_id, amount, account_ids }) => ({
+      member_user_id,
       from_user_id,
       to_user_id,
-      amount
+      amount,
+      account_ids
     }))).toEqual([
-      { account_id: 1, from_user_id: 1, to_user_id: 2, amount: 10 },
-      { account_id: 2, from_user_id: 3, to_user_id: 1, amount: 8 }
+      { member_user_id: 3, from_user_id: 3, to_user_id: 2, amount: 8, account_ids: [2] },
+      { member_user_id: 1, from_user_id: 1, to_user_id: 2, amount: 2, account_ids: [1, 2] }
     ])
+    expect(transfers[1].allocation_ids).toEqual([11, 21])
+    expect(transfers[1].account_names).toEqual(['one', 'two'])
+  })
+
+  it('reverses the transfer when the designated user owes a receiver', () => {
+    const transfers = buildSettlementTransferPreview(lines, 1)
+    const receiver = transfers.find(item => item.member_user_id === 2)
+
+    expect(receiver).toMatchObject({
+      from_user_id: 1,
+      to_user_id: 2,
+      amount: 10
+    })
   })
 })

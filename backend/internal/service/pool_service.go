@@ -532,6 +532,7 @@ type PoolRepository interface {
 	LockSettlement(ctx context.Context, id, actorID int64) (*PoolSettlement, error)
 	ConfirmSettlementLine(ctx context.Context, id, userID, actorID int64) error
 	MarkSettlementPaid(ctx context.Context, id, actorID int64) error
+	MarkSettlementMemberPaid(ctx context.Context, id, memberUserID, settlementUserID, actorID int64) error
 	ListSettlements(ctx context.Context, accountID *int64, limit, offset int) ([]PoolSettlement, int64, error)
 	GetSettlement(ctx context.Context, id int64) (*PoolSettlement, error)
 	GetRecovery(ctx context.Context, start, end time.Time, accountID ...*int64) ([]AccountRecovery, error)
@@ -1432,6 +1433,32 @@ func (s *PoolService) MarkSettlementPaid(ctx context.Context, id, actorID int64)
 		return nil, err
 	}
 	return s.repo.GetSettlement(ctx, id)
+}
+
+func (s *PoolService) MarkSettlementMemberPaid(ctx context.Context, id, memberUserID, settlementUserID, actorID int64) (*PoolSettlement, error) {
+	if id <= 0 {
+		return nil, ErrPoolSettlementNotFound
+	}
+	if memberUserID <= 0 || settlementUserID <= 0 || actorID <= 0 {
+		return nil, infraerrors.BadRequest("SETTLEMENT_PAYMENT_PARTY_REQUIRED", "a settlement member, settlement user, and signed-in administrator are required")
+	}
+	if memberUserID == settlementUserID {
+		return nil, infraerrors.BadRequest("SETTLEMENT_PAYMENT_PARTIES_MUST_DIFFER", "the settlement member and settlement user must differ")
+	}
+	item, err := s.repo.GetSettlement(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if item.Status == "draft" {
+		item, err = s.LockSettlement(ctx, id, actorID)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if err = s.repo.MarkSettlementMemberPaid(ctx, item.ID, memberUserID, settlementUserID, actorID); err != nil {
+		return nil, err
+	}
+	return s.repo.GetSettlement(ctx, item.ID)
 }
 
 func (s *PoolService) GetRecovery(ctx context.Context, start, end time.Time, accountID ...*int64) (*PoolRecoveryOverview, error) {

@@ -3,62 +3,93 @@ import type {
   SharedPoolSettlementLine
 } from '@/api/admin/sharedPool'
 
-export interface SettlementTransferPreview {
+export interface SettlementTransferAllocation {
+  id?: number
   account_id?: number
+  account_name: string
+  net_amount: number
+}
+
+export interface SettlementTransferPreview {
+  member_user_id: number
+  member_user_name: string
+  settlement_user_id: number
+  settlement_user_name: string
   from_user_id: number
   from_user_name: string
   to_user_id: number
   to_user_name: string
   amount: number
+  payment_status: 'pending' | 'paid'
+  allocation_ids: number[]
+  account_ids: number[]
+  account_names: string[]
+  allocations: SettlementTransferAllocation[]
 }
 
 type TransferLine = SharedPoolSettlementLine | SharedPoolSettlementAccountLine
 
-/**
- * Convert member net balances into deterministic one-to-one transfers.
- * Balances are already rounded by the server, so the preview preserves cents.
- */
-export function buildSettlementTransferPreview(lines: TransferLine[]): SettlementTransferPreview[] {
-  const result: SettlementTransferPreview[] = []
-  const groups = new Map<number, TransferLine[]>()
+const cents = (value: number) => Math.round(value * 100)
+
+const memberBalances = (lines: TransferLine[]) => {
+  const members = new Map<number, { id: number; name: string; cents: number }>()
   for (const line of lines) {
-    const accountID = 'account_id' in line ? line.account_id : 0
-    const group = groups.get(accountID)
-    if (group) group.push(line)
-    else groups.set(accountID, [line])
+    const member = members.get(line.user_id)
+    if (member) member.cents += cents(line.net_amount)
+    else members.set(line.user_id, { id: line.user_id, name: line.user_name, cents: cents(line.net_amount) })
   }
+  return [...members.values()]
+}
 
-  for (const [accountID, accountLines] of groups) {
-    const debtors = accountLines
-      .filter(line => line.net_amount > 0)
-      .map(line => ({ id: line.user_id, name: line.user_name, remaining: Math.round(line.net_amount * 100) }))
-      .sort((a, b) => b.remaining - a.remaining || a.id - b.id)
-    const creditors = accountLines
-      .filter(line => line.net_amount < 0)
-      .map(line => ({ id: line.user_id, name: line.user_name, remaining: Math.round(Math.abs(line.net_amount) * 100) }))
-      .sort((a, b) => b.remaining - a.remaining || a.id - b.id)
+export function defaultSettlementUserID(lines: TransferLine[]): number | undefined {
+  return memberBalances(lines)
+    .sort((a, b) => a.cents - b.cents || a.id - b.id)[0]?.id
+}
 
-    let debtorIndex = 0
-    let creditorIndex = 0
-    while (debtorIndex < debtors.length && creditorIndex < creditors.length) {
-      const debtor = debtors[debtorIndex]
-      const creditor = creditors[creditorIndex]
-      const cents = Math.min(debtor.remaining, creditor.remaining)
-      if (cents > 0) {
-        result.push({
-          account_id: accountID || undefined,
-          from_user_id: debtor.id,
-          from_user_name: debtor.name,
-          to_user_id: creditor.id,
-          to_user_name: creditor.name,
-          amount: cents / 100
+/** Aggregate every non-hub member into one transfer while retaining account allocations. */
+export function buildSettlementTransferPreview(
+  lines: TransferLine[],
+  settlementUserID?: number,
+  accountNames: Record<number, string> = {},
+  paymentStatuses: Record<number, 'pending' | 'paid'> = {}
+): SettlementTransferPreview[] {
+  const members = memberBalances(lines)
+  const settlementUser = members.find(member => member.id === settlementUserID)
+    || members.find(member => member.id === defaultSettlementUserID(lines))
+  if (!settlementUser) return []
+
+  return members
+    .filter(member => member.id !== settlementUser.id && member.cents !== 0)
+    .sort((a, b) => Math.abs(b.cents) - Math.abs(a.cents) || a.id - b.id)
+    .map((member) => {
+      const allocations = lines
+        .filter(line => line.user_id === member.id)
+        .map((line): SettlementTransferAllocation => {
+          const accountID = 'account_id' in line ? line.account_id : undefined
+          return {
+            id: 'id' in line ? line.id : undefined,
+            account_id: accountID,
+            account_name: accountID ? accountNames[accountID] || `#${accountID}` : '-',
+            net_amount: line.net_amount
+          }
         })
+      const accountIDs = [...new Set(allocations.flatMap(item => item.account_id ? [item.account_id] : []))]
+      const fromHub = member.cents < 0
+      return {
+        member_user_id: member.id,
+        member_user_name: member.name,
+        settlement_user_id: settlementUser.id,
+        settlement_user_name: settlementUser.name,
+        from_user_id: fromHub ? settlementUser.id : member.id,
+        from_user_name: fromHub ? settlementUser.name : member.name,
+        to_user_id: fromHub ? member.id : settlementUser.id,
+        to_user_name: fromHub ? member.name : settlementUser.name,
+        amount: Math.abs(member.cents) / 100,
+        payment_status: paymentStatuses[member.id] || 'pending',
+        allocation_ids: allocations.flatMap(item => item.id ? [item.id] : []),
+        account_ids: accountIDs,
+        account_names: accountIDs.map(id => accountNames[id] || `#${id}`),
+        allocations
       }
-      debtor.remaining -= cents
-      creditor.remaining -= cents
-      if (debtor.remaining === 0) debtorIndex += 1
-      if (creditor.remaining === 0) creditorIndex += 1
-    }
-  }
-  return result
+    })
 }
