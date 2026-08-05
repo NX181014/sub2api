@@ -73,7 +73,7 @@ const serverTransfers = computed(() => (props.transfers || []).map((transfer): S
   account_ids: transfer.account_ids,
   account_names: transfer.account_ids.map(id => props.accountNames[id] || `#${id}`),
   allocations: transfer.account_line_ids.map(id => {
-    const line = sourceLines.value.find(item => item.id === id)
+    const line = sourceLines.value.find(item => 'id' in item && item.id === id)
     return { id, account_id: line && 'account_id' in line ? line.account_id : undefined, account_name: line && 'account_id' in line ? props.accountNames[line.account_id] || `#${line.account_id}` : '-', net_amount: line?.net_amount || 0 }
   })
 })))
