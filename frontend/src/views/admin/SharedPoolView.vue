@@ -1,13 +1,13 @@
 <template>
   <AppLayout>
     <div class="shared-pool-shell min-w-0 space-y-5">
-      <header class="card min-w-0 overflow-hidden">
-        <div class="flex flex-col gap-4 px-4 py-4 sm:px-5 lg:flex-row lg:items-center lg:justify-between">
-          <div class="min-w-0">
-            <h1 class="text-lg font-semibold text-gray-900 dark:text-white">{{ t('admin.sharedPool.title') }}</h1>
-            <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.description') }}</p>
+      <header class="card shared-pool-header min-w-0 overflow-hidden">
+        <div class="flex flex-col gap-4 px-4 py-4 sm:px-5 xl:flex-row xl:items-center xl:justify-between">
+          <div class="min-w-0 shrink-0">
+            <h1 class="text-lg font-semibold tracking-tight text-gray-900 dark:text-white">{{ t('admin.sharedPool.title') }}</h1>
+            <p class="mt-1 max-w-xl text-sm text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.description') }}</p>
           </div>
-          <div class="sm:hidden">
+          <div class="w-full xl:hidden">
             <Select
               :model-value="activeTab"
               :options="tabs.map(tab => ({ value: tab.key, label: tab.label }))"
@@ -15,76 +15,89 @@
               @change="switchTab($event as TabKey)"
             />
           </div>
-          <nav class="hidden flex-wrap items-center gap-1 sm:flex" :aria-label="t('admin.sharedPool.title')">
-          <button
-            v-for="tab in tabs"
-            :key="tab.key"
-            type="button"
-            class="inline-flex min-h-11 items-center gap-2 rounded-lg px-3 text-sm font-medium transition-colors"
-            :class="activeTab === tab.key
-              ? 'bg-primary-50 text-primary-700 ring-1 ring-inset ring-primary-200 dark:bg-primary-900/20 dark:text-primary-300 dark:ring-primary-800'
-              : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-dark-700 dark:hover:text-white'"
-            :aria-current="activeTab === tab.key ? 'page' : undefined"
-            @click="switchTab(tab.key)"
-          >
-            <Icon :name="tab.icon" size="sm" />
-            {{ tab.label }}
-          </button>
+          <nav class="shared-pool-tabs hidden min-w-0 flex-1 flex-wrap items-center justify-end gap-1 xl:flex" :aria-label="t('admin.sharedPool.title')">
+            <template v-for="(tab, index) in tabs" :key="tab.key">
+              <span v-if="index === 2" class="mx-1 hidden h-6 w-px bg-gray-200 dark:bg-dark-600 xl:block" aria-hidden="true"></span>
+              <button
+                type="button"
+                class="shared-pool-tab inline-flex min-h-11 items-center gap-2 rounded-lg px-3 text-sm font-medium transition-colors"
+                :class="activeTab === tab.key
+                  ? 'bg-primary-50 font-semibold text-primary-700 dark:bg-primary-900/20 dark:text-primary-300'
+                  : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-dark-700 dark:hover:text-white'"
+                :aria-current="activeTab === tab.key ? 'page' : undefined"
+                @click="switchTab(tab.key)"
+              >
+                <Icon :name="tab.icon" size="sm" />
+                {{ tab.label }}
+              </button>
+            </template>
           </nav>
         </div>
 
-        <div v-if="activeTab !== 'accounts' && activeTab !== 'ledger'" class="flex flex-col gap-3 border-t border-gray-100 bg-gray-50/70 p-3 dark:border-dark-700 dark:bg-dark-800/40 sm:p-4 lg:flex-row lg:items-end">
-          <div class="flex min-w-0 flex-1 flex-col gap-3 sm:flex-row sm:items-end">
-            <div class="w-full sm:w-36">
-              <label for="pool-period-type" class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-300">
-                {{ t('admin.sharedPool.period.label') }}
-              </label>
-              <Select
-                id="pool-period-type"
-                v-model="periodType"
-                :options="periodOptions"
-                :aria-label="t('admin.sharedPool.period.label')"
-                @change="handlePeriodTypeChange"
-              />
+        <div v-if="activeTab !== 'accounts' && activeTab !== 'ledger'" class="shared-pool-context-bar border-t border-gray-100 bg-gray-50/70 p-3 dark:border-dark-700 dark:bg-dark-800/40 sm:p-4">
+          <div class="flex min-w-0 flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
+            <div class="grid min-w-0 flex-1 grid-cols-1 gap-3 sm:grid-cols-[minmax(8rem,11rem)_minmax(0,1fr)] sm:items-end">
+              <div class="min-w-0">
+                <label for="pool-period-type" class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-300">
+                  {{ t('admin.sharedPool.period.label') }}
+                </label>
+                <Select
+                  id="pool-period-type"
+                  v-model="periodType"
+                  :options="periodOptions"
+                  :aria-label="t('admin.sharedPool.period.label')"
+                  @change="handlePeriodTypeChange"
+                />
+              </div>
+              <div class="min-w-0">
+                <label class="mb-1 flex items-center gap-1 text-xs font-medium text-gray-600 dark:text-gray-300">
+                  <Icon name="clock" size="xs" class="text-gray-400 dark:text-gray-500" />
+                  {{ t('admin.sharedPool.period.timezone') }}
+                </label>
+                <DateRangePicker
+                  v-model:start-date="startDate"
+                  v-model:end-date="endDate"
+                  @change="handleDateRangeChange"
+                />
+              </div>
             </div>
-            <div class="min-w-0">
-              <DateRangePicker
-                v-model:start-date="startDate"
-                v-model:end-date="endDate"
-                @change="handleDateRangeChange"
-              />
-              <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                {{ t('admin.sharedPool.period.timezone') }}
-              </p>
+            <div class="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-[minmax(11rem,13rem)_auto] sm:items-end lg:w-auto lg:min-w-[22rem]">
+              <div class="min-w-0">
+                <label for="pool-fx-rate" class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-300">
+                  {{ t('admin.sharedPool.form.fxRate') }}
+                </label>
+                <div class="flex min-w-0 gap-2">
+                  <input
+                    id="pool-fx-rate"
+                    v-model.number="fxRate"
+                    class="input h-11 min-w-0 flex-1"
+                    type="number"
+                    min="0.0001"
+                    step="0.0001"
+                  />
+                  <button
+                    type="button"
+                    class="btn btn-secondary h-11 w-11 shrink-0 p-0"
+                    :disabled="savingFXRate"
+                    :title="t('admin.sharedPool.form.saveFxRate')"
+                    :aria-label="t('admin.sharedPool.form.saveFxRate')"
+                    @click="updateFXRate"
+                  >
+                    <LoadingSpinner v-if="savingFXRate" size="sm" />
+                    <Icon v-else name="check" size="sm" />
+                  </button>
+                </div>
+              </div>
+              <div class="flex min-w-0 items-end justify-between gap-3 sm:justify-end">
+                <p v-if="lastLoadedAt" class="min-w-0 truncate pb-2 text-xs text-gray-500 dark:text-gray-400" :title="lastLoadedAt">
+                  {{ t('common.updatedAt', { date: lastLoadedAt }) }}
+                </p>
+                <button type="button" class="btn btn-secondary min-h-11 shrink-0 px-3" :disabled="loading" @click="loadActiveTab">
+                  <Icon name="refresh" size="sm" :class="loading ? 'animate-spin' : ''" />
+                  <span>{{ t('common.refresh') }}</span>
+                </button>
+              </div>
             </div>
-          </div>
-          <div class="flex flex-wrap items-center justify-end gap-2">
-            <label for="pool-fx-rate" class="text-xs font-medium text-gray-600 dark:text-gray-300">
-              {{ t('admin.sharedPool.form.fxRate') }}
-            </label>
-            <input
-              id="pool-fx-rate"
-              v-model.number="fxRate"
-              class="input h-10 w-24"
-              type="number"
-              min="0.0001"
-              step="0.0001"
-            />
-            <button
-              type="button"
-              class="btn btn-secondary h-10 w-10 p-0"
-              :disabled="savingFXRate"
-              :title="t('admin.sharedPool.form.saveFxRate')"
-              :aria-label="t('admin.sharedPool.form.saveFxRate')"
-              @click="updateFXRate"
-            >
-              <LoadingSpinner v-if="savingFXRate" size="sm" />
-              <Icon v-else name="check" size="sm" />
-            </button>
-            <button type="button" class="btn btn-secondary min-h-11 px-3" :disabled="loading" @click="loadActiveTab">
-              <Icon name="refresh" size="sm" :class="loading ? 'animate-spin' : ''" />
-              <span>{{ t('common.refresh') }}</span>
-            </button>
           </div>
         </div>
       </header>
@@ -103,7 +116,6 @@
               </div>
               <div class="flex w-full flex-wrap items-center gap-2 sm:w-auto">
                 <Select v-model="overviewRecoveryFilter" class="min-w-40" :options="overviewRecoveryFilterOptions" :aria-label="t('admin.sharedPool.page.recoveryFilter')" @change="applyOverviewRecoveryFilter" />
-                <button type="button" class="btn btn-secondary min-h-11" :disabled="loading" @click="loadActiveTab"><Icon name="refresh" size="sm" :class="loading ? 'animate-spin' : ''" />{{ t('common.refresh') }}</button>
               </div>
             </div>
             <div class="border-b border-gray-100 px-4 py-4 dark:border-dark-700 sm:px-5"><SharedPoolMetricStrip :items="overviewMetricItems" /></div>
@@ -121,7 +133,7 @@
                 </div>
                 <div class="min-w-0">
                   <div class="flex items-center justify-between gap-3"><StatusBadge :status="availabilityPresentation(row.availability_status, row.account_status).badge" :label="t(`admin.accounts.status.${availabilityPresentation(row.availability_status, row.account_status).key}`)" /><span class="font-semibold tabular-nums" :class="row.roi_rate >= 100 ? 'text-green-600 dark:text-green-400' : 'text-amber-600 dark:text-amber-400'">{{ formatPercent(row.roi_rate) }}</span></div>
-                  <div class="mt-2 h-1.5 overflow-hidden rounded-full bg-gray-100 dark:bg-dark-700"><div class="h-full rounded-full bg-green-500" :style="{ width: `${Math.min(Math.max(row.roi_rate, 0), 100)}%` }"></div></div>
+                  <div v-if="row.roi_rate < 100" class="mt-2 h-1.5 overflow-hidden rounded-full bg-gray-100 dark:bg-dark-700"><div class="h-full rounded-full bg-amber-500" :style="{ width: `${Math.min(Math.max(row.roi_rate, 0), 100)}%` }"></div></div>
                   <span class="mt-1 block text-xs text-gray-500 dark:text-gray-400">{{ t(`admin.sharedPool.page.recoveryStates.${recoveryState(row)}`) }}</span>
                 </div>
                 <div class="flex items-center justify-between gap-3 xl:block xl:text-right"><span class="text-xs text-gray-500 dark:text-gray-400 xl:hidden">{{ t('admin.sharedPool.metrics.usageValue') }}</span><span class="font-medium tabular-nums">{{ formatMoney(row.usage_value, row.currency) }}</span></div>
@@ -193,9 +205,6 @@
               <h2 class="text-base font-semibold text-gray-900 dark:text-white">{{ t('admin.sharedPool.tabs.settlement') }}</h2>
               <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.settlement.formula') }}</p>
             </div>
-            <button type="button" class="btn btn-secondary min-h-11 shrink-0" :disabled="loading" @click="loadActiveTab">
-              <Icon name="refresh" size="sm" :class="loading ? 'animate-spin' : ''" />{{ t('common.refresh') }}
-            </button>
           </div>
           <div class="card-body space-y-5">
             <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
@@ -243,16 +252,15 @@
             <div v-if="sourceRankings.length" class="border-b border-gray-100 dark:border-dark-700">
               <div class="border-b border-gray-100 px-4 py-4 dark:border-dark-700 sm:px-5"><SharedPoolMetricStrip :items="sourceMetricItems" /></div>
               <div class="grid min-w-0 grid-cols-1 gap-0 divide-y divide-gray-100 dark:divide-dark-700 lg:grid-cols-[minmax(0,1.25fr)_minmax(18rem,.75fr)] lg:divide-x lg:divide-y-0 dark:lg:divide-dark-700">
-                <div class="min-w-0 p-4 sm:p-5"><SharedPoolBarChart :title="t('admin.sharedPool.sources.chartTitle')" :items="sourceRoiBars" color="#0ea5e9" :empty-title="t('admin.sharedPool.empty.sources')" /></div>
-                <div class="min-w-0 p-4 sm:p-5"><div class="flex items-center justify-between gap-3"><div><h3 class="text-sm font-semibold text-gray-900 dark:text-white">{{ t('admin.sharedPool.columns.ban30') }}</h3><p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.sources.sampleHint') }}</p></div><Icon name="shield" size="md" class="text-amber-500" /></div><div class="mt-4 divide-y divide-gray-100 border-y border-gray-100 dark:divide-dark-700 dark:border-dark-700"><button v-for="source in sourceRiskRankings" :key="source.name" type="button" class="flex min-h-14 w-full min-w-0 items-center gap-3 py-3 text-left hover:bg-gray-50 dark:hover:bg-dark-800/50" @click="selectedSourceName = source.name"><span class="min-w-0 flex-1 truncate text-sm font-medium text-gray-900 dark:text-white">{{ source.name }}</span><span class="shrink-0 text-sm font-semibold tabular-nums" :class="source.ban_rate_30d > 10 ? 'text-red-600 dark:text-red-400' : source.ban_rate_30d > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-green-600 dark:text-green-400'">{{ formatPercent(source.ban_rate_30d) }}</span></button><p v-if="!sourceRiskRankings.length" class="py-6 text-center text-sm text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.empty.sources') }}</p></div></div>
+                <div class="min-w-0 p-4 sm:p-5"><SharedPoolBarChart :title="sourceChartUsesPending ? t('admin.sharedPool.metrics.pendingRecovery') : t('admin.sharedPool.sources.chartTitle')" :items="sourceChartBars" color="#0ea5e9" :empty-title="t('admin.sharedPool.empty.sources')" /></div>
+                <div class="min-w-0 p-4 sm:p-5"><div class="flex items-center justify-between gap-3"><div><h3 class="text-sm font-semibold text-gray-900 dark:text-white">{{ t('admin.sharedPool.columns.ban30') }}</h3><p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.sources.sampleHint') }}</p></div><Icon name="shield" size="md" class="text-amber-500" /></div><div class="mt-4 divide-y divide-gray-100 border-y border-gray-100 dark:divide-dark-700 dark:border-dark-700"><button v-for="source in sourceRiskRankings" :key="source.name" type="button" class="flex min-h-14 w-full min-w-0 items-center gap-3 py-3 text-left hover:bg-gray-50 dark:hover:bg-dark-800/50" @click="selectedSourceName = source.name"><span class="min-w-0 flex-1 truncate text-sm font-medium text-gray-900 dark:text-white">{{ source.name }}</span><span class="shrink-0 text-right"><span class="block text-sm font-semibold tabular-nums" :class="source.ban_rate_30d > 10 ? 'text-red-600 dark:text-red-400' : source.ban_rate_30d > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-green-600 dark:text-green-400'">{{ formatPercent(source.ban_rate_30d) }}</span><span class="block text-[11px] text-gray-400 dark:text-gray-500">n={{ source.sample_size }}</span></span></button><p v-if="!sourceRiskRankings.length" class="py-6 text-center text-sm text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.empty.sources') }}</p></div></div>
               </div>
             </div>
             <div v-if="paginatedSources.length" class="divide-y divide-gray-100 border-t border-gray-100 dark:divide-dark-700 dark:border-dark-700">
-              <article v-for="(source, index) in paginatedSources" :key="source.name" class="grid min-w-0 grid-cols-1 gap-3 px-4 py-3.5 sm:grid-cols-2 xl:grid-cols-[44px_minmax(180px,1.4fr)_repeat(4,minmax(100px,.7fr))_auto] xl:items-center sm:px-6">
-                <span class="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-gray-100 text-sm font-semibold tabular-nums text-gray-600 dark:bg-dark-700 dark:text-gray-300">{{ (sourcePagination.page - 1) * sourcePagination.page_size + index + 1 }}</span>
-                <div class="min-w-0"><div class="flex min-w-0 items-center gap-2"><span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary-50 text-primary-600 dark:bg-primary-900/20 dark:text-primary-300"><Icon name="link" size="sm" /></span><div class="min-w-0"><div class="flex min-w-0 items-center gap-2"><h3 class="truncate font-semibold text-gray-900 dark:text-white" :title="source.name">{{ source.name }}</h3><StatusBadge :status="sourceMeta(source)?.active === false ? 'inactive' : 'success'" :label="t(`admin.sharedPool.status.${sourceMeta(source)?.active === false ? 'inactive' : 'active'}`)" /></div><p class="mt-1 truncate text-xs text-gray-500 dark:text-gray-400" :title="source.uploaderNames.join(', ')">{{ source.account_count }} {{ t('admin.sharedPool.columns.accounts') }} · {{ source.uploaderNames.join(', ') || '-' }}</p></div></div></div>
+              <article v-for="source in paginatedSources" :key="source.name" class="grid min-w-0 grid-cols-1 gap-3 border-b border-gray-100 px-4 py-3.5 last:border-b-0 sm:grid-cols-2 sm:px-6 xl:grid-cols-[minmax(180px,1.45fr)_repeat(4,minmax(105px,.75fr))_auto] xl:items-center dark:border-dark-700">
+                <div class="min-w-0"><div class="flex min-w-0 items-center gap-2"><span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary-50 text-primary-600 dark:bg-primary-900/20 dark:text-primary-300"><Icon name="link" size="sm" /></span><div class="min-w-0"><div class="flex min-w-0 items-center gap-2"><h3 class="truncate font-semibold text-gray-900 dark:text-white" :title="source.name">{{ source.name }}</h3><StatusBadge :status="sourceMeta(source)?.active === false ? 'inactive' : 'success'" :label="t(`admin.sharedPool.status.${sourceMeta(source)?.active === false ? 'inactive' : 'active'}`)" /></div><p class="mt-1 truncate text-xs text-gray-500 dark:text-gray-400" :title="source.uploaderNames.join(', ')">{{ source.account_count }} {{ t('admin.sharedPool.columns.accounts') }} · n={{ source.sample_size }} · {{ source.uploaderNames.join(', ') || '-' }}</p></div></div></div>
                 <div><span class="block text-xs text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.columns.roi') }}</span><span class="mt-1 block font-semibold tabular-nums" :class="source.roi_rate >= 100 ? 'text-green-600 dark:text-green-400' : 'text-amber-600 dark:text-amber-400'">{{ formatPercent(source.roi_rate) }}</span></div>
-                <div><span class="block text-xs text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.columns.ban30') }}</span><span class="mt-1 block font-medium tabular-nums" :class="source.ban_rate_30d > 10 ? 'text-red-600 dark:text-red-400' : source.ban_rate_30d > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-green-600 dark:text-green-400'">{{ formatPercent(source.ban_rate_30d) }}</span></div>
+                <div><span class="block text-xs text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.columns.ban30') }}</span><span class="mt-1 block font-medium tabular-nums" :class="source.ban_rate_30d > 10 ? 'text-red-600 dark:text-red-400' : source.ban_rate_30d > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-green-600 dark:text-green-400'">{{ formatPercent(source.ban_rate_30d) }}</span><span class="mt-0.5 block text-[11px] text-gray-400 dark:text-gray-500" :title="`${t('admin.sharedPool.columns.ban30')} n=${source.sample_size}`">n={{ source.sample_size }}</span></div>
                 <div><span class="block text-xs text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.form.currency') }}</span><span class="mt-1 block font-medium">CNY</span></div>
                 <div><span class="block text-xs text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.sources.costRule') }}</span><span class="mt-1 block font-medium tabular-nums">{{ formatMoney(source.purchase_cost) }} · {{ source.average_survival_days.toFixed(1) }} {{ t('admin.sharedPool.sources.days') }}</span></div>
                 <button type="button" class="btn btn-secondary min-h-11 px-3 text-xs sm:col-span-2 xl:col-span-1" @click="selectedSourceName = source.name"><Icon name="eye" size="sm" />{{ t('admin.sharedPool.sources.history') }}</button>
@@ -616,6 +624,7 @@ const periodType = ref<PoolPeriodType>(requestedPeriodType)
 const startDate = ref(initialPeriod.start)
 const endDate = ref(initialPeriod.end)
 const loading = ref(false)
+const lastLoadedAt = ref('')
 const savingCost = ref(false)
 const savingEvent = ref(false)
 const savingFXRate = ref(false)
@@ -867,20 +876,31 @@ const sourceMetricItems = computed(() => {
   const rows = sourceRankings.value
   if (!rows.length) return []
   const totalAccounts = rows.reduce((sum, row) => sum + row.account_count, 0)
+  const totalSamples = rows.reduce((sum, row) => sum + row.sample_size, 0)
   const cost = rows.reduce((sum, row) => sum + row.purchase_cost, 0)
   const value = rows.reduce((sum, row) => sum + row.usage_value, 0)
-  const banRate = rows.reduce((sum, row) => sum + row.ban_rate_30d * Math.max(row.account_count, 1), 0) /
-    rows.reduce((sum, row) => sum + Math.max(row.account_count, 1), 0)
+  const pending = rows.reduce((sum, row) => sum + Math.max(row.purchase_cost - row.usage_value, 0), 0)
+  const banWeight = rows.reduce((sum, row) => sum + row.sample_size, 0)
+  const banRate = banWeight
+    ? rows.reduce((sum, row) => sum + row.ban_rate_30d * row.sample_size, 0) / banWeight
+    : 0
   return [
     { label: t('admin.sharedPool.tabs.sources'), value: String(rows.length), icon: 'link' as const },
-    { label: t('admin.sharedPool.columns.accounts'), value: String(totalAccounts), icon: 'server' as const },
+    { label: t('admin.sharedPool.columns.accounts'), value: String(totalAccounts), hint: `n=${totalSamples}`, icon: 'server' as const },
     { label: t('admin.sharedPool.metrics.purchaseCost'), value: formatMoney(cost), icon: 'dollar' as const },
-    { label: t('admin.sharedPool.metrics.usageValue'), value: formatMoney(value), icon: 'bolt' as const, tone: 'positive' as const },
+    { label: t('admin.sharedPool.metrics.usageValue'), value: formatMoney(value), hint: `${t('admin.sharedPool.metrics.pendingRecovery')}: ${formatMoney(pending)}`, icon: 'bolt' as const, tone: 'positive' as const },
     { label: t('admin.sharedPool.columns.ban30'), value: formatPercent(banRate), icon: 'exclamationTriangle' as const, tone: banRate > 10 ? 'danger' as const : banRate > 0 ? 'warning' as const : 'positive' as const }
   ]
 })
 const sourceRoiBars = computed(() => sourceRankings.value.slice(0, 6)
-  .map(source => ({ key: source.name, label: source.name, value: Math.max(source.roi_rate, 0), display: formatPercent(source.roi_rate) })))
+  .map(source => ({ key: source.name, label: source.name, value: Math.max(source.roi_rate, 0), display: `${formatPercent(source.roi_rate)} · n=${source.sample_size}` })))
+const sourceChartUsesPending = computed(() => sourceRankings.value.length > 1 && sourceRankings.value.every(source => source.roi_rate >= 99))
+const sourceChartBars = computed(() => sourceChartUsesPending.value
+  ? [...sourceRankings.value]
+    .sort((a, b) => (b.purchase_cost - b.usage_value) - (a.purchase_cost - a.usage_value))
+    .slice(0, 6)
+    .map(source => ({ key: source.name, label: source.name, value: Math.max(source.purchase_cost - source.usage_value, 0), display: `${formatMoney(Math.max(source.purchase_cost - source.usage_value, 0))} · n=${source.sample_size}` }))
+  : sourceRoiBars.value)
 const sourceRiskRankings = computed(() => [...sourceRankings.value].sort((a, b) => b.ban_rate_30d - a.ban_rate_30d || a.name.localeCompare(b.name)).slice(0, 4))
 const selectedSource = computed(() => sourceRankings.value.find((source) => source.name === selectedSourceName.value))
 const sourceMeta = (source: Pick<RankedSource, 'name'>) => purchaseSources.value.find(
@@ -1168,6 +1188,7 @@ async function loadActiveTab() {
       selectedSourceName.value = ''
       purchaseSources.value = sourceOptions
     }
+    lastLoadedAt.value = formatDateTimeToMinute(new Date().toISOString(), locale.value)
   } catch (error: any) {
     appStore.showError(error?.message || t('admin.sharedPool.errors.load'))
   } finally {
@@ -1825,7 +1846,25 @@ onMounted(async () => {
 </script>
 
 <style scoped>
+.shared-pool-header :deep(.select-trigger),
+.shared-pool-context-bar :deep(.select-trigger),
+.shared-pool-context-bar :deep(.date-picker-trigger),
+.shared-pool-context-bar .input,
+.shared-pool-context-bar .btn {
+  min-height: 2.75rem;
+}
+
 .shared-pool-shell :deep(.date-picker-trigger) {
   min-height: 2.75rem;
+}
+
+@media (max-width: 767px) {
+  .shared-pool-context-bar .grid {
+    min-width: 0;
+  }
+
+  .shared-pool-context-bar :deep(.date-picker-trigger) {
+    width: 100%;
+  }
 }
 </style>

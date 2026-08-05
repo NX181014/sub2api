@@ -25,7 +25,7 @@
 
     <div v-if="activeView === 'summary'" class="min-w-0">
       <div class="border-b border-gray-200 px-4 py-4 dark:border-dark-700 sm:px-5">
-        <div class="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)_auto_auto_auto]">
+        <div class="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)_auto_auto_auto]">
           <SearchInput v-model="summaryFilters.search" :placeholder="t('admin.sharedPool.ledger.searchPlaceholder')" @search="applySummaryFilters" />
           <Select v-model="summaryFilters.purchase_source_id" :options="sourceFilterOptions" searchable :aria-label="t('admin.sharedPool.columns.source')" @change="applySummaryFilters" />
           <Select v-model="summaryFilters.availability_status" :options="availabilityFilterOptions" :aria-label="t('admin.accounts.columns.status')" @change="applySummaryFilters" />
@@ -43,7 +43,7 @@
             {{ t('admin.sharedPool.ledger.batchAdd') }}
           </button>
         </div>
-        <div v-if="showSummaryAdvanced" class="mt-3 grid min-w-0 grid-cols-1 gap-3 border-t border-gray-100 pt-3 dark:border-dark-700 sm:grid-cols-2 xl:grid-cols-4">
+        <div v-if="showSummaryAdvanced" class="mt-3 grid min-w-0 grid-cols-1 gap-3 border-t border-gray-100 pt-3 dark:border-dark-700 sm:grid-cols-2 lg:grid-cols-4">
           <Select v-model="summaryFilters.uploader_user_id" :options="uploaderFilterOptions" searchable :aria-label="t('admin.sharedPool.columns.uploader')" @change="applySummaryFilters" />
           <Select v-model="summaryFilters.payer_user_id" :options="payerFilterOptions" searchable :aria-label="t('admin.sharedPool.ledger.payer')" @change="applySummaryFilters" />
           <Select v-model="summaryFilters.lifecycle_status" :options="statusFilterOptions" :aria-label="t('admin.sharedPool.columns.status')" @change="applySummaryFilters" />
@@ -82,7 +82,7 @@
 
     <div v-else class="min-w-0">
       <div class="border-b border-gray-200 px-4 py-4 dark:border-dark-700 sm:px-5">
-        <div class="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)_auto_auto_auto]">
+        <div class="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)_auto_auto_auto]">
           <SearchInput v-model="entryFilters.search" :placeholder="t('admin.sharedPool.ledger.searchEntries')" @search="applyEntryFilters" />
           <Select v-model="entryFilters.account_id" :options="accountFilterOptions" searchable :aria-label="t('admin.sharedPool.form.account')" @change="applyEntryFilters" />
           <Select v-model="entryFilters.entry_type" :options="entryTypeFilterOptions" :aria-label="t('admin.sharedPool.columns.costType')" @change="applyEntryFilters" />
@@ -100,7 +100,7 @@
             {{ t('admin.sharedPool.ledger.batchAdd') }}
           </button>
         </div>
-        <div v-if="showEntryAdvanced" class="mt-3 grid min-w-0 grid-cols-1 gap-3 border-t border-gray-100 pt-3 dark:border-dark-700 sm:grid-cols-2 xl:grid-cols-5">
+        <div v-if="showEntryAdvanced" class="mt-3 grid min-w-0 grid-cols-1 gap-3 border-t border-gray-100 pt-3 dark:border-dark-700 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
           <Select v-model="entryFilters.uploader_user_id" :options="uploaderFilterOptions" searchable :aria-label="t('admin.sharedPool.columns.uploader')" @change="applyEntryFilters" />
           <Select v-model="entryFilters.purchase_source_id" :options="sourceFilterOptions" searchable :aria-label="t('admin.sharedPool.columns.source')" @change="applyEntryFilters" />
           <Select v-model="entryFilters.payer_user_id" :options="payerFilterOptions" searchable :aria-label="t('admin.sharedPool.ledger.payer')" @change="applyEntryFilters" />
@@ -111,7 +111,7 @@
 
       <div v-if="loading" class="flex min-h-40 items-center justify-center"><LoadingSpinner /></div>
       <div v-else-if="entries.length" class="divide-y divide-gray-200 dark:divide-dark-700">
-        <article v-for="row in entries" :key="row.id" class="grid min-w-0 grid-cols-1 gap-3 px-4 py-3.5 sm:px-5 lg:grid-cols-2 2xl:grid-cols-[minmax(0,1.15fr)_minmax(0,.8fr)_minmax(0,1fr)_auto] 2xl:items-center">
+        <article v-for="row in entries" :key="row.id" class="grid min-w-0 grid-cols-1 gap-3 px-4 py-3.5 transition-colors hover:bg-gray-50/70 dark:hover:bg-dark-800/40 sm:px-5 lg:grid-cols-2 xl:grid-cols-[minmax(0,1.15fr)_minmax(0,.8fr)_minmax(0,1fr)_auto] xl:items-center">
           <div class="min-w-0">
             <button type="button" class="flex min-h-11 max-w-full items-center text-left font-semibold text-primary-600 hover:underline dark:text-primary-400" :title="row.account_name" @click="emit('trace-account', row.account_id)"><span class="truncate">{{ row.account_name }}</span></button>
             <div class="mt-1 flex flex-wrap items-center gap-2 text-xs">
@@ -136,7 +136,7 @@
             <div><dt class="text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.ledger.recordedAt') }}</dt><dd class="mt-1 font-medium tabular-nums">{{ dateOnly(row.created_at || row.paid_at) }}</dd></div>
           </dl>
 
-          <button v-if="isEditableEntry(row)" type="button" class="btn btn-secondary min-h-11 w-full justify-center 2xl:w-auto" @click="emit('edit-entry', row)">
+          <button v-if="isEditableEntry(row)" type="button" class="btn btn-secondary min-h-11 w-full justify-center xl:w-auto" @click="emit('edit-entry', row)">
             <Icon name="edit" size="sm" />{{ t('common.edit') }}
           </button>
         </article>

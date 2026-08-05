@@ -156,12 +156,15 @@ const settleTransfer = async () => {
       </header>
 
       <div class="card-body !p-4 sm:!p-5">
-        <div class="grid min-w-0 gap-4 sm:grid-cols-[minmax(0,1.3fr)_repeat(3,minmax(0,1fr))] sm:items-end">
+        <div class="grid min-w-0 gap-4 lg:grid-cols-[minmax(14rem,1fr)_minmax(0,2fr)] lg:items-end">
           <div class="min-w-0">
-            <p class="text-xs font-medium uppercase text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.settlement.autoNetting') }}</p>
+            <div class="flex items-center gap-2 text-xs font-medium uppercase text-gray-500 dark:text-gray-400">
+              <Icon name="calculator" size="sm" class="text-primary-500" />
+              <span>{{ t('admin.sharedPool.settlement.autoNetting') }}</span>
+            </div>
             <p class="mt-1 text-sm text-gray-700 dark:text-gray-200">{{ t('admin.sharedPool.settlement.autoNettingHint') }}</p>
           </div>
-          <dl class="grid grid-cols-3 gap-3 text-sm">
+          <dl class="grid grid-cols-3 gap-3 border-t border-gray-100 pt-3 text-sm dark:border-dark-700 lg:border-l lg:border-t-0 lg:pl-4 lg:pt-0">
             <div class="min-w-0">
               <dt class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.sharedPool.settlement.pendingMembers') }}</dt>
               <dd class="mt-1 font-semibold tabular-nums text-gray-900 dark:text-white">{{ pendingTransfers.length }}</dd>
@@ -205,10 +208,10 @@ const settleTransfer = async () => {
         :mobile-column-keys="['transfer', 'accounts', 'amount']"
       >
         <template #cell-transfer="{ row }">
-          <div class="flex min-w-0 items-center gap-2">
-            <span class="max-w-28 truncate font-medium" :title="row.from_user_name">{{ row.from_user_name }}</span>
+          <div class="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+            <span class="max-w-28 truncate font-medium sm:max-w-32" :title="row.from_user_name">{{ row.from_user_name }}</span>
             <Icon name="arrowRight" size="xs" class="shrink-0 text-gray-400" />
-            <span class="max-w-28 truncate font-medium" :title="row.to_user_name">{{ row.to_user_name }}</span>
+            <span class="max-w-28 truncate font-medium sm:max-w-32" :title="row.to_user_name">{{ row.to_user_name }}</span>
           </div>
         </template>
 
@@ -230,7 +233,7 @@ const settleTransfer = async () => {
         </template>
 
         <template #cell-amount="{ row }">
-          <div class="flex items-center justify-end gap-3 md:justify-start">
+          <div class="flex flex-wrap items-center justify-end gap-x-3 gap-y-1 md:justify-start">
             <span class="font-semibold tabular-nums text-gray-900 dark:text-white">{{ money(row.amount) }}</span>
             <StatusBadge
               :status="row.payment_status === 'paid' ? 'success' : 'warning'"
@@ -241,7 +244,12 @@ const settleTransfer = async () => {
 
         <template #cell-actions="{ row }">
           <div class="flex justify-end">
-            <button type="button" class="btn btn-secondary min-h-11 px-3 text-xs" @click="openTransfer(row)">
+            <button
+              type="button"
+              :class="row.payment_status === 'paid' ? 'btn btn-secondary' : 'btn btn-primary'"
+              class="min-h-11 w-full px-3 text-xs sm:w-auto"
+              @click="openTransfer(row)"
+            >
               <Icon :name="row.payment_status === 'paid' ? 'eye' : 'creditCard'" size="sm" />
               {{ row.payment_status === 'paid' ? t('common.view') : t('admin.sharedPool.settlement.handleTransfer') }}
             </button>
@@ -303,14 +311,14 @@ const settleTransfer = async () => {
 
       <template #footer>
         <div class="flex w-full flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-          <button type="button" class="btn btn-secondary min-h-11" :disabled="settling" @click="closeTransfer">{{ t('common.cancel') }}</button>
-          <button type="button" class="btn btn-secondary min-h-11" :disabled="settling" @click="copyTransfer">
+          <button type="button" class="btn btn-secondary min-h-11 w-full sm:w-auto" :disabled="settling" @click="closeTransfer">{{ t('common.cancel') }}</button>
+          <button type="button" class="btn btn-secondary min-h-11 w-full sm:w-auto" :disabled="settling" @click="copyTransfer">
             <Icon name="copy" size="sm" />
             {{ t('admin.sharedPool.settlement.copyTransfer') }}
           </button>
           <button
             type="button"
-            class="btn btn-primary min-h-11"
+            class="btn btn-primary min-h-11 w-full sm:w-auto"
             :disabled="!settlementId || status === 'paid' || settling || activeTransfer?.payment_status === 'paid'"
             @click="settleTransfer"
           >
