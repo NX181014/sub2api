@@ -947,27 +947,31 @@ func accountRestrictedPredicate(now time.Time) dbpredicate.Account {
 	)
 }
 
-func accountEffectivelySchedulablePredicate(now time.Time) dbpredicate.Account {
-	return dbaccount.And(
-		dbaccount.StatusEQ(service.StatusActive),
-		dbaccount.SchedulableEQ(true),
-		notExpiredPredicate(now),
-		notOverloadedPredicate(now),
-		notRateLimitedPredicate(now),
-		dbaccount.Or(dbaccount.TempUnschedulableUntilIsNil(), dbaccount.TempUnschedulableUntilLTE(now)),
-		accountQuotaAvailablePredicate(),
-	)
+func accountEffectivelySchedulablePredicate(_ time.Time) dbpredicate.Account {
+	return dbpredicate.Account(func(s *entsql.Selector) {
+		s.Where(entsql.ExprP(accountEffectivelySchedulableExpression(s)))
+	})
 }
 
 func accountUsageStatusPredicate(usageStatus string, inUseAccountIDs []int64, now time.Time) dbpredicate.Account {
 	effective := accountEffectivelySchedulablePredicate(now)
+	available := dbaccount.And(effective, dbaccount.Not(accountActiveBanPredicate()))
 	notInUse := dbaccount.IDNotIn(inUseAccountIDs...)
 	switch usageStatus {
+	case service.AccountUsageStatusAll, "":
+		return nil
+	case service.AccountUsageStatusAvailable:
+		return available
 	case service.AccountUsageStatusInUse:
 		if len(inUseAccountIDs) == 0 {
 			return dbaccount.IDEQ(-1)
 		}
-		return dbaccount.And(effective, dbaccount.IDIn(inUseAccountIDs...))
+		return dbaccount.And(available, dbaccount.IDIn(inUseAccountIDs...))
+	case service.AccountUsageStatusIdleAvailable:
+		if len(inUseAccountIDs) == 0 {
+			return available
+		}
+		return dbaccount.And(available, notInUse)
 	case service.AccountUsageStatusReady:
 		if len(inUseAccountIDs) == 0 {
 			return dbaccount.And(effective, dbaccount.LastUsedAtNotNil())
@@ -984,15 +988,94 @@ func accountUsageStatusPredicate(usageStatus string, inUseAccountIDs []int64, no
 		return dbaccount.StatusEQ(service.StatusError)
 	case service.AccountUsageStatusRestricted:
 		return accountRestrictedPredicate(now)
-	case service.AccountUsageStatusDisabled:
-		return dbaccount.And(
-			dbaccount.StatusNEQ(service.StatusError),
-			dbaccount.Not(accountRestrictedPredicate(now)),
-			dbaccount.Not(effective),
-		)
+	case service.AccountUsageStatusRateLimited,
+		service.AccountUsageStatusAuthIssue,
+		service.AccountUsageStatusBillingLimited,
+		service.AccountUsageStatusAccessLimited,
+		service.AccountUsageStatusBanned,
+		service.AccountUsageStatusOverloaded,
+		service.AccountUsageStatusTemporary,
+		service.AccountUsageStatusDisabled,
+		service.AccountUsageStatusExpiredQuota,
+		service.AccountUsageStatusOtherError:
+		return dbpredicate.Account(func(s *entsql.Selector) {
+			s.Where(entsql.ExprP(accountUsageStatusExpression(s, inUseAccountIDs)+" = ?", usageStatus))
+		})
 	default:
 		return nil
 	}
+}
+
+func accountUsageStatusExpression(s *entsql.Selector, inUseAccountIDs []int64) string {
+	status := s.C(dbaccount.FieldStatus)
+	errorText := "LOWER(COALESCE(" + s.C(dbaccount.FieldErrorMessage) + ",'') || ' ' || COALESCE(" + s.C(dbaccount.FieldTempUnschedulableReason) + ",''))"
+	effective := accountEffectivelySchedulableExpression(s)
+	inUse := "FALSE"
+	if len(inUseAccountIDs) > 0 {
+		ids := make([]string, 0, len(inUseAccountIDs))
+		for _, id := range inUseAccountIDs {
+			if id > 0 {
+				ids = append(ids, strconv.FormatInt(id, 10))
+			}
+		}
+		if len(ids) > 0 {
+			inUse = s.C(dbaccount.FieldID) + " IN (" + strings.Join(ids, ",") + ")"
+		}
+	}
+
+	has := func(values ...string) string {
+		parts := make([]string, 0, len(values))
+		for _, value := range values {
+			parts = append(parts, errorText+" LIKE '%"+value+"%'")
+		}
+		return "(" + strings.Join(parts, " OR ") + ")"
+	}
+	errorActive := "(" + status + " = '" + service.StatusError + "' OR " + s.C(dbaccount.FieldTempUnschedulableUntil) + " > NOW())"
+	activeBan := accountActiveBanExpression(s.C(dbaccount.FieldID))
+	authIssue := errorActive + " AND " + has("(401)", "oauth 401", "status 401", "invalid_grant", "invalid_refresh_token", "token_expired", "token revoked", "refresh_token missing")
+	billingLimited := errorActive + " AND " + has("(402)", "status 402", "payment required", "credit balance exhausted", "insufficient balance", "billing issue", "subscription required", "no active subscription", "entitlement_denied") +
+		" AND NOT " + has("(403)", "status 403")
+	accessLimited := errorActive + " AND " + has("(403)", "status 403", "access forbidden", "validation required", "identity verification required")
+	expiredOrQuota := "((" + s.C(dbaccount.FieldAutoPauseOnExpired) + " IS TRUE AND " + s.C(dbaccount.FieldExpiresAt) + " IS NOT NULL AND " + s.C(dbaccount.FieldExpiresAt) + " <= NOW()) OR NOT (" + accountQuotaAvailableExpression(s.C(dbaccount.FieldType), s.C(dbaccount.FieldExtra)) + "))"
+
+	return "CASE" +
+		" WHEN " + activeBan + " THEN '" + service.AccountUsageStatusBanned + "'" +
+		" WHEN " + authIssue + " THEN '" + service.AccountUsageStatusAuthIssue + "'" +
+		" WHEN " + billingLimited + " THEN '" + service.AccountUsageStatusBillingLimited + "'" +
+		" WHEN " + accessLimited + " THEN '" + service.AccountUsageStatusAccessLimited + "'" +
+		" WHEN " + status + " = '" + service.StatusError + "' THEN '" + service.AccountUsageStatusOtherError + "'" +
+		" WHEN " + status + " <> '" + service.StatusActive + "' OR " + s.C(dbaccount.FieldSchedulable) + " IS NOT TRUE THEN '" + service.AccountUsageStatusDisabled + "'" +
+		" WHEN " + expiredOrQuota + " THEN '" + service.AccountUsageStatusExpiredQuota + "'" +
+		" WHEN " + s.C(dbaccount.FieldRateLimitResetAt) + " > NOW() THEN '" + service.AccountUsageStatusRateLimited + "'" +
+		" WHEN " + s.C(dbaccount.FieldOverloadUntil) + " > NOW() THEN '" + service.AccountUsageStatusOverloaded + "'" +
+		" WHEN " + s.C(dbaccount.FieldTempUnschedulableUntil) + " > NOW() THEN '" + service.AccountUsageStatusTemporary + "'" +
+		" WHEN (" + effective + ") AND " + inUse + " THEN '" + service.AccountUsageStatusInUse + "'" +
+		" WHEN " + effective + " THEN '" + service.AccountUsageStatusIdleAvailable + "'" +
+		" ELSE '" + service.AccountUsageStatusOtherError + "' END"
+}
+
+func accountEffectivelySchedulableExpression(s *entsql.Selector) string {
+	return s.C(dbaccount.FieldStatus) + " = '" + service.StatusActive + "'" +
+		" AND " + s.C(dbaccount.FieldSchedulable) + " IS TRUE" +
+		" AND (" + s.C(dbaccount.FieldAutoPauseOnExpired) + " IS NOT TRUE OR " + s.C(dbaccount.FieldExpiresAt) + " IS NULL OR " + s.C(dbaccount.FieldExpiresAt) + " > NOW())" +
+		" AND (" + s.C(dbaccount.FieldOverloadUntil) + " IS NULL OR " + s.C(dbaccount.FieldOverloadUntil) + " <= NOW())" +
+		" AND (" + s.C(dbaccount.FieldRateLimitResetAt) + " IS NULL OR " + s.C(dbaccount.FieldRateLimitResetAt) + " <= NOW())" +
+		" AND (" + s.C(dbaccount.FieldTempUnschedulableUntil) + " IS NULL OR " + s.C(dbaccount.FieldTempUnschedulableUntil) + " <= NOW())" +
+		" AND " + accountQuotaAvailableExpression(s.C(dbaccount.FieldType), s.C(dbaccount.FieldExtra))
+}
+
+func accountActiveBanPredicate() dbpredicate.Account {
+	return dbpredicate.Account(func(s *entsql.Selector) {
+		s.Where(entsql.ExprP(accountActiveBanExpression(s.C(dbaccount.FieldID))))
+	})
+}
+
+func accountActiveBanExpression(accountID string) string {
+	return "EXISTS (SELECT 1 FROM account_lifecycle_events banned " +
+		"WHERE banned.account_id = " + accountID + " AND banned.event_type = 'banned_confirmed' " +
+		"AND NOT EXISTS (SELECT 1 FROM account_lifecycle_events recovered " +
+		"WHERE recovered.account_id = banned.account_id AND recovered.event_type = 'recovered' " +
+		"AND (recovered.occurred_at, recovered.id) > (banned.occurred_at, banned.id)))"
 }
 
 func (r *accountRepository) accountSelectionFilteredQuery(filters service.AccountSelectionFilters) *dbent.AccountQuery {
@@ -1175,27 +1258,92 @@ func (r *accountRepository) GetSelectionSummary(ctx context.Context, filters ser
 
 	usageFilters := filters
 	usageFilters.UsageStatus = ""
-	usageStatusCounts := make(map[string]int64, 8)
-	for _, usageStatus := range []string{
-		service.AccountUsageStatusInUse,
-		service.AccountUsageStatusReady,
-		service.AccountUsageStatusUnused,
-		service.AccountUsageStatusError,
-		service.AccountUsageStatusRestricted,
-		service.AccountUsageStatusDisabled,
-	} {
-		usageFilters.UsageStatus = usageStatus
-		count, countErr := r.accountSelectionFilteredQuery(usageFilters).Count(ctx)
-		if countErr != nil {
-			return nil, countErr
-		}
-		usageStatusCounts[usageStatus] = int64(count)
+	var usageRows []struct {
+		UsageStatus    string `json:"usage_status"`
+		AccountStatus  string `json:"account_status"`
+		Restricted     bool   `json:"restricted"`
+		Effective      bool   `json:"effective"`
+		LastUsedIsNull bool   `json:"last_used_is_null"`
+		Count          int64  `json:"count"`
 	}
-	usageStatusCounts[service.AccountUsageStatusAttention] = usageStatusCounts[service.AccountUsageStatusError] +
-		usageStatusCounts[service.AccountUsageStatusRestricted] + usageStatusCounts[service.AccountUsageStatusDisabled]
-	usageStatusCounts["all"] = usageStatusCounts[service.AccountUsageStatusInUse] +
-		usageStatusCounts[service.AccountUsageStatusReady] + usageStatusCounts[service.AccountUsageStatusUnused] +
-		usageStatusCounts[service.AccountUsageStatusAttention]
+	err = r.accountSelectionFilteredQuery(usageFilters).
+		Aggregate(
+			dbent.As(func(s *entsql.Selector) string {
+				expression := accountUsageStatusExpression(s, usageFilters.InUseAccountIDs)
+				s.GroupBy(expression)
+				return expression
+			}, "usage_status"),
+			dbent.As(func(s *entsql.Selector) string {
+				expression := s.C(dbaccount.FieldStatus)
+				s.GroupBy(expression)
+				return expression
+			}, "account_status"),
+			dbent.As(func(s *entsql.Selector) string {
+				expression := accountRestrictedExpression(s)
+				s.GroupBy(expression)
+				return expression
+			}, "restricted"),
+			dbent.As(func(s *entsql.Selector) string {
+				expression := accountEffectivelySchedulableExpression(s)
+				s.GroupBy(expression)
+				return expression
+			}, "effective"),
+			dbent.As(func(s *entsql.Selector) string {
+				expression := s.C(dbaccount.FieldLastUsedAt) + " IS NULL"
+				s.GroupBy(expression)
+				return expression
+			}, "last_used_is_null"),
+			dbent.As(dbent.Count(), "count"),
+		).
+		Scan(ctx, &usageRows)
+	if err != nil {
+		return nil, err
+	}
+	usageStatusCounts := map[string]int64{
+		service.AccountUsageStatusAll:            0,
+		service.AccountUsageStatusAvailable:      0,
+		service.AccountUsageStatusInUse:          0,
+		service.AccountUsageStatusIdleAvailable:  0,
+		service.AccountUsageStatusRateLimited:    0,
+		service.AccountUsageStatusAuthIssue:      0,
+		service.AccountUsageStatusBillingLimited: 0,
+		service.AccountUsageStatusAccessLimited:  0,
+		service.AccountUsageStatusBanned:         0,
+		service.AccountUsageStatusOverloaded:     0,
+		service.AccountUsageStatusTemporary:      0,
+		service.AccountUsageStatusDisabled:       0,
+		service.AccountUsageStatusExpiredQuota:   0,
+		service.AccountUsageStatusOtherError:     0,
+		service.AccountUsageStatusReady:          0,
+		service.AccountUsageStatusUnused:         0,
+		service.AccountUsageStatusAttention:      0,
+		service.AccountUsageStatusError:          0,
+		service.AccountUsageStatusRestricted:     0,
+	}
+	for _, row := range usageRows {
+		usageStatusCounts[row.UsageStatus] += row.Count
+		usageStatusCounts[service.AccountUsageStatusAll] += row.Count
+		if row.UsageStatus == service.AccountUsageStatusInUse || row.UsageStatus == service.AccountUsageStatusIdleAvailable {
+			usageStatusCounts[service.AccountUsageStatusAvailable] += row.Count
+		}
+		if row.Effective {
+			if row.UsageStatus != service.AccountUsageStatusInUse {
+				legacyStatus := service.AccountUsageStatusReady
+				if row.LastUsedIsNull {
+					legacyStatus = service.AccountUsageStatusUnused
+				}
+				usageStatusCounts[legacyStatus] += row.Count
+			}
+		} else {
+			usageStatusCounts[service.AccountUsageStatusAttention] += row.Count
+		}
+		if row.AccountStatus == service.StatusError {
+			usageStatusCounts[service.AccountUsageStatusError] += row.Count
+		}
+		if row.Restricted {
+			usageStatusCounts[service.AccountUsageStatusRestricted] += row.Count
+		}
+	}
 	return &service.AccountSelectionSummary{
 		Total: int64(total), Platforms: platforms, Types: types,
 		TypeCounts: typeCounts, SubscriptionTierCounts: subscriptionTierCounts, UsageStatusCounts: usageStatusCounts,
@@ -3482,34 +3630,35 @@ func notRateLimitedPredicate(now time.Time) dbpredicate.Account {
 
 func accountQuotaAvailablePredicate() dbpredicate.Account {
 	return dbpredicate.Account(func(s *entsql.Selector) {
-		accountType := s.C(dbaccount.FieldType)
-		extra := s.C(dbaccount.FieldExtra)
-		safeValue := func(key, valueType, fallback string) string {
-			raw := extra + "->>'" + key + "'"
-			return "CASE WHEN pg_input_is_valid(" + raw + ",'" + valueType + "') THEN (" + raw + ")::" + valueType + " ELSE " + fallback + " END"
-		}
-		value := func(key string) string { return safeValue(key, "numeric", "0") }
-		expired := func(kind, interval string) string {
-			mode := "COALESCE(" + extra + "->>'quota_" + kind + "_reset_mode','rolling')"
-			resetAt := safeValue("quota_"+kind+"_reset_at", "timestamptz", "'1970-01-01'::timestamptz")
-			start := safeValue("quota_"+kind+"_start", "timestamptz", "'1970-01-01'::timestamptz")
-			return "(CASE WHEN " + mode + "='fixed' THEN NOW()>=" + resetAt + " ELSE " + start + "+'" + interval + "'::interval<=NOW() END)"
-		}
-		dailyExpired := expired("daily", "24 hours")
-		weeklyExpired := expired("weekly", "168 hours")
-		exceeded := "(" + value("quota_limit") + ">0 AND " + value("quota_used") + ">=" + value("quota_limit") + ")" +
-			" OR (" + value("quota_daily_limit") + ">0 AND NOT " + dailyExpired + " AND " + value("quota_daily_used") + ">=" + value("quota_daily_limit") + ")" +
-			" OR (" + value("quota_weekly_limit") + ">0 AND NOT " + weeklyExpired + " AND " + value("quota_weekly_used") + ">=" + value("quota_weekly_limit") + ")"
-		s.Where(entsql.P(func(b *entsql.Builder) {
-			b.WriteString("NOT (").
-				Ident(accountType).
-				WriteString(" IN (").
-				Args(service.AccountTypeAPIKey, service.AccountTypeBedrock).
-				WriteString(") AND (").
-				WriteString(exceeded).
-				WriteString("))")
-		}))
+		s.Where(entsql.ExprP(accountQuotaAvailableExpression(s.C(dbaccount.FieldType), s.C(dbaccount.FieldExtra))))
 	})
+}
+
+func accountQuotaAvailableExpression(accountType, extra string) string {
+	safeValue := func(key, valueType, fallback string) string {
+		raw := extra + "->>'" + key + "'"
+		return "CASE WHEN pg_input_is_valid(" + raw + ",'" + valueType + "') THEN (" + raw + ")::" + valueType + " ELSE " + fallback + " END"
+	}
+	value := func(key string) string { return safeValue(key, "numeric", "0") }
+	expired := func(kind, interval string) string {
+		mode := "COALESCE(" + extra + "->>'quota_" + kind + "_reset_mode','rolling')"
+		resetAt := safeValue("quota_"+kind+"_reset_at", "timestamptz", "'1970-01-01'::timestamptz")
+		start := safeValue("quota_"+kind+"_start", "timestamptz", "'1970-01-01'::timestamptz")
+		return "(CASE WHEN " + mode + "='fixed' THEN NOW()>=" + resetAt + " ELSE " + start + "+'" + interval + "'::interval<=NOW() END)"
+	}
+	dailyExpired := expired("daily", "24 hours")
+	weeklyExpired := expired("weekly", "168 hours")
+	exceeded := "(" + value("quota_limit") + ">0 AND " + value("quota_used") + ">=" + value("quota_limit") + ")" +
+		" OR (" + value("quota_daily_limit") + ">0 AND NOT " + dailyExpired + " AND " + value("quota_daily_used") + ">=" + value("quota_daily_limit") + ")" +
+		" OR (" + value("quota_weekly_limit") + ">0 AND NOT " + weeklyExpired + " AND " + value("quota_weekly_used") + ">=" + value("quota_weekly_limit") + ")"
+	return "NOT (" + accountType + " IN ('" + service.AccountTypeAPIKey + "','" + service.AccountTypeBedrock + "') AND (" + exceeded + "))"
+}
+
+func accountRestrictedExpression(s *entsql.Selector) string {
+	return s.C(dbaccount.FieldStatus) + " = '" + service.StatusActive + "' AND (" +
+		"COALESCE(" + s.C(dbaccount.FieldOverloadUntil) + " > NOW(), FALSE) OR " +
+		"COALESCE(" + s.C(dbaccount.FieldRateLimitResetAt) + " > NOW(), FALSE) OR " +
+		"COALESCE(" + s.C(dbaccount.FieldTempUnschedulableUntil) + " > NOW(), FALSE))"
 }
 
 func (r *accountRepository) loadProxies(ctx context.Context, proxyIDs []int64) (map[int64]*service.Proxy, error) {

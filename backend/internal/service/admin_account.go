@@ -126,13 +126,27 @@ func AccountSubscriptionTier(platform, accountType string, credentials map[strin
 }
 
 const (
-	AccountUsageStatusInUse      = "in_use"
+	AccountUsageStatusAll            = "all"
+	AccountUsageStatusAvailable      = "available"
+	AccountUsageStatusInUse          = "in_use"
+	AccountUsageStatusIdleAvailable  = "idle_available"
+	AccountUsageStatusRateLimited    = "rate_limited"
+	AccountUsageStatusAuthIssue      = "auth_issue"
+	AccountUsageStatusBillingLimited = "billing_restricted"
+	AccountUsageStatusAccessLimited  = "access_restricted"
+	AccountUsageStatusBanned         = "banned"
+	AccountUsageStatusOverloaded     = "overloaded"
+	AccountUsageStatusTemporary      = "temporary_failure"
+	AccountUsageStatusDisabled       = "disabled"
+	AccountUsageStatusExpiredQuota   = "expired_or_quota"
+	AccountUsageStatusOtherError     = "other_error"
+
+	// Legacy aggregate filters retained for existing links and API clients.
 	AccountUsageStatusReady      = "ready"
 	AccountUsageStatusUnused     = "unused"
 	AccountUsageStatusAttention  = "attention"
 	AccountUsageStatusError      = "error"
 	AccountUsageStatusRestricted = "restricted"
-	AccountUsageStatusDisabled   = "disabled"
 )
 
 func (s *adminServiceImpl) ListAccountsBySelection(ctx context.Context, page, pageSize int, filters AccountSelectionFilters, includePoolMetrics bool, sortBy, sortOrder string) ([]Account, int64, error) {

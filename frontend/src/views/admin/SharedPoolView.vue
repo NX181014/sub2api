@@ -560,6 +560,7 @@ type WorkbenchContext = {
   search: string
   platform: string
   type: string
+  subscription_tier: string
   status: string
   group: string
   privacy_mode: string
@@ -596,9 +597,14 @@ const routeTab = (): TabKey => ['overview', 'accounts', 'ledger', 'settlement', 
   : 'accounts'
 const routeUsageStatus = (): WorkbenchUsageStatus => {
   const value = queryString('account_usage_status')
-  return ['in_use', 'ready', 'unused', 'attention', 'error', 'restricted', 'disabled'].includes(value)
+  return [
+    'all', 'available', 'in_use', 'idle_available', 'rate_limited', 'auth_issue',
+    'billing_restricted', 'access_restricted', 'banned', 'overloaded',
+    'temporary_failure', 'disabled', 'expired_or_quota', 'other_error',
+    'ready', 'unused', 'attention', 'error', 'restricted'
+  ].includes(value)
     ? value as WorkbenchUsageStatus
-    : 'all'
+    : 'available'
 }
 const initialWorkbenchContext = computed<Partial<WorkbenchContext>>(() => {
   const requestedScope = queryString('account_scope')
@@ -611,6 +617,7 @@ const initialWorkbenchContext = computed<Partial<WorkbenchContext>>(() => {
     search: queryString('account_search'),
     platform: queryString('account_platform'),
     type: queryString('account_type'),
+    subscription_tier: queryString('account_subscription_tier'),
     status: queryString('account_status'),
     usage_status: routeUsageStatus(),
     group: queryString('account_group'),
@@ -1065,8 +1072,9 @@ async function syncWorkbenchContext(context: WorkbenchContext) {
     account_search: context.search,
     account_platform: context.platform,
     account_type: context.type,
+    account_subscription_tier: context.subscription_tier,
     account_status: context.status,
-    account_usage_status: context.usage_status === 'all' ? '' : context.usage_status,
+    account_usage_status: context.usage_status,
     account_group: context.group,
     account_privacy_mode: context.privacy_mode
   })) {

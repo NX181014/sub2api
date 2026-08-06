@@ -289,7 +289,7 @@ describe('admin AccountsView bulk edit scope', () => {
       types: [],
       type_counts: {},
       subscription_tier_counts: {},
-      usage_status_counts: { all: 0, in_use: 0, ready: 0, unused: 0, attention: 0, error: 0, restricted: 0, disabled: 0 }
+      usage_status_counts: { all: 0, available: 0 }
     })
 		listImportBatch.mockResolvedValue({ items: [], total: 0, page: 1, page_size: 100, pages: 0 })
 		listUsers.mockResolvedValue({ items: [], total: 0, page: 1, page_size: 200, pages: 0 })
@@ -372,14 +372,15 @@ describe('admin AccountsView bulk edit scope', () => {
       types: ['apikey'],
       type_counts: { apikey: 3 },
       subscription_tier_counts: { plus: 3 },
-      usage_status_counts: { all: 3, in_use: 1, ready: 1, unused: 1, attention: 0, error: 0, restricted: 0, disabled: 0 }
+      usage_status_counts: { all: 3, available: 2, in_use: 1, idle_available: 1, other_error: 1 }
     })
 
     const wrapper = mountAccountsView({}, { embedded: true })
     await flushPromises()
 
+    expect(wrapper.get('[data-test="workbench-available"]').attributes('aria-current')).toBe('page')
     expect(wrapper.find('[data-test="workbench-all"]').exists()).toBe(true)
-    expect(wrapper.find('[data-test="workbench-standalone"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="workbench-standalone"]').exists()).toBe(false)
     expect(wrapper.find('[data-test="workbench-batch"]').exists()).toBe(false)
     const defaultColumnKeys = (wrapper.getComponent(DataTableStub).props('columns') as Array<{ key: string }>).map(column => column.key)
     expect(defaultColumnKeys).toEqual(['select', 'name', 'status', 'usage', 'pool_record', 'actions'])
@@ -409,9 +410,7 @@ describe('admin AccountsView bulk edit scope', () => {
     await traceButton!.trigger('click')
     expect(wrapper.emitted('trace-account')).toEqual([[42]])
 
-    await wrapper.get('[data-test="workbench-standalone"]').trigger('click')
-    await flushPromises()
-    expect(listAccounts.mock.calls.at(-1)?.[2]).toMatchObject({ import_batch_scope: 'standalone' })
+    expect(wrapper.get('[data-test="workbench-availability-summary"]').text()).toContain('admin.accounts.workbenchAvailabilitySummary')
   })
 
   it('uses one uploader-to-batch tree and keeps uploader selection explicit', async () => {
@@ -481,7 +480,13 @@ describe('admin AccountsView bulk edit scope', () => {
       types: ['apikey', 'oauth'],
       type_counts: { apikey: 3, oauth: 1 },
       subscription_tier_counts: { plus: 3, non_subscription: 1 },
-      usage_status_counts: { all: 4, in_use: 1, ready: 2, unused: 1, attention: 0, error: 0, restricted: 0, disabled: 0 }
+      usage_status_counts: {
+        all: 4,
+        available: 3,
+        in_use: 1,
+        idle_available: 2,
+        auth_issue: 1
+      }
     })
 
     const wrapper = mountAccountsView({}, { embedded: true })
@@ -492,8 +497,10 @@ describe('admin AccountsView bulk edit scope', () => {
     await flushPromises()
     await wrapper.get('[data-test="workbench-axis-usage"]').trigger('click')
     expect(wrapper.get('[data-test="workbench-axis-usage"]').attributes('aria-selected')).toBe('true')
-    await wrapper.get('[data-test="workbench-usage-ready"] .workbench-operational-main').trigger('click')
-    await wrapper.get('[data-test="workbench-usage-ready"] .workbench-scope-toggle').trigger('click')
+    expect(wrapper.find('[data-test="workbench-usage-attention"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="workbench-usage-error"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="workbench-usage-restricted"]').exists()).toBe(false)
+    await wrapper.get('[data-test="workbench-usage-auth_issue"] .workbench-operational-main').trigger('click')
     await flushPromises()
     await wrapper.get('[data-test="workbench-axis-subscription"]').trigger('click')
     await wrapper.get('[data-test="workbench-subscription-plus"] .workbench-operational-main').trigger('click')
@@ -503,13 +510,13 @@ describe('admin AccountsView bulk edit scope', () => {
     expect(listAccounts.mock.calls.at(-1)?.[2]).toMatchObject({
       uploader_user_id: 7,
       import_batch_scope: 'batched',
-      usage_status: 'ready',
+      usage_status: 'auth_issue',
       subscription_tier: 'plus'
     })
     expect(getSelectionSummary).toHaveBeenCalledWith(expect.objectContaining({
       uploader_user_id: 7,
       import_batch_scope: 'batched',
-      usage_status: 'ready',
+      usage_status: 'auth_issue',
       subscription_tier: 'plus'
     }))
     expect(wrapper.getComponent(AccountTableFiltersStub).props('filters')).toMatchObject({
@@ -524,7 +531,7 @@ describe('admin AccountsView bulk edit scope', () => {
     expect(listAccounts.mock.calls.at(-1)?.[2]).toMatchObject({
       uploader_user_id: 7,
       import_batch_scope: 'batched',
-      usage_status: 'all',
+      usage_status: 'available',
       subscription_tier: 'plus'
     })
     expect(wrapper.find('[data-test="workbench-filter-chip-usage"]').exists()).toBe(false)
@@ -626,22 +633,22 @@ describe('admin AccountsView bulk edit scope', () => {
     const wrapper = mountAccountsView({}, { embedded: true })
     await flushPromises()
 
-    expect(wrapper.get('[data-test="workbench-all"]').attributes('aria-current')).toBe('page')
-    expect(wrapper.get('[data-test="workbench-standalone"]').attributes('aria-current')).toBeUndefined()
-
-    await wrapper.get('[data-test="workbench-standalone"]').trigger('click')
-    await flushPromises()
+    expect(wrapper.get('[data-test="workbench-available"]').attributes('aria-current')).toBe('page')
     expect(wrapper.get('[data-test="workbench-all"]').attributes('aria-current')).toBeUndefined()
-    expect(wrapper.get('[data-test="workbench-standalone"]').attributes('aria-current')).toBe('page')
+
+    await wrapper.get('[data-test="workbench-all"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-test="workbench-available"]').attributes('aria-current')).toBeUndefined()
+    expect(wrapper.get('[data-test="workbench-all"]').attributes('aria-current')).toBe('page')
 
     await wrapper.get('[data-test="workbench-uploader"]').trigger('click')
     await flushPromises()
     expect(wrapper.get('[data-test="workbench-uploader"]').attributes('aria-expanded')).toBe('true')
-    expect(wrapper.get('[data-test="workbench-standalone"]').attributes('aria-current')).toBe('page')
+    expect(wrapper.get('[data-test="workbench-all"]').attributes('aria-current')).toBe('page')
     await wrapper.get('[data-test="workbench-uploader-scope"]').trigger('click')
     await flushPromises()
     expect(wrapper.get('[data-test="workbench-uploader-scope"]').attributes('aria-pressed')).toBe('true')
-    expect(wrapper.get('[data-test="workbench-standalone"]').attributes('aria-current')).toBeUndefined()
+    expect(wrapper.get('[data-test="workbench-all"]').attributes('aria-current')).toBeUndefined()
 
     await wrapper.get('[data-test="workbench-batch"] .workbench-batch-main').trigger('click')
     await flushPromises()
@@ -651,7 +658,11 @@ describe('admin AccountsView bulk edit scope', () => {
     await flushPromises()
     expect(wrapper.get('[data-test="workbench-batch-scope"]').attributes('aria-pressed')).toBe('true')
     expect(wrapper.get('[data-test="workbench-all"]').attributes('aria-current')).toBeUndefined()
-    expect(wrapper.get('[data-test="workbench-standalone"]').attributes('aria-current')).toBeUndefined()
+
+    await wrapper.get('[data-test="workbench-all"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-test="workbench-all"]').attributes('aria-current')).toBe('page')
+    expect(wrapper.emitted('workbench-context')?.at(-1)?.[0]).toMatchObject({ scope: 'all', usage_status: 'all' })
   })
 
   it('uses four display presets and keeps modules in the saved workbench order', async () => {
@@ -893,7 +904,7 @@ describe('admin AccountsView bulk edit scope', () => {
       types: ['apikey'],
       type_counts: { apikey: 7 },
       subscription_tier_counts: { plus: 7 },
-      usage_status_counts: { all: 7, in_use: 0, ready: 7, unused: 0, attention: 0, error: 0, restricted: 0, disabled: 0 }
+      usage_status_counts: { all: 7, available: 7, in_use: 0, idle_available: 7 }
     })
     const wrapper = mountAccountsView({}, { embedded: true })
     await flushPromises()

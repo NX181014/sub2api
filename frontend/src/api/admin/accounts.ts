@@ -27,12 +27,34 @@ import type {
   OllamaCloudUsageState
 } from '@/types'
 
+export type AccountUsageStatus =
+  | 'all'
+  | 'available'
+  | 'in_use'
+  | 'idle_available'
+  | 'rate_limited'
+  | 'auth_issue'
+  | 'billing_restricted'
+  | 'access_restricted'
+  | 'banned'
+  | 'overloaded'
+  | 'temporary_failure'
+  | 'disabled'
+  | 'expired_or_quota'
+  | 'other_error'
+  // Legacy values remain valid for saved URLs and API callers.
+  | 'ready'
+  | 'unused'
+  | 'attention'
+  | 'error'
+  | 'restricted'
+
 export interface AccountListFilters {
   platform?: string
   type?: string
   subscription_tier?: string
   status?: string
-  usage_status?: 'all' | 'in_use' | 'ready' | 'unused' | 'attention' | 'error' | 'restricted' | 'disabled'
+  usage_status?: AccountUsageStatus
   group?: string
   search?: string
   privacy_mode?: string
@@ -52,7 +74,7 @@ export interface AccountSelectionSummary {
   types: string[]
   type_counts: Record<string, number>
   subscription_tier_counts: Record<string, number>
-  usage_status_counts: Record<'all' | 'in_use' | 'ready' | 'unused' | 'attention' | 'error' | 'restricted' | 'disabled', number>
+  usage_status_counts: Partial<Record<AccountUsageStatus, number>>
 }
 
 export interface AccountBatchStatusSummary {

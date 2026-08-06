@@ -798,6 +798,74 @@ func (s *AccountRepoSuite) TestSelectionContractsUsageStatusAndTypeCountsAreMutu
 	)
 }
 
+func (s *AccountRepoSuite) TestSelectionContractsUsageTaxonomyUsesSameLeafForListAndSummary() {
+	now := time.Now().UTC()
+	future := now.Add(time.Hour)
+	past := now.Add(-time.Hour)
+	inUse := mustCreateAccount(s.T(), s.client, &service.Account{Name: "usage-taxonomy-in-use"})
+	mustCreateAccount(s.T(), s.client, &service.Account{Name: "usage-taxonomy-idle"})
+	mustCreateAccount(s.T(), s.client, &service.Account{Name: "usage-taxonomy-rate", RateLimitResetAt: &future})
+	mustCreateAccount(s.T(), s.client, &service.Account{Name: "usage-taxonomy-overloaded", OverloadUntil: &future})
+	auth := mustCreateAccount(s.T(), s.client, &service.Account{Name: "usage-taxonomy-auth"})
+	temporary := mustCreateAccount(s.T(), s.client, &service.Account{Name: "usage-taxonomy-temporary"})
+	mustCreateAccount(s.T(), s.client, &service.Account{Name: "usage-taxonomy-billing", Status: service.StatusError, ErrorMessage: "Payment required (402): insufficient balance"})
+	mustCreateAccount(s.T(), s.client, &service.Account{Name: "usage-taxonomy-access", Status: service.StatusError, ErrorMessage: "Access forbidden (403): verification required"})
+	banned := mustCreateAccount(s.T(), s.client, &service.Account{Name: "usage-taxonomy-banned", ErrorMessage: "Access forbidden (403): account suspended"})
+	disabled := mustCreateAccount(s.T(), s.client, &service.Account{Name: "usage-taxonomy-disabled"})
+	expired := mustCreateAccount(s.T(), s.client, &service.Account{Name: "usage-taxonomy-expired"})
+	mustCreateAccount(s.T(), s.client, &service.Account{Name: "usage-taxonomy-other", Status: service.StatusError, ErrorMessage: "Custom error code triggered"})
+
+	_, err := s.tx.ExecContext(s.ctx, `UPDATE accounts SET temp_unschedulable_until=$1,temp_unschedulable_reason='OAuth 401: invalid credentials' WHERE id=$2`, future, auth.ID)
+	s.Require().NoError(err)
+	_, err = s.tx.ExecContext(s.ctx, `UPDATE accounts SET temp_unschedulable_until=$1,temp_unschedulable_reason='proxy transport failure' WHERE id=$2`, future, temporary.ID)
+	s.Require().NoError(err)
+	_, err = s.tx.ExecContext(s.ctx, `UPDATE accounts SET schedulable=FALSE WHERE id=$1`, disabled.ID)
+	s.Require().NoError(err)
+	_, err = s.tx.ExecContext(s.ctx, `UPDATE accounts SET expires_at=$1,auto_pause_on_expired=TRUE WHERE id=$2`, past, expired.ID)
+	s.Require().NoError(err)
+	_, err = s.tx.ExecContext(s.ctx, `INSERT INTO account_lifecycle_events(account_id,event_type,occurred_at,reason,source) VALUES($1,'banned_confirmed',$2,'confirmed','automatic')`, banned.ID, now)
+	s.Require().NoError(err)
+
+	base := service.AccountSelectionFilters{Search: "usage-taxonomy-", InUseAccountIDs: []int64{inUse.ID}}
+	wantNames := map[string]string{
+		service.AccountUsageStatusInUse:          "usage-taxonomy-in-use",
+		service.AccountUsageStatusIdleAvailable:  "usage-taxonomy-idle",
+		service.AccountUsageStatusRateLimited:    "usage-taxonomy-rate",
+		service.AccountUsageStatusAuthIssue:      "usage-taxonomy-auth",
+		service.AccountUsageStatusBillingLimited: "usage-taxonomy-billing",
+		service.AccountUsageStatusAccessLimited:  "usage-taxonomy-access",
+		service.AccountUsageStatusBanned:         "usage-taxonomy-banned",
+		service.AccountUsageStatusOverloaded:     "usage-taxonomy-overloaded",
+		service.AccountUsageStatusTemporary:      "usage-taxonomy-temporary",
+		service.AccountUsageStatusDisabled:       "usage-taxonomy-disabled",
+		service.AccountUsageStatusExpiredQuota:   "usage-taxonomy-expired",
+		service.AccountUsageStatusOtherError:     "usage-taxonomy-other",
+	}
+	for usageStatus, expectedName := range wantNames {
+		filters := base
+		filters.UsageStatus = usageStatus
+		accounts, page, listErr := s.repo.ListWithSelectionFilters(s.ctx, pagination.PaginationParams{Page: 1, PageSize: 20}, filters, false)
+		s.Require().NoError(listErr, usageStatus)
+		s.Require().Equal(int64(1), page.Total, usageStatus)
+		s.Require().Equal(expectedName, accounts[0].Name, usageStatus)
+	}
+
+	available := base
+	available.UsageStatus = service.AccountUsageStatusAvailable
+	accounts, page, err := s.repo.ListWithSelectionFilters(s.ctx, pagination.PaginationParams{Page: 1, PageSize: 20}, available, false)
+	s.Require().NoError(err)
+	s.Require().Equal(int64(2), page.Total)
+	s.Require().ElementsMatch([]string{"usage-taxonomy-in-use", "usage-taxonomy-idle"}, []string{accounts[0].Name, accounts[1].Name})
+
+	summary, err := s.repo.GetSelectionSummary(s.ctx, base)
+	s.Require().NoError(err)
+	s.Require().Equal(int64(len(wantNames)), summary.UsageStatusCounts[service.AccountUsageStatusAll])
+	s.Require().Equal(int64(2), summary.UsageStatusCounts[service.AccountUsageStatusAvailable])
+	for usageStatus := range wantNames {
+		s.Require().Equal(int64(1), summary.UsageStatusCounts[usageStatus], usageStatus)
+	}
+}
+
 func (s *AccountRepoSuite) TestListByGroup() {
 	group := mustCreateGroup(s.T(), s.client, &service.Group{Name: "g-list"})
 	acc1 := mustCreateAccount(s.T(), s.client, &service.Account{Name: "a1", Status: service.StatusActive})

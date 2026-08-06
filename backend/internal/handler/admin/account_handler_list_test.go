@@ -182,6 +182,27 @@ func TestAccountHandlerRejectsInvalidUsageStatus(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
+func TestAccountHandlerAcceptsConcreteUsageStatuses(t *testing.T) {
+	for _, usageStatus := range []string{
+		service.AccountUsageStatusAvailable,
+		service.AccountUsageStatusIdleAvailable,
+		service.AccountUsageStatusRateLimited,
+		service.AccountUsageStatusAuthIssue,
+		service.AccountUsageStatusBillingLimited,
+		service.AccountUsageStatusAccessLimited,
+		service.AccountUsageStatusBanned,
+		service.AccountUsageStatusOverloaded,
+		service.AccountUsageStatusTemporary,
+		service.AccountUsageStatusExpiredQuota,
+		service.AccountUsageStatusOtherError,
+	} {
+		normalized, valid := normalizeAccountUsageStatus(usageStatus)
+		require.True(t, valid, usageStatus)
+		require.Equal(t, usageStatus, normalized)
+	}
+	require.True(t, usageStatusNeedsRuntime(service.AccountUsageStatusIdleAvailable))
+}
+
 func TestAccountHandlerSelectionSummaryFiltersUnassignedUploader(t *testing.T) {
 	router, adminSvc := setupAccountListRouter()
 

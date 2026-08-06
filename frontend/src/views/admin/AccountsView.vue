@@ -94,20 +94,11 @@
               <div class="mb-2 flex items-center justify-between gap-3">
                 <div class="min-w-0">
                   <h2 id="workbench-navigator-title" class="text-sm font-semibold text-gray-900 dark:text-white">{{ t('admin.accounts.workbenchNavigatorTitle') }}</h2>
-                  <button
-                    type="button"
-                    class="mt-1 flex min-h-11 max-w-full items-center gap-1.5 text-left text-xs text-gray-500 hover:text-primary-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 dark:text-gray-400 dark:hover:text-primary-300"
-                    @click="focusWorkbenchUsageStatus('attention')"
-                  >
-                    <Icon name="exclamationTriangle" size="sm" class="shrink-0 text-amber-500" />
-                    <span class="truncate">{{ t('admin.accounts.workbenchAttentionCount', { count: workbenchUsageStatusCount('attention') }) }}</span>
-                    <Icon name="arrowRight" size="xs" class="shrink-0" />
-                  </button>
+                  <p data-test="workbench-availability-summary" class="mt-1 truncate text-xs tabular-nums text-gray-500 dark:text-gray-400">
+                    {{ t('admin.accounts.workbenchAvailabilitySummary', { available: workbenchUsageStatusCount('available'), total: workbenchUsageStatusCount('all') }) }}
+                  </p>
                 </div>
-                <span class="flex items-center gap-2">
-                  <span class="text-xs tabular-nums text-gray-500 dark:text-gray-400">
-                    {{ t('admin.accounts.workbenchBatchCount', { count: workbenchBatchTotal }) }}
-                  </span>
+                <span class="flex items-center">
                   <button
                     type="button"
                     data-test="workbench-mobile-toggle"
@@ -148,20 +139,21 @@
             </div>
             <div class="workbench-navigator-list">
               <section v-show="activeWorkbenchAxis === 'source'" class="workbench-axis" aria-labelledby="workbench-source-axis">
-                <h3 id="workbench-source-axis" class="workbench-axis-title">{{ t('admin.accounts.workbenchSourceAxis') }}</h3>
-                <button type="button" data-test="workbench-all" :aria-current="workbenchScope === 'all' ? 'page' : undefined" :class="['workbench-nav-item', workbenchScope === 'all' ? 'workbench-nav-item-active' : '']" @click="selectWorkbenchScope('all')">
+                <h3 id="workbench-source-axis" class="workbench-axis-title">{{ t('admin.accounts.workbenchAccountRange') }}</h3>
+                <button type="button" data-test="workbench-available" :aria-current="workbenchScope === 'all' && selectedWorkbenchUsageStatus === 'available' ? 'page' : undefined" :class="['workbench-nav-item', workbenchScope === 'all' && selectedWorkbenchUsageStatus === 'available' ? 'workbench-nav-item-active' : '']" @click="selectWorkbenchAccountRange('available')">
+                  <Icon name="checkCircle" size="sm" class="shrink-0 text-emerald-500" />
+                  <span class="truncate font-medium">{{ workbenchUsageStatusLabel('available') }}</span>
+                  <span class="workbench-nav-count">{{ workbenchUsageStatusCount('available') }}</span>
+                  <Icon v-if="workbenchScope === 'all' && selectedWorkbenchUsageStatus === 'available'" name="check" size="sm" class="workbench-nav-check" />
+                </button>
+                <button type="button" data-test="workbench-all" :aria-current="workbenchScope === 'all' && selectedWorkbenchUsageStatus === 'all' ? 'page' : undefined" :class="['workbench-nav-item', workbenchScope === 'all' && selectedWorkbenchUsageStatus === 'all' ? 'workbench-nav-item-active' : '']" @click="selectWorkbenchAccountRange('all')">
                   <Icon name="grid" size="sm" class="shrink-0 text-gray-400" />
                   <span class="truncate font-medium">{{ t('admin.sharedPool.ledger.allAccounts') }}</span>
-                  <span class="workbench-nav-count">{{ workbenchAccountTotal }}</span>
-                  <Icon v-if="workbenchScope === 'all'" name="check" size="sm" class="workbench-nav-check" />
-                </button>
-                <button type="button" data-test="workbench-standalone" :aria-current="workbenchScope === 'standalone' ? 'page' : undefined" :class="['workbench-nav-item', workbenchScope === 'standalone' ? 'workbench-nav-item-active' : '']" @click="selectWorkbenchScope('standalone')">
-                  <Icon name="user" size="sm" class="shrink-0 text-gray-400" />
-                  <span class="truncate font-medium">{{ t('admin.accounts.standaloneImport') }}</span>
-                  <span class="workbench-nav-count">{{ workbenchStandaloneCount }}</span>
-                  <Icon v-if="workbenchScope === 'standalone'" name="check" size="sm" class="workbench-nav-check" />
+                  <span class="workbench-nav-count">{{ workbenchUsageStatusCount('all') }}</span>
+                  <Icon v-if="workbenchScope === 'all' && selectedWorkbenchUsageStatus === 'all'" name="check" size="sm" class="workbench-nav-check" />
                 </button>
 
+                <h3 class="workbench-axis-title mt-3">{{ t('admin.accounts.workbenchUploaderAndBatch') }}</h3>
                 <div v-for="group in filteredWorkbenchUploaderGroups" :key="String(group.id)" class="workbench-uploader-group">
                   <div :class="[
                     'workbench-uploader-row',
@@ -221,10 +213,6 @@
                         <Icon name="upload" size="sm" />
                         <span>{{ t('admin.accounts.dataImport') }}</span>
                       </button>
-                      <button type="button" :title="workbenchUsageStatusLabel('attention')" @click="focusWorkbenchUsageStatus('attention')">
-                        <Icon name="exclamationTriangle" size="sm" />
-                        <span>{{ workbenchUploaderAttentionCount(group) }}</span>
-                      </button>
                     </div>
                     <div class="workbench-uploader-batches">
                     <div
@@ -279,28 +267,22 @@
               </section>
 
               <section v-show="activeWorkbenchAxis === 'usage'" class="workbench-axis" aria-labelledby="workbench-usage-axis">
-                <h3 id="workbench-usage-axis" class="workbench-axis-title">{{ t('admin.accounts.workbenchUsageAxis') }}</h3>
-                <div
-                  v-for="status in workbenchOperationalUsageStatuses"
-                  :key="status"
-                  :data-test="`workbench-usage-${status}`"
-                  :class="['workbench-operational-row', focusedWorkbenchUsageStatus === status ? 'workbench-focus-active' : '', selectedWorkbenchUsageStatus === status ? 'workbench-scope-active' : '']"
-                >
-                  <button type="button" class="workbench-operational-main" @click="focusWorkbenchUsageStatus(status)">
-                    <Icon :name="workbenchUsageStatusIcon(status)" size="sm" :class="workbenchUsageStatusIconClass(status)" />
-                    <span class="min-w-0 flex-1 truncate font-medium">{{ workbenchUsageStatusLabel(status) }}</span>
-                  </button>
-                  <span class="workbench-nav-count">{{ workbenchUsageStatusCount(status) }}</span>
-                  <button
-                    type="button"
-                    class="workbench-scope-toggle"
-                    :class="selectedWorkbenchUsageStatus === status ? 'workbench-scope-toggle-active' : ''"
-                    :aria-pressed="selectedWorkbenchUsageStatus === status"
-                    :aria-label="workbenchUsageStatusLabel(status)"
-                    @click="selectWorkbenchUsageStatus(status)"
+                <h3 id="workbench-usage-axis" class="sr-only">{{ t('admin.accounts.workbenchUsageAxis') }}</h3>
+                <div v-for="group in workbenchOperationalUsageGroups" :key="group.label" class="workbench-status-group">
+                  <h4 class="workbench-axis-title">{{ t(group.label) }}</h4>
+                  <div
+                    v-for="status in group.statuses"
+                    :key="status"
+                    :data-test="`workbench-usage-${status}`"
+                    :class="['workbench-operational-row', selectedWorkbenchUsageStatus === status ? 'workbench-scope-active' : '']"
                   >
-                    <Icon :name="selectedWorkbenchUsageStatus === status ? 'check' : 'plus'" size="sm" />
-                  </button>
+                    <button type="button" class="workbench-operational-main" @click="selectWorkbenchUsageStatus(status)">
+                      <Icon :name="workbenchUsageStatusIcon(status)" size="sm" :class="workbenchUsageStatusIconClass(status)" />
+                      <span class="min-w-0 flex-1 truncate font-medium">{{ workbenchUsageStatusLabel(status) }}</span>
+                      <span class="workbench-nav-count">{{ workbenchUsageStatusCount(status) }}</span>
+                      <Icon v-if="selectedWorkbenchUsageStatus === status" name="check" size="sm" class="workbench-nav-check" />
+                    </button>
+                  </div>
                 </div>
               </section>
 
@@ -1428,6 +1410,7 @@ const props = withDefaults(defineProps<{
   initialWorkbenchContext: () => ({})
 })
 const embedded = props.embedded
+const defaultWorkbenchUsageStatus: WorkbenchUsageStatus = embedded ? 'available' : 'all'
 const emit = defineEmits<{
   'pool-record': [account: Account]
   'trace-account': [accountId: number]
@@ -1461,7 +1444,6 @@ const focusedWorkbenchBatchID = ref(selectedWorkbenchBatchID.value)
 const workbenchBatches = ref<AccountImportBatchSummary[]>([])
 const workbenchAxes: WorkbenchAxis[] = ['source', 'usage', 'subscription']
 const activeWorkbenchAxis = ref<WorkbenchAxis>('source')
-const focusedWorkbenchUsageStatus = ref<WorkbenchUsageStatus>('attention')
 const focusedWorkbenchSubscriptionTier = ref('')
 const workbenchNavigatorSearch = ref('')
 const expandedWorkbenchUploaders = ref(new Set<string>(
@@ -1473,23 +1455,12 @@ const workbenchFacetSummary = ref<AccountSelectionSummary>({
   types: [],
   type_counts: {},
   subscription_tier_counts: {},
-  usage_status_counts: {
-    all: 0,
-    in_use: 0,
-    ready: 0,
-    unused: 0,
-    attention: 0,
-    error: 0,
-    restricted: 0,
-    disabled: 0
-  }
+  usage_status_counts: {}
 })
 const mobileWorkbenchNavigatorExpanded = ref(false)
 const workbenchSidebarRef = ref<HTMLElement | null>(null)
 const workbenchNavigatorLoading = ref(false)
 const workbenchNavigatorLoadingMore = ref(false)
-const workbenchAccountTotal = ref(0)
-const workbenchStandaloneCount = ref(0)
 const workbenchBatchTotal = ref(0)
 const workbenchBatchPage = ref(1)
 const workbenchBatchPages = ref(1)
@@ -2173,7 +2144,7 @@ const {
     type: props.initialWorkbenchContext.type || '',
     subscription_tier: props.initialWorkbenchContext.subscription_tier || '',
     status: embedded ? '' : props.initialWorkbenchContext.status || '',
-    usage_status: props.initialWorkbenchContext.usage_status || 'all',
+    usage_status: props.initialWorkbenchContext.usage_status || defaultWorkbenchUsageStatus,
     privacy_mode: props.initialWorkbenchContext.privacy_mode || '',
     uploader_user_id: '',
     group: props.initialWorkbenchContext.group || '',
@@ -2189,7 +2160,7 @@ const accountTableFilterParams = computed(() => embedded
   : params
 )
 const selectedWorkbenchUsageStatus = computed<WorkbenchUsageStatus>(() =>
-  (params.usage_status || 'all') as WorkbenchUsageStatus
+  (params.usage_status || defaultWorkbenchUsageStatus) as WorkbenchUsageStatus
 )
 if (embedded) {
   pagination.page = Math.max(1, Number(props.initialWorkbenchContext.page || 1))
@@ -2426,24 +2397,39 @@ const filteredWorkbenchUploaderGroups = computed<WorkbenchUploaderGroup[]>(() =>
     .filter(group => group.batches.length > 0)
 })
 const workbenchNavigatorResultCount = computed(() => filteredWorkbenchUploaderGroups.value.length)
-const workbenchAttentionUsageStatuses: WorkbenchUsageStatus[] = ['error', 'restricted', 'disabled']
-const workbenchOperationalUsageStatuses: WorkbenchUsageStatus[] = ['attention', ...workbenchAttentionUsageStatuses, 'ready', 'in_use', 'unused', 'all']
+const workbenchOperationalUsageGroups: Array<{ label: string; statuses: WorkbenchUsageStatus[] }> = [
+  {
+    label: 'admin.accounts.workbenchUsageGroupNormal',
+    statuses: ['available', 'in_use', 'idle_available']
+  },
+  {
+    label: 'admin.accounts.workbenchUsageGroupRestricted',
+    statuses: ['rate_limited', 'auth_issue', 'billing_restricted', 'access_restricted', 'overloaded', 'temporary_failure']
+  },
+  {
+    label: 'admin.accounts.workbenchUsageGroupStopped',
+    statuses: ['banned', 'disabled', 'expired_or_quota', 'other_error']
+  }
+]
 const workbenchUsageStatusLabel = (status: WorkbenchUsageStatus) => t(`admin.accounts.workbenchUsageStatus.${status}`)
-const workbenchUsageStatusIcon = (status: WorkbenchUsageStatus): 'exclamationTriangle' | 'xCircle' | 'ban' | 'checkCircle' | 'play' | 'clock' | 'grid' => {
-  if (status === 'attention') return 'exclamationTriangle'
-  if (status === 'error') return 'xCircle'
-  if (status === 'restricted' || status === 'disabled') return 'ban'
-  if (status === 'ready') return 'checkCircle'
+const workbenchUsageStatusIcon = (status: WorkbenchUsageStatus): 'exclamationTriangle' | 'xCircle' | 'ban' | 'checkCircle' | 'play' | 'clock' | 'key' | 'creditCard' | 'lock' | 'bolt' => {
+  if (status === 'available') return 'checkCircle'
   if (status === 'in_use') return 'play'
-  if (status === 'unused') return 'clock'
-  return 'grid'
+  if (status === 'idle_available' || status === 'rate_limited' || status === 'expired_or_quota') return 'clock'
+  if (status === 'auth_issue') return 'key'
+  if (status === 'billing_restricted') return 'creditCard'
+  if (status === 'access_restricted') return 'lock'
+  if (status === 'banned' || status === 'disabled') return 'ban'
+  if (status === 'overloaded') return 'bolt'
+  if (status === 'temporary_failure') return 'exclamationTriangle'
+  return 'xCircle'
 }
-const workbenchUsageStatusIconClass = (status: WorkbenchUsageStatus) =>
-  workbenchAttentionUsageStatuses.includes(status) || status === 'attention'
-    ? 'shrink-0 text-amber-500'
-    : status === 'ready'
-      ? 'shrink-0 text-emerald-500'
-      : 'shrink-0 text-gray-400'
+const workbenchUsageStatusIconClass = (status: WorkbenchUsageStatus) => {
+  if (['available', 'in_use', 'idle_available'].includes(status)) return 'shrink-0 text-emerald-500'
+  if (['rate_limited', 'auth_issue', 'billing_restricted', 'access_restricted', 'overloaded', 'temporary_failure'].includes(status)) return 'shrink-0 text-amber-500'
+  if (status === 'disabled') return 'shrink-0 text-gray-400'
+  return 'shrink-0 text-red-500'
+}
 const workbenchAxisLabel = (axis: WorkbenchAxis) => t(`admin.accounts.workbench${axis[0]!.toUpperCase()}${axis.slice(1)}Axis`)
 const workbenchUsageStatusCount = (status: WorkbenchUsageStatus) =>
   workbenchFacetSummary.value.usage_status_counts?.[status] ?? (status === 'all' ? workbenchFacetSummary.value.total : 0)
@@ -2513,7 +2499,7 @@ const workbenchFilterChips = computed<Array<{ axis: WorkbenchAxis; label: string
         : selectedWorkbenchBatch.value?.names.join('、') || selectedWorkbenchBatchID.value
     chips.push({ axis: 'source', label: workbenchAxisLabel('source'), value: source })
   }
-  if (selectedWorkbenchUsageStatus.value !== 'all') {
+  if (selectedWorkbenchUsageStatus.value !== defaultWorkbenchUsageStatus) {
     chips.push({ axis: 'usage', label: workbenchAxisLabel('usage'), value: workbenchUsageStatusLabel(selectedWorkbenchUsageStatus.value) })
   }
   if (params.subscription_tier) {
@@ -2525,7 +2511,9 @@ const workbenchTitle = computed(() => {
   if (workbenchScope.value === 'standalone') return t('admin.accounts.standaloneImport')
   if (workbenchScope.value === 'uploader') return selectedWorkbenchUploader.value?.label || t('admin.sharedPool.ledger.allUploaders')
   if (workbenchScope.value === 'batch') return selectedWorkbenchBatch.value?.names.join('、') || t('admin.accounts.importBatchGroup')
-  return t('admin.sharedPool.ledger.allAccounts')
+  return selectedWorkbenchUsageStatus.value === 'available'
+    ? workbenchUsageStatusLabel('available')
+    : t('admin.sharedPool.ledger.allAccounts')
 })
 const workbenchSubtitle = computed(() => {
   const batch = selectedWorkbenchBatch.value
@@ -2562,23 +2550,15 @@ const loadWorkbenchNavigator = async () => {
     const summaryFilters = { ...filters } as Record<string, unknown>
     delete summaryFilters.import_batch_scope
     summaryFilters.search = String(params.search || '')
-    const summaryPromise = adminAPI.accounts.getSelectionSummary(summaryFilters)
     const facetFilters = workbenchRequestFilters(summaryFilters)
     if (workbenchScope.value === 'batch' && selectedWorkbenchBatchID.value) {
       facetFilters.import_batch_id = selectedWorkbenchBatchID.value
     } else if (workbenchScope.value === 'standalone') {
       facetFilters.import_batch_scope = 'standalone'
     }
-    const facetPromise = workbenchScope.value === 'all'
-      ? summaryPromise
-      : adminAPI.accounts.getSelectionSummary(facetFilters)
-    const standalonePromise = workbenchScope.value === 'standalone'
-      ? facetPromise
-      : adminAPI.accounts.getSelectionSummary({ ...summaryFilters, import_batch_scope: 'standalone' })
-    const [result, summary, standalone, facets] = await Promise.all([
+    const facetPromise = adminAPI.accounts.getSelectionSummary(facetFilters)
+    const [result, facets] = await Promise.all([
       adminAPI.accounts.listRows(1, 100, filters),
-      summaryPromise,
-      standalonePromise,
       facetPromise
     ])
     if (revision !== workbenchNavigatorRevision) return
@@ -2619,8 +2599,6 @@ const loadWorkbenchNavigator = async () => {
     if (revision !== workbenchNavigatorRevision) return
     workbenchBatches.value = batches
     workbenchFacetSummary.value = facets || workbenchFacetSummary.value
-    workbenchAccountTotal.value = summary?.total ?? 0
-    workbenchStandaloneCount.value = standalone?.total ?? 0
     workbenchBatchTotal.value = result.total
     workbenchBatchPage.value = result.page
     workbenchBatchPages.value = Math.max(1, result.pages || 1)
@@ -2673,19 +2651,33 @@ const emitWorkbenchContext = () => emit('workbench-context', {
   sort_by: sortState.sort_by,
   sort_order: sortState.sort_order
 })
-const focusWorkbenchUsageStatus = (status: WorkbenchUsageStatus) => {
-  activeWorkbenchAxis.value = 'usage'
-  focusedWorkbenchUsageStatus.value = status
-}
 const focusWorkbenchSubscription = (tier: string) => {
   focusedWorkbenchSubscriptionTier.value = tier
 }
 const selectWorkbenchUsageStatus = (status: WorkbenchUsageStatus) => {
   if (selectedWorkbenchUsageStatus.value === status) {
-    if (status === 'all') return
-    status = 'all'
+    if (status === defaultWorkbenchUsageStatus) return
+    status = defaultWorkbenchUsageStatus
   }
-  focusWorkbenchUsageStatus(status)
+  activeWorkbenchAxis.value = 'usage'
+  params.usage_status = status
+  clearSelection()
+  pagination.page = 1
+  closeMobileWorkbenchNavigator()
+  emitWorkbenchContext()
+  void reload()
+}
+const selectWorkbenchAccountRange = (status: 'available' | 'all') => {
+  if (workbenchScope.value === 'all' && selectedWorkbenchUsageStatus.value === status) {
+    closeMobileWorkbenchNavigator()
+    return
+  }
+  workbenchScope.value = 'all'
+  selectedWorkbenchBatchID.value = ''
+  selectedWorkbenchUploaderID.value = ''
+  focusedWorkbenchBatchID.value = ''
+  focusedWorkbenchUploaderID.value = ''
+  expandedWorkbenchUploaders.value = new Set()
   params.usage_status = status
   clearSelection()
   pagination.page = 1
@@ -2831,7 +2823,7 @@ const selectWorkbenchBatch = (batch: AccountImportBatchSummary) => {
 }
 const clearWorkbenchFilterChip = (axis: WorkbenchAxis) => {
   if (axis === 'source') selectWorkbenchScope('all')
-  else if (axis === 'usage') selectWorkbenchUsageStatus('all')
+  else if (axis === 'usage') selectWorkbenchUsageStatus(defaultWorkbenchUsageStatus)
   else selectWorkbenchSubscription('')
 }
 const toggleImportBatch = async (id: string) => {
@@ -3062,7 +3054,7 @@ const applyWorkbenchContext = async (context: Partial<AccountWorkbenchContext>) 
     type: context.type || '',
     subscription_tier: context.subscription_tier || '',
     status: '',
-    usage_status: context.usage_status || selectedWorkbenchUsageStatus.value,
+    usage_status: context.usage_status || defaultWorkbenchUsageStatus,
     group: context.group || '',
     privacy_mode: context.privacy_mode || ''
   }
@@ -3082,7 +3074,6 @@ const applyWorkbenchContext = async (context: Partial<AccountWorkbenchContext>) 
   selectedWorkbenchUploaderID.value = nextUploaderID
   focusedWorkbenchBatchID.value = nextBatchID
   focusedWorkbenchUploaderID.value = nextUploaderID
-  focusedWorkbenchUsageStatus.value = nextFilters.usage_status
   focusedWorkbenchSubscriptionTier.value = nextFilters.subscription_tier
   if (nextUploaderID !== '') {
     expandedWorkbenchUploaders.value = new Set([String(nextUploaderID)])
@@ -3169,7 +3160,7 @@ const clearFilters = () => {
     type: '',
     subscription_tier: '',
     status: '',
-    usage_status: 'all',
+    usage_status: defaultWorkbenchUsageStatus,
     privacy_mode: '',
     uploader_user_id: '',
     group: '',
@@ -4779,6 +4770,10 @@ onUnmounted(() => {
 
 .workbench-axis-title {
   @apply px-2.5 pb-1.5 text-xs font-semibold text-gray-500 dark:text-gray-400;
+}
+
+.workbench-status-group + .workbench-status-group {
+  @apply mt-3 border-t border-gray-200 pt-3 dark:border-dark-700;
 }
 
 .workbench-uploader-group,

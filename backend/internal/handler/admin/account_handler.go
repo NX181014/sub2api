@@ -345,12 +345,23 @@ func parseAccountFilterQuery(c *gin.Context) (accountFilterQuery, error) {
 
 func normalizeAccountUsageStatus(usageStatus string) (string, bool) {
 	usageStatus = strings.TrimSpace(usageStatus)
-	if usageStatus == "all" {
+	if usageStatus == service.AccountUsageStatusAll {
 		return "", true
 	}
 	switch usageStatus {
 	case "",
+		service.AccountUsageStatusAvailable,
 		service.AccountUsageStatusInUse,
+		service.AccountUsageStatusIdleAvailable,
+		service.AccountUsageStatusRateLimited,
+		service.AccountUsageStatusAuthIssue,
+		service.AccountUsageStatusBillingLimited,
+		service.AccountUsageStatusAccessLimited,
+		service.AccountUsageStatusBanned,
+		service.AccountUsageStatusOverloaded,
+		service.AccountUsageStatusTemporary,
+		service.AccountUsageStatusExpiredQuota,
+		service.AccountUsageStatusOtherError,
 		service.AccountUsageStatusReady,
 		service.AccountUsageStatusUnused,
 		service.AccountUsageStatusAttention,
@@ -365,6 +376,7 @@ func normalizeAccountUsageStatus(usageStatus string) (string, bool) {
 
 func usageStatusNeedsRuntime(usageStatus string) bool {
 	return usageStatus == service.AccountUsageStatusInUse ||
+		usageStatus == service.AccountUsageStatusIdleAvailable ||
 		usageStatus == service.AccountUsageStatusReady ||
 		usageStatus == service.AccountUsageStatusUnused
 }
