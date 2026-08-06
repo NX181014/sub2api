@@ -560,7 +560,7 @@ type WorkbenchContext = {
   search: string
   platform: string
   type: string
-  subscription_tier: string
+  subscription_tier?: string
   status: string
   group: string
   privacy_mode: string
