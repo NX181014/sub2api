@@ -604,7 +604,7 @@ const routeUsageStatus = (): WorkbenchUsageStatus => {
     'ready', 'unused', 'attention', 'error', 'restricted'
   ].includes(value)
     ? value as WorkbenchUsageStatus
-    : 'in_use'
+    : 'available'
 }
 const initialWorkbenchContext = computed<Partial<WorkbenchContext>>(() => {
   const requestedScope = queryString('account_scope')

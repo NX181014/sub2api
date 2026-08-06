@@ -179,6 +179,6 @@ describe('SharedPoolView route state', () => {
 
     await router.push('/?tab=accounts')
     await flushPromises()
-    expect(wrapper.get('[data-test="accounts-context"]').text()).toContain('in_use')
+    expect(wrapper.get('[data-test="accounts-context"]').text()).toContain('available')
   })
 })

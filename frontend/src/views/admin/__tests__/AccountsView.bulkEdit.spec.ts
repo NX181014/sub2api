@@ -378,8 +378,8 @@ describe('admin AccountsView bulk edit scope', () => {
     const wrapper = mountAccountsView({}, { embedded: true })
     await flushPromises()
 
-    expect(wrapper.get('[data-test="workbench-in-use"]').attributes('aria-current')).toBe('page')
-    expect(wrapper.get('[data-test="workbench-available"]').attributes('aria-current')).toBeUndefined()
+    expect(wrapper.get('[data-test="workbench-in-use"]').attributes('aria-current')).toBeUndefined()
+    expect(wrapper.get('[data-test="workbench-available"]').attributes('aria-current')).toBe('page')
     expect(wrapper.find('[data-test="workbench-all"]').exists()).toBe(true)
     expect(wrapper.find('[data-test="workbench-standalone"]').exists()).toBe(false)
     expect(wrapper.find('[data-test="workbench-batch"]').exists()).toBe(true)
@@ -533,7 +533,7 @@ describe('admin AccountsView bulk edit scope', () => {
     expect(listAccounts.mock.calls.at(-1)?.[2]).toMatchObject({
       uploader_user_id: 7,
       import_batch_scope: 'batched',
-      usage_status: 'in_use',
+      usage_status: 'available',
       subscription_tier: 'plus'
     })
     expect(wrapper.find('[data-test="workbench-filter-chip-usage"]').exists()).toBe(false)
@@ -635,8 +635,8 @@ describe('admin AccountsView bulk edit scope', () => {
     const wrapper = mountAccountsView({}, { embedded: true })
     await flushPromises()
 
-    expect(wrapper.get('[data-test="workbench-in-use"]').attributes('aria-current')).toBe('page')
-    expect(wrapper.get('[data-test="workbench-available"]').attributes('aria-current')).toBeUndefined()
+    expect(wrapper.get('[data-test="workbench-in-use"]').attributes('aria-current')).toBeUndefined()
+    expect(wrapper.get('[data-test="workbench-available"]').attributes('aria-current')).toBe('page')
     expect(wrapper.get('[data-test="workbench-all"]').attributes('aria-current')).toBeUndefined()
 
     await wrapper.get('[data-test="workbench-all"]').trigger('click')
