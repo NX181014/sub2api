@@ -1390,7 +1390,7 @@ const props = withDefaults(defineProps<{
   initialWorkbenchContext: () => ({})
 })
 const embedded = props.embedded
-const defaultWorkbenchUsageStatus: WorkbenchUsageStatus = embedded ? 'available' : 'all'
+const defaultWorkbenchUsageStatus: WorkbenchUsageStatus = embedded ? 'in_use' : 'all'
 const emit = defineEmits<{
   'pool-record': [account: Account]
   'trace-account': [accountId: number]
