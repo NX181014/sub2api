@@ -1390,7 +1390,7 @@ const props = withDefaults(defineProps<{
   initialWorkbenchContext: () => ({})
 })
 const embedded = props.embedded
-const defaultWorkbenchUsageStatus: WorkbenchUsageStatus = embedded ? 'available' : 'all'
+const defaultWorkbenchUsageStatus: WorkbenchUsageStatus = embedded ? 'in_use' : 'all'
 const emit = defineEmits<{
   'pool-record': [account: Account]
   'trace-account': [accountId: number]
@@ -2310,7 +2310,7 @@ const batchStatusItems = (status: AccountBatchStatusSummary) => {
     { key: 'normal', label: t('admin.accounts.status.active'), className: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' }
   ]
   return definitions
-    .map(item => ({ ...item, count: status[item.key] }))
+    .map(item => ({ ...item, count: status[item.key] ?? 0 }))
     .filter(item => item.count > 0)
 }
 const importBatchStatusItems = (batch: ImportBatchRow) => batchStatusItems(batch.status)
@@ -2368,7 +2368,7 @@ const workbenchUploaderGroups = computed<WorkbenchUploaderGroup[]>(() => {
     group.restrictedCount += batch.status.restricted ?? (batch.status.rate_limited + batch.status.overloaded + batch.status.temp_unschedulable)
     group.faultCount += batch.status.faults ?? (batch.status.error + batch.status.inactive + batch.status.manual_unschedulable)
     for (const key of Object.keys(group.status) as Array<keyof AccountBatchStatusSummary>) {
-      group.status[key] += batch.status[key]
+      group.status[key] = (group.status[key] ?? 0) + (batch.status[key] ?? 0)
     }
     group.batches.push(batch)
     groups.set(key, group)
