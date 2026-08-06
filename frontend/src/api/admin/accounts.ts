@@ -85,6 +85,10 @@ export interface AccountBatchStatusSummary {
   overloaded: number
   temp_unschedulable: number
   manual_unschedulable: number
+  in_use?: number
+  available?: number
+  restricted?: number
+  faults?: number
 }
 
 export interface AccountImportBatchSummary {

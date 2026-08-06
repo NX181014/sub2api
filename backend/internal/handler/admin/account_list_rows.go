@@ -24,6 +24,10 @@ type accountBatchStatusSummary struct {
 	Overloaded          int `json:"overloaded"`
 	TempUnschedulable   int `json:"temp_unschedulable"`
 	ManualUnschedulable int `json:"manual_unschedulable"`
+	InUse               int `json:"in_use"`
+	Available           int `json:"available"`
+	Restricted          int `json:"restricted"`
+	Faults              int `json:"faults"`
 }
 
 type accountImportBatchSummary struct {
@@ -76,10 +80,22 @@ func accountEffectivelySchedulable(account *service.Account, now time.Time) bool
 	return effectivelySchedulable
 }
 
-func addBatchStatus(summary *accountImportBatchSummary, account *service.Account, now time.Time) {
+func addBatchStatus(summary *accountImportBatchSummary, account *service.Account, now time.Time, currentConcurrency int) {
 	effectivelySchedulable := accountEffectivelySchedulable(account, now)
 	if effectivelySchedulable {
 		summary.SchedulableCount++
+		summary.Status.Available++
+		if currentConcurrency > 0 {
+			summary.Status.InUse++
+		}
+	}
+	restricted := (account.RateLimitResetAt != nil && account.RateLimitResetAt.After(now)) ||
+		(account.OverloadUntil != nil && account.OverloadUntil.After(now)) ||
+		(account.TempUnschedulableUntil != nil && account.TempUnschedulableUntil.After(now))
+	if restricted {
+		summary.Status.Restricted++
+	} else if !effectivelySchedulable {
+		summary.Status.Faults++
 	}
 	switch {
 	case account.Status == service.StatusError:
@@ -103,7 +119,7 @@ func addBatchStatus(summary *accountImportBatchSummary, account *service.Account
 	}
 }
 
-func buildAccountLogicalRows(accounts []service.Account, now time.Time) []accountLogicalRow {
+func buildAccountLogicalRows(accounts []service.Account, now time.Time, runtimeConcurrency map[int64]int) []accountLogicalRow {
 	rows := make([]accountLogicalRow, 0, len(accounts))
 	batches := make(map[string]*accountImportBatchSummary)
 	for i := range accounts {
@@ -135,14 +151,14 @@ func buildAccountLogicalRows(accounts []service.Account, now time.Time) []accoun
 		if len(batch.Names) < 4 {
 			batch.Names = append(batch.Names, account.Name)
 		}
-		addBatchStatus(batch, account, now)
+		addBatchStatus(batch, account, now, runtimeConcurrency[account.ID])
 	}
 	return rows
 }
 
 func accountRowStatusRank(account *service.Account, now time.Time) int {
 	summary := accountImportBatchSummary{}
-	addBatchStatus(&summary, account, now)
+	addBatchStatus(&summary, account, now, 0)
 	return batchStatusRank(summary.Status)
 }
 
@@ -257,7 +273,11 @@ func (h *AccountHandler) enrichLogicalRowRuntime(ctx context.Context, accounts [
 		pageHasOpenAI = pageHasOpenAI || account.Platform == service.PlatformOpenAI
 	}
 
-	if h.concurrencyService != nil && len(accountIDs) > 0 {
+	if filters.RuntimeConcurrency != nil {
+		for i, account := range accounts {
+			responses[i].CurrentConcurrency = filters.RuntimeConcurrency[account.ID]
+		}
+	} else if h.concurrencyService != nil && len(accountIDs) > 0 {
 		if counts, err := h.concurrencyService.GetAccountConcurrencyBatch(ctx, accountIDs); err == nil {
 			for i, account := range accounts {
 				responses[i].CurrentConcurrency = counts[account.ID]
@@ -266,31 +286,7 @@ func (h *AccountHandler) enrichLogicalRowRuntime(ctx context.Context, accounts [
 	}
 
 	if includeSchedulerScore && pageHasOpenAI {
-		pool := h.listAccountSchedulerScoreFilterPool(ctx, filters.Platform, filters.Type, filters.Status, filters.Search, filters.GroupID, filters.PrivacyMode)
-		if filters.UploaderUserID > 0 || filters.UploaderUnassigned || filters.ImportBatchID != "" || filters.ImportBatchScope != "" {
-			filtered := pool[:0]
-			for i := range pool {
-				account := &pool[i]
-				batchID, _ := account.Extra["import_batch_id"].(string)
-				if filters.UploaderUserID > 0 && (account.CreatedByUserID == nil || *account.CreatedByUserID != filters.UploaderUserID) {
-					continue
-				}
-				if filters.UploaderUnassigned && account.CreatedByUserID != nil {
-					continue
-				}
-				if filters.ImportBatchID != "" && batchID != filters.ImportBatchID {
-					continue
-				}
-				if filters.ImportBatchScope == "standalone" && batchID != "" {
-					continue
-				}
-				if filters.ImportBatchScope == "batched" && batchID == "" {
-					continue
-				}
-				filtered = append(filtered, *account)
-			}
-			pool = filtered
-		}
+		pool := h.listAccountSchedulerScoreFilterPool(ctx, filters)
 		scores, groupScores := h.buildOpenAIAccountSchedulerScores(ctx, pageAccounts, pool)
 		for i, account := range accounts {
 			responses[i].SchedulerScore = scores[account.ID]
@@ -387,8 +383,17 @@ func (h *AccountHandler) ListRows(c *gin.Context) {
 		response.ErrorFrom(c, err)
 		return
 	}
+	if filters.RuntimeConcurrency == nil && h.concurrencyService != nil && len(accounts) > 0 {
+		accountIDs := make([]int64, len(accounts))
+		for i := range accounts {
+			accountIDs[i] = accounts[i].ID
+		}
+		if counts, countErr := h.concurrencyService.GetAccountConcurrencyBatch(c.Request.Context(), accountIDs); countErr == nil {
+			filters.RuntimeConcurrency = counts
+		}
+	}
 	now := time.Now()
-	rows := buildAccountLogicalRows(accounts, now)
+	rows := buildAccountLogicalRows(accounts, now, filters.RuntimeConcurrency)
 	sortAccountLogicalRows(rows, filters.SortBy, filters.SortOrder, now)
 	total := int64(len(rows))
 	start := (page - 1) * pageSize
@@ -406,11 +411,11 @@ func (h *AccountHandler) ListRows(c *gin.Context) {
 			standalone = append(standalone, row.account)
 			continue
 		}
-		batchFilters := accountFilterQuery{
-			AccountSelectionFilters: service.AccountSelectionFilters{ImportBatchID: row.Batch.ID},
-			SortBy:                  "id",
-			SortOrder:               "asc",
-		}
+		batchFilters := filters
+		batchFilters.ImportBatchID = row.Batch.ID
+		batchFilters.ImportBatchScope = ""
+		batchFilters.SortBy = "id"
+		batchFilters.SortOrder = "asc"
 		_, batchTotal, countErr := h.listAccountPage(c.Request.Context(), 1, 1, batchFilters, false)
 		if countErr != nil {
 			response.ErrorFrom(c, countErr)

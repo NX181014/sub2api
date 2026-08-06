@@ -272,8 +272,9 @@ type accountSelectionSummaryService interface {
 
 type accountFilterQuery struct {
 	service.AccountSelectionFilters
-	SortBy    string
-	SortOrder string
+	SortBy             string
+	SortOrder          string
+	RuntimeConcurrency map[int64]int
 }
 
 func parseAccountFilterQuery(c *gin.Context) (accountFilterQuery, error) {
@@ -388,9 +389,12 @@ func (h *AccountHandler) resolveAccountUsageRuntime(ctx context.Context, filters
 	base := filters
 	base.UsageStatus = ""
 	base.InUseAccountIDs = nil
-	// Type is cleared so selection-summary can calculate the type facet against
-	// the same runtime snapshot; the final query still applies the requested type.
-	base.Type = ""
+	// Facets clear type and subscription independently; resolve against their
+	// union so all facets reuse one runtime snapshot.
+	if force {
+		base.Type = ""
+		base.SubscriptionTier = ""
+	}
 	accounts, err := h.loadAllAccountRows(ctx, base, false)
 	if err != nil {
 		return accountFilterQuery{}, err
@@ -413,6 +417,7 @@ func (h *AccountHandler) resolveAccountUsageRuntime(ctx context.Context, filters
 			filters.InUseAccountIDs = append(filters.InUseAccountIDs, accountID)
 		}
 	}
+	filters.RuntimeConcurrency = counts
 	return filters, nil
 }
 
@@ -726,18 +731,17 @@ func (h *AccountHandler) buildOpenAIAccountSchedulerScores(
 	return baseScores, groupScoresByAccount
 }
 
-func (h *AccountHandler) listAccountSchedulerScoreFilterPool(
-	ctx context.Context,
-	platform, accountType, status, search string,
-	groupID int64,
-	privacyMode string,
-) []service.Account {
-	if h.adminService == nil || (platform != "" && platform != service.PlatformOpenAI) {
+func (h *AccountHandler) listAccountSchedulerScoreFilterPool(ctx context.Context, filters accountFilterQuery) []service.Account {
+	if h.adminService == nil || (filters.Platform != "" && filters.Platform != service.PlatformOpenAI) {
 		return nil
 	}
 	// 池只用于 OpenAI 分数计算（非 OpenAI 账号会在打分时被丢弃），
 	// 无论列表页平台过滤为何，查询一律限定 openai，避免无过滤时全表扫描。
-	accounts, err := h.adminService.ListAccountsForSchedulerScoreFilter(ctx, service.PlatformOpenAI, accountType, status, search, groupID, privacyMode)
+	poolFilters := filters
+	poolFilters.Platform = service.PlatformOpenAI
+	poolFilters.SortBy = "id"
+	poolFilters.SortOrder = "asc"
+	accounts, err := h.loadAllAccountRows(ctx, poolFilters, false)
 	if err != nil {
 		slog.Warn("openai_scheduler_filter_score_pool_failed", "error", err)
 		return nil
@@ -760,7 +764,6 @@ func (h *AccountHandler) List(c *gin.Context) {
 		return
 	}
 	platform, accountType, status, search := filters.Platform, filters.Type, filters.Status, filters.Search
-	privacyMode, groupID, uploaderUserID := filters.PrivacyMode, filters.GroupID, filters.UploaderUserID
 	lite := parseBoolQueryWithDefault(c.Query("lite"), false)
 	// 调度分需要跨候选池批量打分并读取负载，默认列表不计算；只有前端列可见时才显式开启。
 	includeSchedulerScore := parseBoolQueryWithDefault(c.Query("include_scheduler_score"), false)
@@ -802,53 +805,14 @@ func (h *AccountHandler) List(c *gin.Context) {
 		}
 	}
 	if includeSchedulerScore && pageHasOpenAIAccounts {
-		schedulerFilterPool := h.listAccountSchedulerScoreFilterPool(c.Request.Context(), platform, accountType, status, search, groupID, privacyMode)
-		if uploaderUserID > 0 {
-			filteredPool := schedulerFilterPool[:0]
-			for i := range schedulerFilterPool {
-				if schedulerFilterPool[i].CreatedByUserID != nil && *schedulerFilterPool[i].CreatedByUserID == uploaderUserID {
-					filteredPool = append(filteredPool, schedulerFilterPool[i])
-				}
-			}
-			schedulerFilterPool = filteredPool
-		}
-		if filters.UploaderUnassigned {
-			filteredPool := schedulerFilterPool[:0]
-			for i := range schedulerFilterPool {
-				if schedulerFilterPool[i].CreatedByUserID == nil {
-					filteredPool = append(filteredPool, schedulerFilterPool[i])
-				}
-			}
-			schedulerFilterPool = filteredPool
-		}
-		if filters.ImportBatchID != "" {
-			filteredPool := schedulerFilterPool[:0]
-			for i := range schedulerFilterPool {
-				if batchID, _ := schedulerFilterPool[i].Extra["import_batch_id"].(string); batchID == filters.ImportBatchID {
-					filteredPool = append(filteredPool, schedulerFilterPool[i])
-				}
-			}
-			schedulerFilterPool = filteredPool
-		}
-		if filters.ImportBatchScope != "" {
-			filteredPool := schedulerFilterPool[:0]
-			for i := range schedulerFilterPool {
-				batchID, _ := schedulerFilterPool[i].Extra["import_batch_id"].(string)
-				if filters.ImportBatchScope == "standalone" && batchID != "" {
-					continue
-				}
-				if filters.ImportBatchScope == "batched" && batchID == "" {
-					continue
-				}
-				filteredPool = append(filteredPool, schedulerFilterPool[i])
-			}
-			schedulerFilterPool = filteredPool
-		}
+		schedulerFilterPool := h.listAccountSchedulerScoreFilterPool(c.Request.Context(), filters)
 		schedulerScores, schedulerGroupScores = h.buildOpenAIAccountSchedulerScores(c.Request.Context(), accounts, schedulerFilterPool)
 	}
 
-	// 始终获取并发数（Redis ZCARD，极低开销）
-	if h.concurrencyService != nil {
+	// Reuse the snapshot that selected the current usage slice.
+	if filters.RuntimeConcurrency != nil {
+		concurrencyCounts = filters.RuntimeConcurrency
+	} else if h.concurrencyService != nil {
 		if cc, ccErr := h.concurrencyService.GetAccountConcurrencyBatch(c.Request.Context(), accountIDs); ccErr == nil && cc != nil {
 			concurrencyCounts = cc
 		}

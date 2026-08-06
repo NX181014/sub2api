@@ -21,7 +21,7 @@ func TestBuildAccountLogicalRowsGroupsBatchesAndSummarizesStatus(t *testing.T) {
 		{ID: 7, Name: "batch-a", Status: service.StatusError, Schedulable: true, CreatedAt: now.Add(-time.Minute), UploaderUsername: &uploader, Extra: map[string]any{"import_batch_id": batchID}},
 	}
 
-	rows := buildAccountLogicalRows(accounts, now)
+	rows := buildAccountLogicalRows(accounts, now, map[int64]int{8: 1})
 	require.Len(t, rows, 2)
 	require.Equal(t, "account", rows[0].Kind)
 	require.Equal(t, "import_batch", rows[1].Kind)
@@ -29,6 +29,9 @@ func TestBuildAccountLogicalRowsGroupsBatchesAndSummarizesStatus(t *testing.T) {
 	require.Equal(t, 1, rows[1].Batch.SchedulableCount)
 	require.Equal(t, 1, rows[1].Batch.Status.Normal)
 	require.Equal(t, 1, rows[1].Batch.Status.Error)
+	require.Equal(t, 1, rows[1].Batch.Status.InUse)
+	require.Equal(t, 1, rows[1].Batch.Status.Available)
+	require.Equal(t, 1, rows[1].Batch.Status.Faults)
 	require.Equal(t, avatar, *rows[1].Batch.UploaderAvatarURL)
 	require.Equal(t, uploaderStatus, *rows[1].Batch.UploaderStatus)
 	require.Equal(t, now.Add(-time.Minute), rows[1].Batch.CreatedAt)
@@ -40,7 +43,7 @@ func TestSortAccountLogicalRowsUsesParentValues(t *testing.T) {
 		{ID: 3, Name: "newer", Status: service.StatusActive, Schedulable: true, CreatedAt: now},
 		{ID: 2, Name: "batch-ok", Status: service.StatusActive, Schedulable: true, CreatedAt: now.Add(-time.Minute), Extra: map[string]any{"import_batch_id": "batch"}},
 		{ID: 1, Name: "batch-error", Status: service.StatusError, CreatedAt: now.Add(-2 * time.Minute), Extra: map[string]any{"import_batch_id": "batch"}},
-	}, now)
+	}, now, nil)
 
 	sortAccountLogicalRows(rows, "created_at", "desc", now)
 	require.Equal(t, int64(3), rows[0].account.ID)
