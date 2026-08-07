@@ -388,10 +388,7 @@ describe('admin AccountsView bulk edit scope', () => {
     expect(defaultColumnKeys).not.toContain('id')
     expect(wrapper.text()).toContain('#7')
 
-    await wrapper.get('[data-test="workbench-uploader"]').trigger('click')
-    await wrapper.get('[data-test="workbench-batch"] .workbench-batch-main').trigger('click')
-    expect(wrapper.emitted('workbench-context')).toBeUndefined()
-    await wrapper.get('[data-test="workbench-batch-scope"]').trigger('click')
+    await wrapper.get('[data-test="workbench-batch"]').trigger('click')
     await flushPromises()
 
     expect(listImportBatch).toHaveBeenCalledWith(batchID, 1, 20, expect.any(Object))
@@ -414,7 +411,7 @@ describe('admin AccountsView bulk edit scope', () => {
     expect(wrapper.get('[data-test="workbench-availability-summary"]').text()).toContain('admin.accounts.workbenchAvailabilitySummary')
   })
 
-  it('uses one uploader-to-batch tree and keeps uploader selection explicit', async () => {
+  it('renders uploaders and recent batches as flat sections with whole-row selection', async () => {
     const navigatorRows = [
       navigatorBatchRow('batch-a-new', '2026-08-03T00:00:00Z', 7, 'Uploader A', 'August'),
       navigatorBatchRow('batch-a-old', '2026-08-01T00:00:00Z', 7, 'Uploader A', 'July'),
@@ -429,6 +426,14 @@ describe('admin AccountsView bulk edit scope', () => {
 
     expect(wrapper.find('[data-test="workbench-mode-uploader"]').exists()).toBe(false)
     expect(wrapper.find('[data-test="workbench-mode-batch"]').exists()).toBe(false)
+    expect(wrapper.findAll('[data-test="workbench-all"], [data-test="workbench-available"], [data-test="workbench-in-use"]').map(row => row.attributes('data-test'))).toEqual([
+      'workbench-all',
+      'workbench-available',
+      'workbench-in-use'
+    ])
+    expect(wrapper.get('#workbench-uploader-axis').text()).toBe('admin.sharedPool.columns.uploader')
+    expect(wrapper.get('#workbench-batch-axis').text()).toBe('admin.accounts.workbenchRecentBatches')
+    expect(wrapper.find('.workbench-uploader-batches').exists()).toBe(false)
     expect(wrapper.findAll('[data-test="workbench-uploader"]')).toHaveLength(2)
     expect(wrapper.findAll('[data-test="workbench-batch"]')).toHaveLength(3)
     expect(wrapper.findAll('.workbench-uploader-state').map(node => node.text())).toEqual([
@@ -436,36 +441,38 @@ describe('admin AccountsView bulk edit scope', () => {
       'common.unknown'
     ])
 
-    const firstToggle = wrapper.findAll('[data-test="workbench-uploader"]')[0]!
-    expect(firstToggle.attributes('aria-expanded')).toBeUndefined()
-    await firstToggle.trigger('click')
-    expect(firstToggle.attributes('aria-expanded')).toBeUndefined()
-    expect(wrapper.findAll('[data-test="workbench-batch"]')).toHaveLength(3)
+    const uploaderStats = wrapper.findAll('.workbench-uploader-stats')[0].text()
+    expect(uploaderStats).toContain('common.total 4')
+    expect(uploaderStats).toContain('admin.accounts.workbenchSchedulableCount')
+    expect(uploaderStats).toContain('admin.accounts.workbenchUsageStatus.in_use 0')
+    expect(uploaderStats).toContain('admin.accounts.workbenchAttentionCount')
+    expect(uploaderStats).toContain('admin.accounts.workbenchBatchCount')
 
-    await wrapper.findAll('[data-test="workbench-uploader"]')[0].trigger('click')
-    await flushPromises()
-    expect(wrapper.emitted('workbench-context')).toBeUndefined()
-    await wrapper.findAll('[data-test="workbench-uploader-scope"]')[0].trigger('click')
+    const firstUploader = wrapper.findAll('[data-test="workbench-uploader"]')[0]
+    expect(firstUploader.attributes('aria-expanded')).toBeUndefined()
+    await firstUploader.trigger('click')
     await flushPromises()
     expect(wrapper.emitted('workbench-context')?.at(-1)?.[0]).toMatchObject({
       scope: 'uploader',
       uploader_user_id: 7
     })
+    expect(wrapper.findAll('[data-test="workbench-uploader"]')[0].attributes('aria-current')).toBe('page')
     const batches = wrapper.findAll('[data-test="workbench-batch"]')
     expect(batches).toHaveLength(3)
     expect(batches.map(batch => batch.text())).toEqual([
       expect.stringContaining('August'),
-      expect.stringContaining('July'),
-      expect.stringContaining('Quarterly')
+      expect.stringContaining('Quarterly'),
+      expect.stringContaining('July')
     ])
     expect(wrapper.findAll('[data-test="workbench-uploader"]')).toHaveLength(2)
 
     await wrapper.findAll('[data-test="workbench-uploader"]')[1].trigger('click')
     await flushPromises()
-    expect(wrapper.emitted('workbench-context')?.at(-1)?.[0]).toMatchObject({ uploader_user_id: 7 })
+    expect(wrapper.emitted('workbench-context')?.at(-1)?.[0]).toMatchObject({ uploader_user_id: 8 })
     const toggles = wrapper.findAll('[data-test="workbench-uploader"]')
     expect(toggles[0].attributes('aria-expanded')).toBeUndefined()
     expect(toggles[1].attributes('aria-expanded')).toBeUndefined()
+    expect(toggles[1].attributes('aria-current')).toBe('page')
     expect(wrapper.findAll('[data-test="workbench-batch"]')).toHaveLength(3)
   })
 
@@ -495,7 +502,6 @@ describe('admin AccountsView bulk edit scope', () => {
     await flushPromises()
     expect(wrapper.get('[data-test="workbench-axis-source"]').attributes('aria-selected')).toBe('true')
     await wrapper.get('[data-test="workbench-uploader"]').trigger('click')
-    await wrapper.get('[data-test="workbench-uploader-scope"]').trigger('click')
     await flushPromises()
     expect(listAccounts.mock.calls.at(-1)?.[2]).toMatchObject({
       uploader_user_id: 7,
@@ -561,7 +567,7 @@ describe('admin AccountsView bulk edit scope', () => {
     })
   })
 
-  it('orders nested batches newest first and searches uploader, batch name, and batch ID', async () => {
+  it('orders recent batches newest first and searches uploader, batch name, and batch ID', async () => {
     const navigatorRows = [
       navigatorBatchRow('batch-old', '2026-08-01T00:00:00Z', 8, 'Uploader B', 'July'),
       navigatorBatchRow('batch-new', '2026-08-03T00:00:00Z', 7, 'Uploader A', 'August'),
@@ -629,9 +635,16 @@ describe('admin AccountsView bulk edit scope', () => {
       expect(document.activeElement).toBe(search.element)
       expect(document.body.classList).toContain('modal-open')
 
+      expect(dialog.get('[data-test="workbench-batch"]').exists()).toBe(true)
       await dialog.get('[data-test="workbench-uploader"]').trigger('click')
+      await flushPromises()
+      expect(wrapper.find('.workbench-sidebar[role="dialog"]').exists()).toBe(false)
+      expect(document.body.classList).not.toContain('modal-open')
+      expect(document.activeElement).toBe(opener.element)
+
+      await opener.trigger('click')
+      await flushPromises()
       expect(wrapper.find('.workbench-sidebar[role="dialog"]').exists()).toBe(true)
-      expect(wrapper.get('[data-test="workbench-batch"]').exists()).toBe(true)
 
       document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
       await flushPromises()
@@ -644,7 +657,7 @@ describe('admin AccountsView bulk edit scope', () => {
     }
   })
 
-  it('exposes the selected source and tree expansion to assistive technology', async () => {
+  it('exposes whole-row source selection without tree expansion semantics', async () => {
     const navigatorRows = [
       navigatorBatchRow('batch-a', '2026-08-03T00:00:00Z', 7, 'Uploader A', 'August')
     ]
@@ -667,19 +680,17 @@ describe('admin AccountsView bulk edit scope', () => {
     await wrapper.get('[data-test="workbench-uploader"]').trigger('click')
     await flushPromises()
     expect(wrapper.get('[data-test="workbench-uploader"]').attributes('aria-expanded')).toBeUndefined()
-    expect(wrapper.get('[data-test="workbench-all"]').attributes('aria-current')).toBe('page')
-    await wrapper.get('[data-test="workbench-uploader-scope"]').trigger('click')
-    await flushPromises()
-    expect(wrapper.get('[data-test="workbench-uploader-scope"]').attributes('aria-pressed')).toBe('true')
+    expect(wrapper.get('[data-test="workbench-uploader"]').attributes('aria-current')).toBe('page')
+    expect(wrapper.get('[data-test="workbench-uploader-scope"]').attributes('aria-hidden')).toBe('true')
+    expect(wrapper.get('[data-test="workbench-uploader-scope"]').attributes('aria-pressed')).toBeUndefined()
     expect(wrapper.get('[data-test="workbench-all"]').attributes('aria-current')).toBeUndefined()
 
-    await wrapper.get('[data-test="workbench-batch"] .workbench-batch-main').trigger('click')
+    await wrapper.get('[data-test="workbench-batch"]').trigger('click')
     await flushPromises()
-    expect(wrapper.get('[data-test="workbench-batch"]').classes()).toContain('workbench-focus-active')
-    expect(wrapper.get('[data-test="workbench-uploader-scope"]').attributes('aria-pressed')).toBe('true')
-    await wrapper.get('[data-test="workbench-batch-scope"]').trigger('click')
-    await flushPromises()
-    expect(wrapper.get('[data-test="workbench-batch-scope"]').attributes('aria-pressed')).toBe('true')
+    expect(wrapper.get('[data-test="workbench-batch"]').classes()).not.toContain('workbench-focus-active')
+    expect(wrapper.get('[data-test="workbench-batch"]').attributes('aria-current')).toBe('page')
+    expect(wrapper.get('[data-test="workbench-batch-scope"]').attributes('aria-hidden')).toBe('true')
+    expect(wrapper.get('[data-test="workbench-batch-scope"]').attributes('aria-pressed')).toBeUndefined()
     expect(wrapper.get('[data-test="workbench-all"]').attributes('aria-current')).toBeUndefined()
 
     await wrapper.get('[data-test="workbench-all"]').trigger('click')
@@ -965,6 +976,28 @@ describe('admin AccountsView bulk edit scope', () => {
     await flushPromises()
     expect(listImportBatch).toHaveBeenCalledTimes(2)
     expect(wrapper.getComponent(DataTableStub).props('data')).toHaveLength(102)
+  })
+
+  it('selects and expands a batch from the main row action', async () => {
+    const batchID = 'batch-activate'
+    const batchAccount = (id: number) => ({ ...account(id), extra: { import_batch_id: batchID } })
+    listAccounts.mockResolvedValue({ items: [batchAccount(1)], total: 1, page: 1, page_size: 20, pages: 1 })
+    listRows.mockResolvedValue(batchRowsResponse(batchID, 1))
+    listImportBatch.mockResolvedValue({ items: [batchAccount(1)], total: 1, page: 1, page_size: 100, pages: 1 })
+
+    const wrapper = mountAccountsView()
+    await flushPromises()
+
+    await wrapper.get('[data-test="data-table"] button').trigger('click')
+    await flushPromises()
+
+    expect(listImportBatch).toHaveBeenCalledWith(batchID, 1, 100, expect.any(Object))
+    expect((wrapper.get('[data-test="select-row"] input').element as HTMLInputElement).checked).toBe(true)
+    expect(wrapper.getComponent(AccountBulkActionsBarStub).props('selectedIds')).toEqual([1])
+    expect((wrapper.getComponent(DataTableStub).props('data') as any[]).map((row: any) => row.id)).toEqual([
+      `import-batch:${batchID}`,
+      1
+    ])
   })
 
   it('restores a selected batch when returning to its page without refetching members', async () => {

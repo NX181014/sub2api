@@ -49,11 +49,14 @@
         v-for="(row, index) in sortedData"
         :key="resolveRowKey(row, index)"
         class="rounded-lg border border-gray-200 bg-white p-4 dark:border-dark-700 dark:bg-dark-900"
-        :class="{
-          'cursor-pointer': clickableRows,
-          'border-primary-300 bg-primary-50/40 dark:border-primary-700 dark:bg-primary-900/10': selectable && isRowSelected(row, index)
-        }"
-        @click="clickableRows && emit('rowClick', row)"
+        :class="[
+          {
+          'cursor-pointer': isRowClickable(row),
+            'border-primary-300 bg-primary-50/40 dark:border-primary-700 dark:bg-primary-900/10': selectable && isRowSelected(row, index)
+          },
+          rowClass?.(row, index)
+        ]"
+        @click="isRowClickable(row) && emit('rowClick', row)"
       >
         <div class="space-y-3">
           <div v-if="selectable" class="flex justify-end">
@@ -214,11 +217,14 @@
             :data-index="item.index"
             :ref="item.measure ? measureElement : undefined"
             class="hover:bg-gray-50 dark:hover:bg-dark-800"
-            :class="{
-              'cursor-pointer': clickableRows,
-              'bg-primary-50/40 dark:bg-primary-900/10': selectable && isRowSelected(item.row, item.index)
-            }"
-            @click="clickableRows && emit('rowClick', item.row)"
+            :class="[
+              {
+                'cursor-pointer': isRowClickable(item.row),
+                'bg-primary-50/40 dark:bg-primary-900/10': selectable && isRowSelected(item.row, item.index)
+              },
+              rowClass?.(item.row, item.index)
+            ]"
+            @click="isRowClickable(item.row) && emit('rowClick', item.row)"
           >
             <td v-if="selectable" class="w-11 min-w-11 px-3 py-4 text-center">
               <input
@@ -453,8 +459,10 @@ interface Props {
    * will emit 'sort' events instead of performing client-side sorting.
    */
   serverSideSort?: boolean
-  /** Emit 'rowClick' on row/card click and show pointer cursor (interactive cells should @click.stop) */
-  clickableRows?: boolean
+  /** Emit 'rowClick' on row/card click and show pointer cursor. */
+  clickableRows?: boolean | ((row: any) => boolean)
+  /** Optional class resolver for row-level states. */
+  rowClass?: (row: any, index: number) => string | undefined
   /** Estimated row height in px for the virtualizer (default 56) */
   estimateRowHeight?: number
   /** Number of rows to render beyond the visible area (default 5) */
@@ -485,6 +493,10 @@ const props = withDefaults(defineProps<Props>(), {
   selectable: false,
   selectedKeys: () => []
 })
+
+const isRowClickable = (row: any) => typeof props.clickableRows === 'function'
+  ? props.clickableRows(row)
+  : props.clickableRows
 
 const sortKey = ref<string>('')
 const sortOrder = ref<'asc' | 'desc'>('asc')
