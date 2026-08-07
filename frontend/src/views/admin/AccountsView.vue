@@ -2509,9 +2509,7 @@ const workbenchFilterChips = computed<Array<{ axis: WorkbenchAxis; label: string
         : selectedWorkbenchBatch.value?.names.join('、') || selectedWorkbenchBatchID.value
     chips.push({ axis: 'source', label: workbenchAxisLabel('source'), value: source })
   } else if (activeWorkbenchAxis.value === 'source' && selectedWorkbenchUsageStatus.value !== defaultWorkbenchUsageStatus) {
-    const value = selectedWorkbenchUsageStatus.value === 'all'
-      ? t('admin.sharedPool.ledger.allAccounts')
-      : workbenchUsageStatusLabel(selectedWorkbenchUsageStatus.value)
+    const value = workbenchUsageStatusLabel(selectedWorkbenchUsageStatus.value)
     chips.push({ axis: 'source', label: workbenchAxisLabel('source'), value })
   } else if (activeWorkbenchAxis.value === 'usage' && selectedWorkbenchUsageStatus.value !== defaultWorkbenchUsageStatus) {
     chips.push({ axis: 'usage', label: workbenchAxisLabel('usage'), value: workbenchUsageStatusLabel(selectedWorkbenchUsageStatus.value) })
