@@ -999,7 +999,9 @@ func accountUsageStatusPredicate(usageStatus string, inUseAccountIDs []int64, no
 		service.AccountUsageStatusExpiredQuota,
 		service.AccountUsageStatusOtherError:
 		return dbpredicate.Account(func(s *entsql.Selector) {
-			s.Where(entsql.ExprP(accountUsageStatusExpression(s, inUseAccountIDs)+" = ?", usageStatus))
+			s.Where(entsql.P(func(b *entsql.Builder) {
+				b.WriteString(accountUsageStatusExpression(s, inUseAccountIDs)).WriteString(" = ").Arg(usageStatus)
+			}))
 		})
 	default:
 		return nil
@@ -1095,7 +1097,9 @@ func (r *accountRepository) accountSelectionFilteredQuery(filters service.Accoun
 
 func accountSubscriptionTierPredicate(tier string) dbpredicate.Account {
 	return dbpredicate.Account(func(s *entsql.Selector) {
-		s.Where(entsql.ExprP(accountSubscriptionTierExpression(s.C(dbaccount.FieldType), s.C(dbaccount.FieldCredentials))+" = ?", tier))
+		s.Where(entsql.P(func(b *entsql.Builder) {
+			b.WriteString(accountSubscriptionTierExpression(s.C(dbaccount.FieldType), s.C(dbaccount.FieldCredentials))).WriteString(" = ").Arg(tier)
+		}))
 	})
 }
 

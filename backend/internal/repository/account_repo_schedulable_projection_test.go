@@ -134,3 +134,32 @@ func TestAccountListStatusUsesEffectiveRuntimePredicates(t *testing.T) {
 	require.Contains(t, normalized, "expires_at")
 	require.Contains(t, normalized, "auto_pause_on_expired")
 }
+
+func TestAccountSelectionPredicatesBindPostgresArguments(t *testing.T) {
+	var capturedSQL string
+	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(captureEntQueryMatcher{actual: &capturedSQL}))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+
+	driver := entsql.OpenDB(dialect.Postgres, db)
+	client := dbent.NewClient(dbent.Driver(driver))
+	t.Cleanup(func() { _ = client.Close() })
+	repo := newAccountRepositoryWithSQL(client, db, nil)
+
+	mock.ExpectQuery("account selection count").
+		WithArgs("pro", service.AccountUsageStatusRateLimited).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+
+	filters := service.AccountSelectionFilters{
+		SubscriptionTier: "pro",
+		UsageStatus:      service.AccountUsageStatusRateLimited,
+	}
+	_, err = repo.accountSelectionFilteredQuery(filters).Count(context.Background())
+	require.NoError(t, err)
+	require.NoError(t, mock.ExpectationsWereMet())
+
+	normalized := normalizeSQLWhitespace(capturedSQL)
+	require.Contains(t, normalized, "= $1")
+	require.Contains(t, normalized, "= $2")
+	require.NotContains(t, normalized, "?")
+}
