@@ -118,7 +118,7 @@ describe('SharedPoolView route state', () => {
           AppLayout: { template: '<div><slot /></div>' },
           AccountsView: {
             props: ['initialWorkbenchContext'],
-            template: '<div data-test="accounts-context">{{ initialWorkbenchContext.scope }}|{{ initialWorkbenchContext.import_batch_id }}|{{ initialWorkbenchContext.usage_status }}|{{ initialWorkbenchContext.subscription_tier }}|{{ initialWorkbenchContext.page }}</div>'
+            template: '<div data-test="accounts-context">{{ initialWorkbenchContext.axis }}|{{ initialWorkbenchContext.scope }}|{{ initialWorkbenchContext.import_batch_id }}|{{ initialWorkbenchContext.usage_status }}|{{ initialWorkbenchContext.subscription_tier }}|{{ initialWorkbenchContext.page }}</div>'
           },
           AccountTracePanel: true,
           CostLedgerPanel: true,
@@ -168,14 +168,14 @@ describe('SharedPoolView route state', () => {
     }))
     expect(wrapper.findAll('h3').filter((node) => node.text() === 'source-a')).toHaveLength(1)
 
-    await router.push('/?tab=accounts&account_scope=batch&import_batch_id=batch-9&account_usage_status=ready&account_subscription_tier=plus&account_page=3')
+    await router.push('/?tab=accounts&account_axis=source&account_scope=batch&import_batch_id=batch-9&account_usage_status=all&account_page=3')
     await flushPromises()
 
-    expect(wrapper.get('[data-test="accounts-context"]').text()).toBe('batch|batch-9|ready|plus|3')
+    expect(wrapper.get('[data-test="accounts-context"]').text()).toBe('source|batch|batch-9|all||3')
 
-    await router.push('/?tab=accounts&account_usage_status=auth_issue')
+    await router.push('/?tab=accounts&account_axis=usage&account_usage_status=auth_issue')
     await flushPromises()
-    expect(wrapper.get('[data-test="accounts-context"]').text()).toContain('auth_issue')
+    expect(wrapper.get('[data-test="accounts-context"]').text()).toContain('usage|all||auth_issue')
 
     await router.push('/?tab=accounts')
     await flushPromises()

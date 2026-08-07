@@ -120,7 +120,7 @@
                   :data-test="`workbench-axis-${axis}`"
                   :aria-selected="activeWorkbenchAxis === axis"
                   :class="['workbench-axis-tab', activeWorkbenchAxis === axis ? 'workbench-axis-tab-active' : '']"
-                  @click="activeWorkbenchAxis = axis"
+                  @click="selectWorkbenchAxis(axis)"
                 >
                   {{ workbenchAxisLabel(axis) }}
                 </button>
@@ -1358,6 +1358,7 @@ type AccountWorkbenchScope = 'all' | 'standalone' | 'uploader' | 'batch'
 type WorkbenchAxis = 'source' | 'usage' | 'subscription'
 type WorkbenchUsageStatus = NonNullable<AccountListFilters['usage_status']>
 type AccountWorkbenchContext = {
+  axis: WorkbenchAxis
   scope: AccountWorkbenchScope
   import_batch_id?: string
   uploader_user_id?: number | string
@@ -1391,6 +1392,13 @@ const props = withDefaults(defineProps<{
 })
 const embedded = props.embedded
 const defaultWorkbenchUsageStatus: WorkbenchUsageStatus = embedded ? 'in_use' : 'all'
+const workbenchSourceRangeStatuses = new Set<WorkbenchUsageStatus>(['all', 'available', 'in_use'])
+const resolveWorkbenchAxis = (context: Partial<AccountWorkbenchContext>, scope: AccountWorkbenchScope): WorkbenchAxis => {
+  if (context.axis && ['source', 'usage', 'subscription'].includes(context.axis)) return context.axis
+  if (scope !== 'all' || context.import_batch_id || (context.uploader_user_id !== undefined && context.uploader_user_id !== '')) return 'source'
+  if (context.subscription_tier) return 'subscription'
+  return context.usage_status && !workbenchSourceRangeStatuses.has(context.usage_status) ? 'usage' : 'source'
+}
 const emit = defineEmits<{
   'pool-record': [account: Account]
   'trace-account': [accountId: number]
@@ -1410,21 +1418,23 @@ const proxies = ref<AccountProxy[]>([])
 const groups = ref<AdminGroup[]>([])
 const uploaderOptions = ref<Array<{ value: number; label: string }>>([])
 const expandedImportBatches = ref(new Set<string>())
-const workbenchScope = ref<AccountWorkbenchScope>(
+const requestedInitialWorkbenchScope: AccountWorkbenchScope = (
   props.initialWorkbenchContext.import_batch_id || props.initialImportBatchId
     ? 'batch'
     : props.initialWorkbenchContext.scope || props.initialWorkbenchScope
 )
-const selectedWorkbenchBatchID = ref(props.initialWorkbenchContext.import_batch_id || props.initialImportBatchId)
+const initialWorkbenchAxis = resolveWorkbenchAxis(props.initialWorkbenchContext, requestedInitialWorkbenchScope)
+const workbenchScope = ref<AccountWorkbenchScope>(initialWorkbenchAxis === 'source' ? requestedInitialWorkbenchScope : 'all')
+const selectedWorkbenchBatchID = ref(initialWorkbenchAxis === 'source' ? props.initialWorkbenchContext.import_batch_id || props.initialImportBatchId : '')
 const selectedWorkbenchUploaderID = ref<number | string>(
-  props.initialWorkbenchContext.uploader_user_id ?? props.initialUploaderUserId
+  initialWorkbenchAxis === 'source' ? props.initialWorkbenchContext.uploader_user_id ?? props.initialUploaderUserId : ''
 )
 const focusedWorkbenchUploaderID = ref<number | string>(selectedWorkbenchUploaderID.value)
 const focusedWorkbenchBatchID = ref(selectedWorkbenchBatchID.value)
 const workbenchBatches = ref<AccountImportBatchSummary[]>([])
 const workbenchAxes: WorkbenchAxis[] = ['source', 'usage', 'subscription']
-const activeWorkbenchAxis = ref<WorkbenchAxis>('source')
-const focusedWorkbenchSubscriptionTier = ref('')
+const activeWorkbenchAxis = ref<WorkbenchAxis>(initialWorkbenchAxis)
+const focusedWorkbenchSubscriptionTier = ref(initialWorkbenchAxis === 'subscription' ? props.initialWorkbenchContext.subscription_tier || '' : '')
 const workbenchNavigatorSearch = ref('')
 const workbenchFacetSummary = ref<AccountSelectionSummary>({
   total: 0,
@@ -2074,6 +2084,11 @@ const workbenchRequestFilters = (raw: Record<string, unknown>) => {
   const request = { ...raw } as Record<string, unknown>
   delete request.import_batch_id
   delete request.import_batch_scope
+  if (!embedded) return request
+  delete request.uploader_user_id
+  if (activeWorkbenchAxis.value !== 'subscription') delete request.subscription_tier
+  if (activeWorkbenchAxis.value === 'subscription') request.usage_status = 'all'
+  if (activeWorkbenchAxis.value !== 'source') return request
   if (workbenchScope.value === 'uploader') {
     request.uploader_user_id = selectedWorkbenchUploaderID.value
     request.import_batch_scope = 'batched'
@@ -2123,9 +2138,11 @@ const {
   initialParams: {
     platform: props.initialWorkbenchContext.platform || '',
     type: props.initialWorkbenchContext.type || '',
-    subscription_tier: props.initialWorkbenchContext.subscription_tier || '',
+    subscription_tier: initialWorkbenchAxis === 'subscription' ? props.initialWorkbenchContext.subscription_tier || '' : '',
     status: embedded ? '' : props.initialWorkbenchContext.status || '',
-    usage_status: props.initialWorkbenchContext.usage_status || defaultWorkbenchUsageStatus,
+    usage_status: initialWorkbenchAxis === 'subscription' || workbenchScope.value !== 'all'
+      ? 'all'
+      : props.initialWorkbenchContext.usage_status || defaultWorkbenchUsageStatus,
     privacy_mode: props.initialWorkbenchContext.privacy_mode || '',
     uploader_user_id: '',
     group: props.initialWorkbenchContext.group || '',
@@ -2151,9 +2168,9 @@ if (embedded) {
 }
 
 const accounts = ref<Account[]>([])
-const nonEmbeddedFilteredAccountTotal = ref(0)
+const exactFilteredAccountTotal = ref(0)
 const filteredAccountTotal = computed(() => Math.max(
-  embedded ? workbenchFacetSummary.value.total : nonEmbeddedFilteredAccountTotal.value,
+  exactFilteredAccountTotal.value,
   currentPageAccountCount.value
 ))
 const visibleResultAccountCount = filteredAccountTotal
@@ -2484,23 +2501,28 @@ const selectedWorkbenchUploader = computed(() =>
 )
 const workbenchFilterChips = computed<Array<{ axis: WorkbenchAxis; label: string; value: string }>>(() => {
   const chips: Array<{ axis: WorkbenchAxis; label: string; value: string }> = []
-  if (workbenchScope.value !== 'all') {
+  if (activeWorkbenchAxis.value === 'source' && workbenchScope.value !== 'all') {
     const source = workbenchScope.value === 'standalone'
       ? t('admin.accounts.standaloneImport')
       : workbenchScope.value === 'uploader'
         ? selectedWorkbenchUploader.value?.label || String(selectedWorkbenchUploaderID.value)
         : selectedWorkbenchBatch.value?.names.join('、') || selectedWorkbenchBatchID.value
     chips.push({ axis: 'source', label: workbenchAxisLabel('source'), value: source })
-  }
-  if (selectedWorkbenchUsageStatus.value !== defaultWorkbenchUsageStatus) {
+  } else if (activeWorkbenchAxis.value === 'source' && selectedWorkbenchUsageStatus.value !== defaultWorkbenchUsageStatus) {
+    const value = selectedWorkbenchUsageStatus.value === 'all'
+      ? t('admin.sharedPool.ledger.allAccounts')
+      : workbenchUsageStatusLabel(selectedWorkbenchUsageStatus.value)
+    chips.push({ axis: 'source', label: workbenchAxisLabel('source'), value })
+  } else if (activeWorkbenchAxis.value === 'usage' && selectedWorkbenchUsageStatus.value !== defaultWorkbenchUsageStatus) {
     chips.push({ axis: 'usage', label: workbenchAxisLabel('usage'), value: workbenchUsageStatusLabel(selectedWorkbenchUsageStatus.value) })
-  }
-  if (params.subscription_tier) {
+  } else if (activeWorkbenchAxis.value === 'subscription' && params.subscription_tier) {
     chips.push({ axis: 'subscription', label: workbenchAxisLabel('subscription'), value: workbenchSubscriptionLabel(String(params.subscription_tier)) })
   }
   return chips
 })
 const workbenchTitle = computed(() => {
+  if (activeWorkbenchAxis.value === 'subscription') return workbenchSubscriptionLabel(String(params.subscription_tier || ''))
+  if (activeWorkbenchAxis.value === 'usage') return workbenchUsageStatusLabel(selectedWorkbenchUsageStatus.value)
   if (workbenchScope.value === 'standalone') return t('admin.accounts.standaloneImport')
   if (workbenchScope.value === 'uploader') return selectedWorkbenchUploader.value?.label || t('admin.sharedPool.ledger.allUploaders')
   if (workbenchScope.value === 'batch') return selectedWorkbenchBatch.value?.names.join('、') || t('admin.accounts.importBatchGroup')
@@ -2519,16 +2541,15 @@ const workbenchSubtitle = computed(() => {
     batches: workbenchScope.value === 'all' ? workbenchBatchTotal.value : 0
   })
 })
-const workbenchNavigatorFilters = () => workbenchRequestFilters({
+const workbenchNavigatorFilters = () => ({
   platform: String(params.platform || ''),
   type: String(params.type || ''),
-  subscription_tier: String(params.subscription_tier || ''),
+  subscription_tier: '',
   status: String(params.status || ''),
-  usage_status: selectedWorkbenchUsageStatus.value,
+  usage_status: 'all' as WorkbenchUsageStatus,
   group: String(params.group || ''),
   search: workbenchNavigatorSearch.value.trim() || String(params.search || ''),
   privacy_mode: String(params.privacy_mode || ''),
-  uploader_user_id: params.uploader_user_id || undefined,
   sort_by: 'created_at',
   sort_order: 'desc' as const
 })
@@ -2539,7 +2560,7 @@ const loadWorkbenchNavigator = async () => {
   workbenchNavigatorLoadingMore.value = false
   try {
     const filters = workbenchNavigatorFilters()
-    const facetFilters = workbenchRequestFilters({ ...filters, search: String(params.search || '') })
+    const facetFilters = { ...filters, search: String(params.search || '') }
     const facetPromise = adminAPI.accounts.getSelectionSummary(facetFilters)
     const [result, facets] = await Promise.all([
       adminAPI.accounts.listRows(1, 100, filters),
@@ -2619,6 +2640,7 @@ const loadMoreWorkbenchBatches = async () => {
   }
 }
 const emitWorkbenchContext = () => emit('workbench-context', {
+  axis: activeWorkbenchAxis.value,
   scope: workbenchScope.value,
   ...(selectedWorkbenchBatchID.value ? { import_batch_id: selectedWorkbenchBatchID.value } : {}),
   ...(selectedWorkbenchUploaderID.value !== '' ? { uploader_user_id: selectedWorkbenchUploaderID.value } : {}),
@@ -2638,12 +2660,36 @@ const emitWorkbenchContext = () => emit('workbench-context', {
 const focusWorkbenchSubscription = (tier: string) => {
   focusedWorkbenchSubscriptionTier.value = tier
 }
+const clearWorkbenchSourceSelection = () => {
+  workbenchScope.value = 'all'
+  selectedWorkbenchBatchID.value = ''
+  selectedWorkbenchUploaderID.value = ''
+  focusedWorkbenchBatchID.value = ''
+  focusedWorkbenchUploaderID.value = ''
+}
+const selectWorkbenchAxis = (axis: WorkbenchAxis) => {
+  if (activeWorkbenchAxis.value === axis) return
+  activeWorkbenchAxis.value = axis
+  clearWorkbenchSourceSelection()
+  params.subscription_tier = ''
+  params.usage_status = axis === 'subscription' ? 'all' : defaultWorkbenchUsageStatus
+  focusedWorkbenchSubscriptionTier.value = ''
+  clearSelection()
+  pagination.page = 1
+  emitWorkbenchContext()
+  void reload()
+}
 const selectWorkbenchUsageStatus = (status: WorkbenchUsageStatus) => {
-  if (selectedWorkbenchUsageStatus.value === status) {
-    if (status === defaultWorkbenchUsageStatus) return
+  if (activeWorkbenchAxis.value === 'usage' && selectedWorkbenchUsageStatus.value === status) {
+    if (status === defaultWorkbenchUsageStatus) {
+      closeMobileWorkbenchNavigator()
+      return
+    }
     status = defaultWorkbenchUsageStatus
   }
   activeWorkbenchAxis.value = 'usage'
+  clearWorkbenchSourceSelection()
+  params.subscription_tier = ''
   params.usage_status = status
   clearSelection()
   pagination.page = 1
@@ -2652,15 +2698,13 @@ const selectWorkbenchUsageStatus = (status: WorkbenchUsageStatus) => {
   void reload()
 }
 const selectWorkbenchAccountRange = (status: 'in_use' | 'available' | 'all') => {
-  if (workbenchScope.value === 'all' && selectedWorkbenchUsageStatus.value === status) {
+  if (activeWorkbenchAxis.value === 'source' && workbenchScope.value === 'all' && selectedWorkbenchUsageStatus.value === status) {
     closeMobileWorkbenchNavigator()
     return
   }
-  workbenchScope.value = 'all'
-  selectedWorkbenchBatchID.value = ''
-  selectedWorkbenchUploaderID.value = ''
-  focusedWorkbenchBatchID.value = ''
-  focusedWorkbenchUploaderID.value = ''
+  activeWorkbenchAxis.value = 'source'
+  clearWorkbenchSourceSelection()
+  params.subscription_tier = ''
   params.usage_status = status
   clearSelection()
   pagination.page = 1
@@ -2669,10 +2713,16 @@ const selectWorkbenchAccountRange = (status: 'in_use' | 'available' | 'all') => 
   void reload()
 }
 const selectWorkbenchSubscription = (tier: string) => {
-  if (String(params.subscription_tier || '') === tier) {
-    if (!tier) return
+  if (activeWorkbenchAxis.value === 'subscription' && String(params.subscription_tier || '') === tier) {
+    if (!tier) {
+      closeMobileWorkbenchNavigator()
+      return
+    }
     tier = ''
   }
+  activeWorkbenchAxis.value = 'subscription'
+  clearWorkbenchSourceSelection()
+  params.usage_status = 'all'
   focusWorkbenchSubscription(tier)
   params.subscription_tier = tier
   clearSelection()
@@ -2747,13 +2797,16 @@ const handleWorkbenchNavigatorMediaChange = (event: MediaQueryListEvent) => {
   if (!event.matches) closeMobileWorkbenchNavigator()
 }
 const selectWorkbenchScope = (scope: 'all' | 'standalone') => {
-  if (workbenchScope.value === scope) {
+  if (activeWorkbenchAxis.value === 'source' && workbenchScope.value === scope) {
     closeMobileWorkbenchNavigator()
     return
   }
+  activeWorkbenchAxis.value = 'source'
   workbenchScope.value = scope
   selectedWorkbenchBatchID.value = ''
   selectedWorkbenchUploaderID.value = ''
+  params.subscription_tier = ''
+  params.usage_status = scope === 'all' ? defaultWorkbenchUsageStatus : 'all'
   clearSelection()
   pagination.page = 1
   closeMobileWorkbenchNavigator()
@@ -2775,9 +2828,12 @@ const selectWorkbenchUploader = (group: WorkbenchUploaderGroup) => {
     return
   }
   focusWorkbenchUploader(group)
+  activeWorkbenchAxis.value = 'source'
   workbenchScope.value = 'uploader'
   selectedWorkbenchBatchID.value = ''
   selectedWorkbenchUploaderID.value = group.id
+  params.subscription_tier = ''
+  params.usage_status = 'all'
   clearSelection()
   pagination.page = 1
   closeMobileWorkbenchNavigator()
@@ -2790,9 +2846,12 @@ const selectWorkbenchBatch = (batch: AccountImportBatchSummary) => {
     return
   }
   focusWorkbenchBatch(batch)
+  activeWorkbenchAxis.value = 'source'
   workbenchScope.value = 'batch'
   selectedWorkbenchBatchID.value = batch.id
   selectedWorkbenchUploaderID.value = batch.uploader_user_id ?? 'unassigned'
+  params.subscription_tier = ''
+  params.usage_status = 'all'
   clearSelection()
   pagination.page = 1
   closeMobileWorkbenchNavigator()
@@ -2800,7 +2859,7 @@ const selectWorkbenchBatch = (batch: AccountImportBatchSummary) => {
   void reload()
 }
 const clearWorkbenchFilterChip = (axis: WorkbenchAxis) => {
-  if (axis === 'source') selectWorkbenchScope('all')
+  if (axis === 'source') selectWorkbenchAccountRange(defaultWorkbenchUsageStatus as 'in_use' | 'available' | 'all')
   else if (axis === 'usage') selectWorkbenchUsageStatus(defaultWorkbenchUsageStatus)
   else selectWorkbenchSubscription('')
 }
@@ -2951,12 +3010,18 @@ const getFilteredAccountSummary = (filters: ReturnType<typeof buildBulkEditFilte
   const key = JSON.stringify(filters)
   if (key === filteredSummaryKey && filteredSummaryValue) return Promise.resolve(filteredSummaryValue)
   if (key === filteredSummaryKey && filteredSummaryPromise) return filteredSummaryPromise
-  const { uploader_unassigned: uploaderUnassigned, ...summaryFilters } = filters
+  const {
+    uploader_unassigned: uploaderUnassigned,
+    uploader_user_id: uploaderUserID,
+    ...summaryFilters
+  } = filters
   filteredSummaryKey = key
   filteredSummaryValue = null
   const request = adminAPI.accounts.getSelectionSummary({
     ...summaryFilters,
-    uploader_user_id: uploaderUnassigned ? 'unassigned' : filters.uploader_user_id
+    ...(uploaderUnassigned || uploaderUserID !== undefined
+      ? { uploader_user_id: uploaderUnassigned ? 'unassigned' : uploaderUserID }
+      : {})
   }).then(summary => {
     if (filteredSummaryKey === key) filteredSummaryValue = summary
     return summary
@@ -2968,12 +3033,11 @@ const getFilteredAccountSummary = (filters: ReturnType<typeof buildBulkEditFilte
 }
 
 const loadFilteredAccountTotal = async () => {
-  if (embedded) return
   const revision = ++filteredAccountTotalRevision
   const filters = buildBulkEditFilterSnapshot()
   try {
     const summary = await getFilteredAccountSummary(filters)
-    if (revision === filteredAccountTotalRevision) nonEmbeddedFilteredAccountTotal.value = summary.total
+    if (revision === filteredAccountTotalRevision) exactFilteredAccountTotal.value = summary.total
   } catch (error) {
     console.error('Failed to load filtered account total:', error)
   }
@@ -3019,8 +3083,10 @@ const reload = async (resetPage = true) => {
 }
 
 const applyWorkbenchContext = async (context: Partial<AccountWorkbenchContext>) => {
-  const nextBatchID = context.import_batch_id || ''
-  const nextScope = nextBatchID ? 'batch' : context.scope || props.initialWorkbenchScope
+  const requestedScope = (context.import_batch_id ? 'batch' : context.scope || props.initialWorkbenchScope) as AccountWorkbenchScope
+  const nextAxis = resolveWorkbenchAxis(context, requestedScope)
+  const nextScope = nextAxis === 'source' ? requestedScope : 'all'
+  const nextBatchID = nextScope === 'batch' ? context.import_batch_id || '' : ''
   const nextUploaderID = nextScope === 'uploader' || nextScope === 'batch' ? context.uploader_user_id ?? '' : ''
   const nextPage = Math.max(1, Number(context.page || 1))
   const nextPageSize = Math.max(1, Number(context.page_size || 20))
@@ -3030,13 +3096,16 @@ const applyWorkbenchContext = async (context: Partial<AccountWorkbenchContext>) 
     search: context.search || '',
     platform: context.platform || '',
     type: context.type || '',
-    subscription_tier: context.subscription_tier || '',
+    subscription_tier: nextAxis === 'subscription' ? context.subscription_tier || '' : '',
     status: '',
-    usage_status: context.usage_status || defaultWorkbenchUsageStatus,
+    usage_status: nextAxis === 'subscription' || nextScope !== 'all'
+      ? 'all'
+      : context.usage_status || defaultWorkbenchUsageStatus,
     group: context.group || '',
     privacy_mode: context.privacy_mode || ''
   }
   const unchanged =
+    activeWorkbenchAxis.value === nextAxis &&
     workbenchScope.value === nextScope &&
     selectedWorkbenchBatchID.value === nextBatchID &&
     String(selectedWorkbenchUploaderID.value) === String(nextUploaderID) &&
@@ -3047,12 +3116,13 @@ const applyWorkbenchContext = async (context: Partial<AccountWorkbenchContext>) 
     Object.entries(nextFilters).every(([key, value]) => String(params[key] || '') === value)
   if (unchanged) return
 
+  activeWorkbenchAxis.value = nextAxis
   workbenchScope.value = nextScope
   selectedWorkbenchBatchID.value = nextBatchID
   selectedWorkbenchUploaderID.value = nextUploaderID
   focusedWorkbenchBatchID.value = nextBatchID
   focusedWorkbenchUploaderID.value = nextUploaderID
-  focusedWorkbenchSubscriptionTier.value = nextFilters.subscription_tier
+  focusedWorkbenchSubscriptionTier.value = nextAxis === 'subscription' ? nextFilters.subscription_tier : ''
   pagination.page = nextPage
   pagination.page_size = nextPageSize
   sortState.sort_by = nextSortBy

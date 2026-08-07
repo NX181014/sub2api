@@ -549,8 +549,10 @@ type AccountsViewExpose = {
   reload: (resetPage?: boolean) => Promise<void>
 }
 type WorkbenchScope = 'all' | 'standalone' | 'uploader' | 'batch'
+type WorkbenchAxis = 'source' | 'usage' | 'subscription'
 type WorkbenchUsageStatus = NonNullable<AccountListFilters['usage_status']>
 type WorkbenchContext = {
+  axis: WorkbenchAxis
   scope: WorkbenchScope
   import_batch_id?: string
   uploader_user_id?: number | string
@@ -606,9 +608,14 @@ const routeUsageStatus = (): WorkbenchUsageStatus => {
     ? value as WorkbenchUsageStatus
     : 'in_use'
 }
+const routeWorkbenchAxis = (): WorkbenchAxis | undefined => {
+  const value = queryString('account_axis')
+  return ['source', 'usage', 'subscription'].includes(value) ? value as WorkbenchAxis : undefined
+}
 const initialWorkbenchContext = computed<Partial<WorkbenchContext>>(() => {
   const requestedScope = queryString('account_scope')
   return {
+    axis: routeWorkbenchAxis(),
     scope: (['all', 'standalone', 'uploader', 'batch'].includes(requestedScope) ? requestedScope : 'all') as WorkbenchScope,
     import_batch_id: queryString('import_batch_id'),
     uploader_user_id: queryString('uploader_user_id'),
@@ -1060,6 +1067,7 @@ function switchTab(tab: TabKey) {
 
 async function syncWorkbenchContext(context: WorkbenchContext) {
   const query: LocationQueryRaw = { ...route.query, tab: 'accounts', account_scope: context.scope }
+  query.account_axis = context.axis
   if (context.import_batch_id) query.import_batch_id = context.import_batch_id
   else delete query.import_batch_id
   if (context.uploader_user_id) query.uploader_user_id = String(context.uploader_user_id)

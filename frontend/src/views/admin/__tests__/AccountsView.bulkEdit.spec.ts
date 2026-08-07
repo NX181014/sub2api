@@ -469,7 +469,7 @@ describe('admin AccountsView bulk edit scope', () => {
     expect(wrapper.findAll('[data-test="workbench-batch"]')).toHaveLength(3)
   })
 
-  it('combines source, usage status, and subscription tier in one server-backed range', async () => {
+  it('keeps source, usage status, and subscription tier filters independent', async () => {
     const navigatorRows = [
       navigatorBatchRow('batch-a', '2026-08-03T00:00:00Z', 7, 'Uploader A', 'August')
     ]
@@ -497,48 +497,68 @@ describe('admin AccountsView bulk edit scope', () => {
     await wrapper.get('[data-test="workbench-uploader"]').trigger('click')
     await wrapper.get('[data-test="workbench-uploader-scope"]').trigger('click')
     await flushPromises()
+    expect(listAccounts.mock.calls.at(-1)?.[2]).toMatchObject({
+      uploader_user_id: 7,
+      import_batch_scope: 'batched',
+      usage_status: 'all'
+    })
+    expect(listAccounts.mock.calls.at(-1)?.[2]).not.toHaveProperty('subscription_tier')
+
     await wrapper.get('[data-test="workbench-axis-usage"]').trigger('click')
+    await flushPromises()
     expect(wrapper.get('[data-test="workbench-axis-usage"]').attributes('aria-selected')).toBe('true')
     expect(wrapper.find('[data-test="workbench-usage-attention"]').exists()).toBe(false)
     expect(wrapper.find('[data-test="workbench-usage-error"]').exists()).toBe(false)
     expect(wrapper.find('[data-test="workbench-usage-restricted"]').exists()).toBe(false)
     await wrapper.get('[data-test="workbench-usage-auth_issue"] .workbench-operational-main').trigger('click')
     await flushPromises()
+    expect(listAccounts.mock.calls.at(-1)?.[2]).toMatchObject({ usage_status: 'auth_issue' })
+    expect(listAccounts.mock.calls.at(-1)?.[2]).not.toHaveProperty('uploader_user_id')
+    expect(listAccounts.mock.calls.at(-1)?.[2]).not.toHaveProperty('import_batch_scope')
+    expect(listAccounts.mock.calls.at(-1)?.[2]).not.toHaveProperty('subscription_tier')
+
     await wrapper.get('[data-test="workbench-axis-subscription"]').trigger('click')
+    await flushPromises()
     await wrapper.get('[data-test="workbench-subscription-plus"] .workbench-operational-main').trigger('click')
     await wrapper.get('[data-test="workbench-subscription-plus"] .workbench-scope-toggle').trigger('click')
     await flushPromises()
 
     expect(listAccounts.mock.calls.at(-1)?.[2]).toMatchObject({
-      uploader_user_id: 7,
-      import_batch_scope: 'batched',
-      usage_status: 'auth_issue',
+      usage_status: 'all',
       subscription_tier: 'plus'
     })
+    expect(listAccounts.mock.calls.at(-1)?.[2]).not.toHaveProperty('uploader_user_id')
+    expect(listAccounts.mock.calls.at(-1)?.[2]).not.toHaveProperty('import_batch_scope')
     expect(getSelectionSummary).toHaveBeenCalledWith(expect.objectContaining({
-      uploader_user_id: 7,
-      import_batch_scope: 'batched',
-      usage_status: 'auth_issue',
+      usage_status: 'all',
       subscription_tier: 'plus'
     }))
+    expect(getSelectionSummary.mock.calls.at(-1)?.[0]).not.toHaveProperty('uploader_user_id')
+    expect(getSelectionSummary.mock.calls.at(-1)?.[0]).not.toHaveProperty('import_batch_scope')
     expect(wrapper.getComponent(AccountTableFiltersStub).props('filters')).toMatchObject({
       type: '',
       status: '',
       uploader_user_id: ''
     })
-    expect(wrapper.findAll('[data-test^="workbench-filter-chip-"]')).toHaveLength(3)
+    expect(wrapper.findAll('[data-test^="workbench-filter-chip-"]')).toHaveLength(1)
+    expect(wrapper.find('[data-test="workbench-filter-chip-source"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="workbench-filter-chip-usage"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="workbench-filter-chip-subscription"]').exists()).toBe(true)
 
-    await wrapper.get('[data-test="workbench-filter-chip-usage"]').trigger('click')
+    await wrapper.get('[data-test="workbench-axis-source"]').trigger('click')
     await flushPromises()
     expect(listAccounts.mock.calls.at(-1)?.[2]).toMatchObject({
-      uploader_user_id: 7,
-      import_batch_scope: 'batched',
-      usage_status: 'in_use',
-      subscription_tier: 'plus'
+      usage_status: 'in_use'
     })
-    expect(wrapper.find('[data-test="workbench-filter-chip-usage"]').exists()).toBe(false)
-    expect(wrapper.find('[data-test="workbench-filter-chip-source"]').exists()).toBe(true)
-    expect(wrapper.find('[data-test="workbench-filter-chip-subscription"]').exists()).toBe(true)
+    expect(listAccounts.mock.calls.at(-1)?.[2]).not.toHaveProperty('uploader_user_id')
+    expect(listAccounts.mock.calls.at(-1)?.[2]).not.toHaveProperty('subscription_tier')
+    expect(wrapper.findAll('[data-test^="workbench-filter-chip-"]')).toHaveLength(0)
+    expect(wrapper.emitted('workbench-context')?.at(-1)?.[0]).toMatchObject({
+      axis: 'source',
+      scope: 'all',
+      usage_status: 'in_use',
+      subscription_tier: ''
+    })
   })
 
   it('orders nested batches newest first and searches uploader, batch name, and batch ID', async () => {
