@@ -378,9 +378,9 @@ describe('admin AccountsView bulk edit scope', () => {
     const wrapper = mountAccountsView({}, { embedded: true })
     await flushPromises()
 
-    expect(wrapper.get('[data-test="workbench-in-use"]').attributes('aria-current')).toBe('page')
+    expect(wrapper.get('[data-test="workbench-in-use"]').attributes('aria-current')).toBeUndefined()
     expect(wrapper.get('[data-test="workbench-available"]').attributes('aria-current')).toBeUndefined()
-    expect(wrapper.find('[data-test="workbench-all"]').exists()).toBe(true)
+    expect(wrapper.get('[data-test="workbench-all"]').attributes('aria-current')).toBe('page')
     expect(wrapper.find('[data-test="workbench-standalone"]').exists()).toBe(false)
     expect(wrapper.find('[data-test="workbench-batch"]').exists()).toBe(true)
     const defaultColumnKeys = (wrapper.getComponent(DataTableStub).props('columns') as Array<{ key: string }>).map(column => column.key)
@@ -548,7 +548,7 @@ describe('admin AccountsView bulk edit scope', () => {
     await wrapper.get('[data-test="workbench-axis-source"]').trigger('click')
     await flushPromises()
     expect(listAccounts.mock.calls.at(-1)?.[2]).toMatchObject({
-      usage_status: 'in_use'
+      usage_status: 'all'
     })
     expect(listAccounts.mock.calls.at(-1)?.[2]).not.toHaveProperty('uploader_user_id')
     expect(listAccounts.mock.calls.at(-1)?.[2]).not.toHaveProperty('subscription_tier')
@@ -556,7 +556,7 @@ describe('admin AccountsView bulk edit scope', () => {
     expect(wrapper.emitted('workbench-context')?.at(-1)?.[0]).toMatchObject({
       axis: 'source',
       scope: 'all',
-      usage_status: 'in_use',
+      usage_status: 'all',
       subscription_tier: ''
     })
   })
@@ -655,9 +655,9 @@ describe('admin AccountsView bulk edit scope', () => {
     const wrapper = mountAccountsView({}, { embedded: true })
     await flushPromises()
 
-    expect(wrapper.get('[data-test="workbench-in-use"]').attributes('aria-current')).toBe('page')
+    expect(wrapper.get('[data-test="workbench-in-use"]').attributes('aria-current')).toBeUndefined()
     expect(wrapper.get('[data-test="workbench-available"]').attributes('aria-current')).toBeUndefined()
-    expect(wrapper.get('[data-test="workbench-all"]').attributes('aria-current')).toBeUndefined()
+    expect(wrapper.get('[data-test="workbench-all"]').attributes('aria-current')).toBe('page')
 
     await wrapper.get('[data-test="workbench-all"]').trigger('click')
     await flushPromises()

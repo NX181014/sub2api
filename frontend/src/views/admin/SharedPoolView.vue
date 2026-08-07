@@ -170,7 +170,6 @@
           :pool-records="poolRecordsByAccountID"
           @pool-record="openAccountPoolRecord"
           @trace-account="openAccountTrace"
-          @workbench-context="syncWorkbenchContext"
           @refreshed="refreshAccountPoolRecords"
           @pool-create-request="prepareAccountAction('create')"
           @pool-import-request="prepareAccountAction('import')"
@@ -606,7 +605,7 @@ const routeUsageStatus = (): WorkbenchUsageStatus => {
     'ready', 'unused', 'attention', 'error', 'restricted'
   ].includes(value)
     ? value as WorkbenchUsageStatus
-    : 'in_use'
+    : 'all'
 }
 const routeWorkbenchAxis = (): WorkbenchAxis | undefined => {
   const value = queryString('account_axis')
@@ -1063,33 +1062,6 @@ function switchTab(tab: TabKey) {
   }
   void router.replace({ query: { ...route.query, tab } })
   if (tab !== 'ledger') void loadActiveTab()
-}
-
-async function syncWorkbenchContext(context: WorkbenchContext) {
-  const query: LocationQueryRaw = { ...route.query, tab: 'accounts', account_scope: context.scope }
-  query.account_axis = context.axis
-  if (context.import_batch_id) query.import_batch_id = context.import_batch_id
-  else delete query.import_batch_id
-  if (context.uploader_user_id) query.uploader_user_id = String(context.uploader_user_id)
-  else delete query.uploader_user_id
-  query.account_page = String(context.page)
-  query.account_page_size = String(context.page_size)
-  query.account_sort_by = context.sort_by
-  query.account_sort_order = context.sort_order
-  for (const [key, value] of Object.entries({
-    account_search: context.search,
-    account_platform: context.platform,
-    account_type: context.type,
-    account_subscription_tier: context.subscription_tier,
-    account_status: context.status,
-    account_usage_status: context.usage_status,
-    account_group: context.group,
-    account_privacy_mode: context.privacy_mode
-  })) {
-    if (value) query[key] = value
-    else delete query[key]
-  }
-  await router.replace({ query })
 }
 
 async function refreshAccountPoolRecords() {

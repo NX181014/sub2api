@@ -118,6 +118,8 @@ describe('SharedPoolView route state', () => {
           AppLayout: { template: '<div><slot /></div>' },
           AccountsView: {
             props: ['initialWorkbenchContext'],
+            emits: ['workbench-context'],
+            name: 'AccountsView',
             template: '<div data-test="accounts-context">{{ initialWorkbenchContext.axis }}|{{ initialWorkbenchContext.scope }}|{{ initialWorkbenchContext.import_batch_id }}|{{ initialWorkbenchContext.usage_status }}|{{ initialWorkbenchContext.subscription_tier }}|{{ initialWorkbenchContext.page }}</div>'
           },
           AccountTracePanel: true,
@@ -179,6 +181,24 @@ describe('SharedPoolView route state', () => {
 
     await router.push('/?tab=accounts')
     await flushPromises()
-    expect(wrapper.get('[data-test="accounts-context"]').text()).toContain('in_use')
+    expect(wrapper.get('[data-test="accounts-context"]').text()).toContain('all')
+
+    wrapper.findComponent({ name: 'AccountsView' }).vm.$emit('workbench-context', {
+      axis: 'usage',
+      scope: 'all',
+      usage_status: 'rate_limited',
+      page: 1,
+      page_size: 20,
+      search: '',
+      platform: '',
+      type: '',
+      status: '',
+      group: '',
+      privacy_mode: '',
+      sort_by: 'created_at',
+      sort_order: 'desc'
+    })
+    await flushPromises()
+    expect(router.currentRoute.value.query).toEqual({ tab: 'accounts' })
   })
 })

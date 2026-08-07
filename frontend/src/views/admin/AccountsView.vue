@@ -1391,7 +1391,7 @@ const props = withDefaults(defineProps<{
   initialWorkbenchContext: () => ({})
 })
 const embedded = props.embedded
-const defaultWorkbenchUsageStatus: WorkbenchUsageStatus = embedded ? 'in_use' : 'all'
+const defaultWorkbenchUsageStatus: WorkbenchUsageStatus = 'all'
 const workbenchSourceRangeStatuses = new Set<WorkbenchUsageStatus>(['all', 'available', 'in_use'])
 const resolveWorkbenchAxis = (context: Partial<AccountWorkbenchContext>, scope: AccountWorkbenchScope): WorkbenchAxis => {
   if (context.axis && ['source', 'usage', 'subscription'].includes(context.axis)) return context.axis
