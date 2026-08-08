@@ -369,6 +369,9 @@
           :page-selected-count="visibleSelectedCount"
           :current-page-count="currentPageAccountCount"
           :busy="loading || pageBatchLoading || bulkActionInProgress"
+          :total-results="pagination.total"
+          :selecting-all="selectingAllResults"
+          :all-results-selected="allResultsSelected"
           @delete="handleBulkDelete"
           @reset-status="handleBulkResetStatus"
           @refresh-token="handleBulkRefreshToken"
@@ -376,6 +379,7 @@
           @edit-selected="openBulkEditSelected"
           @clear="clearSelection"
           @toggle-page="togglePageSelection"
+          @select-all-results="handleSelectAllResults"
           @toggle-schedulable="handleBulkToggleSchedulable"
         />
         <div
@@ -631,6 +635,7 @@
                 :today-stats="todayStatsByAccountId[String(row.id)] ?? null"
                 :today-stats-loading="todayStatsLoading"
                 :manual-refresh-token="usageManualRefreshToken"
+                @account-updated="handleAccountUpdated"
               />
               <time
                 v-if="embedded"
@@ -755,8 +760,17 @@
             </div>
           </template>
           <template #cell-rate_multiplier="{ row }">
-            <span v-if="!isImportBatchRow(row)" class="text-sm font-mono text-gray-700 dark:text-gray-300">
-              {{ (row.rate_multiplier ?? 1).toFixed(2) }}x
+            <span v-if="!isImportBatchRow(row)" class="inline-flex items-center gap-1 text-sm font-mono text-gray-700 dark:text-gray-300">
+              <span>{{ formatMultiplier(row.rate_multiplier ?? 1) }}x</span>
+              <span
+                v-if="row.extra?.upstream_billing_rate_sync_enabled === true"
+                class="inline-flex cursor-help text-emerald-600 dark:text-emerald-400"
+                :aria-label="t('admin.accounts.upstreamBilling.syncedRateTooltip')"
+                :title="t('admin.accounts.upstreamBilling.syncedRateTooltip')"
+                data-testid="account-rate-sync-indicator"
+              >
+                <Icon name="sync" size="xs" />
+              </span>
             </span>
           </template>
           <template #header-upstream_billing_rate="{ column }">
@@ -1338,6 +1352,7 @@ import PlatformTypeBadge from '@/components/common/PlatformTypeBadge.vue'
 import Icon from '@/components/icons/Icon.vue'
 import ErrorPassthroughRulesModal from '@/components/admin/ErrorPassthroughRulesModal.vue'
 import TLSFingerprintProfilesModal from '@/components/admin/TLSFingerprintProfilesModal.vue'
+import { fetchAllAccountIds } from '@/utils/accountSelection'
 import { formatDateTime, formatRelativeTime } from '@/utils/format'
 import { proxyExpiryBadgeClass, proxyExpiryLabelKey } from '@/utils/proxyExpiry'
 import { extractApiErrorMessage } from '@/utils/apiError'
@@ -1345,6 +1360,7 @@ import { sanitizeUrl } from '@/utils/url'
 import type { Account, AccountPlatform, AccountSchedulerGroupScore, AccountType, Proxy as AccountProxy, AdminGroup, WindowStats, ClaudeModel } from '@/types'
 import type { AccountBatchStatusSummary, AccountImportBatchSummary, AccountListFilters, AccountListRow, AccountSelectionSummary } from '@/api/admin/accounts'
 import type { PoolApproval, PoolApprovalBusinessChange, PoolApprovalBusinessSummary, PoolApprovalScope, PoolApprovalStatus, PoolCredentialReveal, SharedPoolAccountCost } from '@/api/admin/sharedPool'
+import { formatMultiplier } from '@/utils/formatters'
 
 type AccountWorkbenchScope = 'all' | 'standalone' | 'uploader' | 'batch'
 type WorkbenchAxis = 'source' | 'usage' | 'subscription'
@@ -2882,13 +2898,14 @@ const toggleImportBatch = async (id: string) => {
 }
 
 const {
+  selectedSet,
   selectedIds: selIds,
   isSelected,
   setSelectedIds,
   select,
   deselect,
   toggle: toggleSel,
-  clear: clearSelection,
+  clear: clearSelectedIds,
   batchUpdate
 } = useTableSelection<Account>({
   rows: accounts,
@@ -2994,6 +3011,22 @@ const activateImportBatch = async (batch: ImportBatchRow) => {
     return
   }
   await toggleImportBatch(batch.batchID)
+}
+
+const selectingAllResults = ref(false)
+const selectedAllResultIDs = ref<Set<number> | null>(null)
+const selectionRequestVersion = ref(0)
+const allResultsSelected = computed(() => {
+  const snapshot = selectedAllResultIDs.value
+  if (!snapshot || snapshot.size === 0 || snapshot.size !== selectedSet.value.size) return false
+  return Array.from(snapshot).every(id => selectedSet.value.has(id))
+})
+
+const clearSelection = () => {
+  selectionRequestVersion.value++
+  selectingAllResults.value = false
+  selectedAllResultIDs.value = null
+  clearSelectedIds()
 }
 
 const swipeVirtualContext: SwipeSelectVirtualContext = {
@@ -3174,6 +3207,7 @@ const refreshUpstreamBillingSortedList = async (force = false) => {
 }
 
 const debouncedReload = () => {
+  clearSelection()
   syncAccountListDerivedParams()
   hasPendingListSync.value = false
   resetAutoRefreshCache()
@@ -4118,7 +4152,7 @@ const handleBulkProbeUpstreamBilling = async () => {
   accountIDs.forEach(id => probingUpstreamBilling.add(id))
   try {
     const results = await adminAPI.accounts.probeUpstreamBillingBatch(accountIDs)
-    if (results.some(result => result.snapshot)) await refreshCurrentPage()
+    if (results.some(result => result.snapshot)) await refreshAccountsAfterUpstreamBillingProbe()
     const failed = results.filter(result => result.error).length
     if (failed > 0) {
       appStore.showError(t('admin.accounts.upstreamBilling.batchPartial', { success: results.length - failed, failed }))
@@ -4269,6 +4303,32 @@ const buildBulkEditFilterSnapshot = () => {
   return filters
 }
 
+const handleSelectAllResults = async () => {
+  if (selectingAllResults.value || pagination.total === 0) return
+
+  const requestVersion = ++selectionRequestVersion.value
+  const filters = buildBulkEditFilterSnapshot()
+  selectingAllResults.value = true
+  try {
+    const ids = await fetchAllAccountIds(
+      (page, pageSize, requestFilters) => adminAPI.accounts.list(page, pageSize, requestFilters),
+      filters
+    )
+    if (requestVersion !== selectionRequestVersion.value) return
+
+    setSelectedIds(ids)
+    selectedAllResultIDs.value = new Set(ids)
+  } catch (error) {
+    if (requestVersion !== selectionRequestVersion.value) return
+    console.error('Failed to select all account results:', error)
+    appStore.showError(t('admin.accounts.bulkActions.selectAllFailed'))
+  } finally {
+    if (requestVersion === selectionRequestVersion.value) {
+      selectingAllResults.value = false
+    }
+  }
+}
+
 const openBulkEditSelected = () => {
   if (!selIds.value.length) return
   bulkEditTarget.value = {
@@ -4343,13 +4403,20 @@ const buildAccountQueryFilters = () => {
   }
   return filters
 }
+const refreshAccountsAfterUpstreamBillingProbe = async () => {
+  try {
+    await load()
+  } catch (error) {
+    console.error('Failed to refresh accounts after upstream billing probe:', error)
+  }
+}
 const handleProbeUpstreamBilling = async (account: Account) => {
   if (probingUpstreamBilling.has(account.id)) return
   probingUpstreamBilling.add(account.id)
   try {
     const result = await adminAPI.accounts.probeUpstreamBilling(account.id)
     if (result.snapshot) {
-      await refreshCurrentPage()
+      await refreshAccountsAfterUpstreamBillingProbe()
     }
   } catch (error) {
     console.error('Failed to probe upstream billing:', error)

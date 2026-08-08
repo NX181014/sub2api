@@ -28,13 +28,25 @@
         {{ t('admin.accounts.bulkActions.currentPage', { count: currentPageCount }) }}
       </span>
       <span v-if="selectedIds.length" class="text-sm font-medium text-primary-700 dark:text-primary-300">
-        {{ selectedBatchCount > 0
+        {{ allResultsSelected
+          ? t('admin.accounts.bulkActions.selectedAll', { count: selectedIds.length })
+          : selectedBatchCount > 0
           ? t('admin.accounts.bulkActions.selectedScope', { count: selectedIds.length, batches: selectedBatchCount })
           : t('admin.accounts.bulkActions.selected', { count: selectedIds.length }) }}
       </span>
       <span v-if="hiddenSelectedCount > 0" class="text-xs text-gray-500 dark:text-gray-400">
         {{ t('admin.accounts.bulkActions.hiddenSelected', { count: hiddenSelectedCount }) }}
       </span>
+      <button
+        v-if="!allResultsSelected && totalResults > selectedIds.length"
+        :disabled="busy || selectingAll"
+        class="min-h-11 px-2 text-sm font-medium text-primary-700 hover:text-primary-800 disabled:cursor-not-allowed disabled:opacity-50 dark:text-primary-300 dark:hover:text-primary-200"
+        @click="$emit('select-all-results')"
+      >
+        {{ selectingAll
+          ? t('admin.accounts.bulkActions.selectingAll')
+          : t('admin.accounts.bulkActions.selectAllResults', { count: totalResults }) }}
+      </button>
       <button
         v-if="selectedIds.length"
         :disabled="busy"
@@ -86,6 +98,9 @@ withDefaults(defineProps<{
   pageSelectedCount?: number
   currentPageCount?: number
   busy?: boolean
+  totalResults?: number
+  selectingAll?: boolean
+  allResultsSelected?: boolean
 }>(), {
   filteredCount: 0,
   selectedBatchCount: 0,
@@ -93,13 +108,17 @@ withDefaults(defineProps<{
   allPageSelected: false,
   pageSelectedCount: 0,
   currentPageCount: 0,
-  busy: false
+  busy: false,
+  totalResults: 0,
+  selectingAll: false,
+  allResultsSelected: false
 })
 defineEmits([
   'delete',
   'edit-selected',
   'clear',
   'toggle-page',
+  'select-all-results',
   'toggle-schedulable',
   'reset-status',
   'refresh-token',
